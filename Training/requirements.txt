@@ -1,0 +1,6 @@
+ultralytics>=8.3
+coremltools>=8.0
+numpy
+opencv-python
+pyyaml
+tqdm
