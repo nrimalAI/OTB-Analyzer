@@ -1,0 +1,23 @@
+# Xcode
+*.xcodeproj
+xcuserdata/
+DerivedData/
+*.xcresult
+
+# SPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Large engine assets — fetched by Scripts/download-nnue.sh
+*.nnue
+
+# Training artifacts (Phase 1)
+Training/datasets/
+Training/runs/
+Training/*.pt
+Training/venv/
+__pycache__/
+
+# macOS
+.DS_Store
