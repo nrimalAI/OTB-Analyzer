@@ -20,6 +20,7 @@ COMMON = dict(
     epochs=120,
     patience=25,
     batch=16,
+    workers=4,  # keep dataloader RAM modest on 16 GB machines
     fliplr=0.0,      # semantic left/right — never mirror
     flipud=0.0,
     degrees=12,
