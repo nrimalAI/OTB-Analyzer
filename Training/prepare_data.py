@@ -59,22 +59,24 @@ def image_index(data):
     return idx
 
 
-def game_of(path):
-    # Paths look like images/G000/G000_IMG000.jpg — the game id is the G-number.
-    for part in Path(path).parts:
-        if part.upper().startswith("G") and part[1:4].isdigit():
-            return int(part[1:4])
-    # Fallback: hash the parent directory.
-    return abs(hash(Path(path).parent.name)) % 1000
+def official_splits(data):
+    """{image_id: 'train'|'val'|'test'} from the dataset's own split lists.
+
+    Prefers the chessred2k split (the subset with bbox+corner labels, split by
+    game as in the paper: 1442/330/306); falls back to the full-dataset split.
+    """
+    splits = data.get("splits", {})
+    source = splits.get("chessred2k", splits)
+    out = {}
+    for name in ("train", "val", "test"):
+        for image_id in source.get(name, {}).get("image_ids", []):
+            out[image_id] = name
+    return out
 
 
-def split_of(game):
-    m = game % 10
-    if m <= 6:
-        return "train"
-    if m == 7:
-        return "val"
-    return "test"
+def normalize_category(name):
+    """Dataset uses 'white-pawn'; our class list uses 'white_pawn'."""
+    return name.replace("-", "_")
 
 
 def extract_corners(entry):
@@ -123,8 +125,9 @@ def main():
 
     images_root = Path(args.images)
     out = Path(args.out)
-    categories = {c["id"]: c["name"] for c in data["categories"]}
+    categories = {c["id"]: normalize_category(c["name"]) for c in data["categories"]}
     imgs = image_index(data)
+    split_by_id = official_splits(data)
 
     ann = data["annotations"]
     piece_anns = ann.get("pieces", [])
@@ -175,7 +178,9 @@ def main():
             skipped_missing += 1
             continue
 
-        split = split_of(game_of(meta["path"]))
+        split = split_by_id.get(image_id)
+        if split is None:
+            continue  # not part of the (2k) split — no labels to train on anyway
         stem = f"img{image_id:06d}"
         counts[split] += 1
 

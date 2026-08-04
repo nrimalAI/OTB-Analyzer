@@ -13,7 +13,7 @@ Package.resolved
 *.nnue
 
 # Training artifacts (Phase 1)
-Training/datasets/
+datasets/
 Training/runs/
 Training/*.pt
 Training/venv/

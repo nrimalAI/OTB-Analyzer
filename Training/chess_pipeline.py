@@ -69,16 +69,29 @@ def project(H, point):
     return p[0] / p[2], p[1] / p[2]
 
 
-def board_square(H, point, pull=0.30):
-    """Map an image point to a 0-indexed (file, rank) square, or None.
+def pulled_board_point(H, point, pull=0.30):
+    """Project an anchor into board coords with camera-aware correction.
 
-    `pull` shifts the anchor toward the board center along the rank axis
-    before binning: a piece's contact point sits ON its square, but tall
-    pieces photographed at an angle have their box bottom slightly in front
-    of the square center; pulling by a fraction of a square compensates.
+    A piece's bbox bottom-center is the *front edge* of its base — displaced
+    from the base center toward the camera. In image space that displacement
+    is straight down, so the correction is a step along image-"up" (-y),
+    mapped through the homography and applied in board coordinates. This is
+    correct regardless of which side of the board the camera is on.
     """
-    bx, by = project(H, point)
-    by = by + pull  # toward higher ranks (away from the camera at low ranks)
+    x, y = point
+    bx, by = project(H, (x, y))
+    ux, uy = project(H, (x, y - 1.0))  # one pixel up in image space
+    dx, dy = ux - bx, uy - by
+    norm = np.hypot(dx, dy)
+    if norm > 1e-9:
+        bx += pull * dx / norm
+        by += pull * dy / norm
+    return bx, by
+
+
+def board_square(H, point, pull=0.30):
+    """Map an image point to a 0-indexed (file, rank) square, or None."""
+    bx, by = pulled_board_point(H, point, pull)
     f, r = int(np.floor(bx)), int(np.floor(by))
     if 0 <= f < 8 and 0 <= r < 8:
         return f, r
@@ -99,8 +112,7 @@ def assign_squares(H, detections, pull=0.30):
             board[sq] = (det.cls, det.confidence)
             continue
         # Occupied by a higher-confidence piece: demote to nearest free neighbor.
-        bx, by = project(H, det.anchor)
-        by += pull
+        bx, by = pulled_board_point(H, det.anchor, pull)
         candidates = []
         for df in (-1, 0, 1):
             for dr in (-1, 0, 1):

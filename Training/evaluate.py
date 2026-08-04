@@ -25,7 +25,7 @@ from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, homography,
 )
-from prepare_data import game_of, image_index, split_of
+from prepare_data import image_index, normalize_category, official_splits
 
 
 def ground_truth_board(piece_anns, categories):
@@ -35,9 +35,12 @@ def ground_truth_board(piece_anns, categories):
         pos = p.get("chessboard_position")
         if not pos:
             continue
+        name = categories[p["category_id"]]
+        if name not in FEN_LETTER:  # e.g. the dataset's "empty" category
+            continue
         file = ord(pos[0]) - ord("a")
         rank = int(pos[1]) - 1
-        board[(file, rank)] = FEN_LETTER[categories[p["category_id"]]]
+        board[(file, rank)] = FEN_LETTER[name]
     return board
 
 
@@ -55,8 +58,9 @@ def main():
     args = ap.parse_args()
 
     data = json.loads(Path(args.annotations).read_text())
-    categories = {c["id"]: c["name"] for c in data["categories"]}
+    categories = {c["id"]: normalize_category(c["name"]) for c in data["categories"]}
     imgs = image_index(data)
+    split_by_id = official_splits(data)
 
     by_image = defaultdict(list)
     for p in data["annotations"]["pieces"]:
@@ -67,13 +71,13 @@ def main():
 
     images_root = Path(args.images)
     total_squares = correct_squares = 0
-    boards = exact = corner_failures = 0
+    boards = exact = corner_failures = flip_suspects = 0
     confusion = Counter()
 
     items = sorted(by_image.items())
     for image_id, piece_anns in items:
         meta = imgs[image_id]
-        if args.split != "all" and split_of(game_of(meta["path"])) != args.split:
+        if args.split != "all" and split_by_id.get(image_id) != args.split:
             continue
         src = images_root / meta["path"]
         if not src.exists():
@@ -111,6 +115,7 @@ def main():
 
         # 3. score all 64 squares
         board_ok = True
+        wrong_here = 0
         for f in range(8):
             for r in range(8):
                 total_squares += 1
@@ -120,9 +125,21 @@ def main():
                     correct_squares += 1
                 else:
                     board_ok = False
+                    wrong_here += 1
                     confusion[(want or "·", got or "·")] += 1
         boards += 1
         exact += board_ok
+
+        # Diagnostic: would the 180°-rotated prediction have matched better?
+        # A high count here means the corner model confuses a1 with h8
+        # (chessboards are 2-fold rotationally symmetric).
+        if not board_ok:
+            rotated = {(7 - f, 7 - r): v for (f, r), v in pred_letters.items()}
+            rot_wrong = sum(
+                1 for f in range(8) for r in range(8)
+                if gt.get((f, r)) != rotated.get((f, r)))
+            if rot_wrong < wrong_here / 2:
+                flip_suspects += 1
 
         if args.limit and boards >= args.limit:
             break
@@ -135,6 +152,7 @@ def main():
     print(f"corner detection failed: {corner_failures}")
     print(f"per-square accuracy:     {correct_squares / total_squares:.4%}")
     print(f"full-board exact match:  {exact / boards:.2%}")
+    print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):
         print(f"  {want} -> {got}: {n}")
