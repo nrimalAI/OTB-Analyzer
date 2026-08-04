@@ -15,8 +15,10 @@ final class AppModel: ObservableObject {
     @Published var path: [AppRoute] = []
 
     // Recognition
-    /// Swapped for the CoreML implementation in Phase 2.
-    let recognizer: BoardRecognizer = StubRecognizer()
+    /// CoreML when the models are bundled; stub keeps the flow usable without
+    /// them (e.g. before running Training/export_coreml.py).
+    let recognizer: BoardRecognizer =
+        (try? CoreMLBoardRecognizer(bundle: .main)) ?? StubRecognizer()
     @Published var isRecognizing = false
     @Published var recognitionFailed = false
 

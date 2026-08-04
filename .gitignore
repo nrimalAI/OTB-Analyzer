@@ -21,3 +21,10 @@ __pycache__/
 
 # macOS
 .DS_Store
+runs/
+*.mlpackage
+!Models/*.mlpackage
+corners_train.log
+pieces_train.log
+pieces.pid
+venv-export/
