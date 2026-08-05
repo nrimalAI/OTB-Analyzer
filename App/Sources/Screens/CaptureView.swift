@@ -9,6 +9,7 @@ struct CaptureView: View {
 
     @State private var pickedItem: PhotosPickerItem?
     @State private var showCamera = false
+    @State private var showAbout = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -61,6 +62,19 @@ struct CaptureView: View {
         }
         .navigationTitle("OTB Analyzer")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showAbout = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel("About")
+            }
+        }
+        .sheet(isPresented: $showAbout) {
+            AboutView()
+        }
         .overlay {
             if model.isRecognizing {
                 ProgressView("Reading board…")

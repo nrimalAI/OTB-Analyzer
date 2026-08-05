@@ -31,16 +31,21 @@ targets:
       - package: ChessAnalysis
       - package: ChessBoardUI
       - package: ChessKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: "OTB Analyzer"
+        NSCameraUsageDescription: "Take a photo of a chess board to analyze the position."
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # No network use at all; declaring exempt avoids the export-compliance
+        # question on every App Store Connect upload.
+        ITSAppUsesNonExemptEncryption: false
     settings:
       base:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
-        GENERATE_INFOPLIST_FILE: true
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
-        INFOPLIST_KEY_NSCameraUsageDescription: "Take a photo of a chess board to analyze the position."
-        INFOPLIST_KEY_UILaunchScreen_Generation: true
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
-        INFOPLIST_KEY_CFBundleDisplayName: "OTB Analyzer"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
