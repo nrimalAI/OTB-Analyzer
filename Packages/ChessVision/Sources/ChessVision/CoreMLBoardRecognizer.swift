@@ -34,6 +34,22 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
         self.cornerScoreThreshold = cornerScoreThreshold
         self.pull = pull
+        // Keypoint coordinates come out in input-pixel space, so the parser
+        // must know the model's true input side (640 for the first-generation
+        // corner model, 960 for later ones).
+        self.cornerInputSide = Self.imageInputSide(of: cornerModel) ?? 640
+    }
+
+    private let cornerInputSide: Double
+
+    /// The (square) image-input side length declared by a CoreML model.
+    static func imageInputSide(of model: MLModel) -> Double? {
+        for input in model.modelDescription.inputDescriptionsByName.values {
+            if let constraint = input.imageConstraint {
+                return Double(constraint.pixelsWide)
+            }
+        }
+        return nil
     }
 
     /// Loads compiled models (`.mlmodelc`) named `BoardCorners` and `Pieces`
@@ -92,7 +108,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         return try Self.parseCorners(
             from: array,
             imageSize: imageSize,
-            scoreThreshold: cornerScoreThreshold
+            scoreThreshold: cornerScoreThreshold,
+            inputSide: cornerInputSide
         )
     }
 
@@ -100,13 +117,13 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     static func parseCorners(
         from array: MLMultiArray,
         imageSize: CGSize,
-        scoreThreshold: Float
+        scoreThreshold: Float,
+        inputSide: Double = 640
     ) throws -> [CGPoint] {
         guard array.shape.count == 3,
               array.shape[1].intValue == 17
         else { throw RecognitionError.modelUnavailable }
         let anchors = array.shape[2].intValue
-        let inputSide = 640.0
 
         // Contiguous float32 [1, 17, anchors]: index(c, a) = c * anchors + a.
         let values: UnsafeBufferPointer<Float32> = try array.withUnsafeBufferPointer(
