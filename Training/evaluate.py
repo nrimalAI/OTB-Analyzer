@@ -97,6 +97,8 @@ def main():
                     help="corner-model inference resolution (kpt precision lever)")
     ap.add_argument("--two-pass", action="store_true",
                     help="re-run corner model on a board crop for sharper keypoints")
+    ap.add_argument("--gt-corners", action="store_true",
+                    help="use annotated ground-truth corners (bottleneck diagnostic)")
     args = ap.parse_args()
 
     data = json.loads(Path(args.annotations).read_text())
@@ -107,6 +109,9 @@ def main():
     by_image = defaultdict(list)
     for p in data["annotations"]["pieces"]:
         by_image[p["image_id"]].append(p)
+    gt_corners_by_image = {
+        c["image_id"]: c["corners"] for c in data["annotations"].get("corners", [])
+    }
 
     corner_model = YOLO(args.corners_model)
     piece_model = YOLO(args.pieces_model)
@@ -133,8 +138,13 @@ def main():
             continue
 
         # 1. corners
-        kpts = detect_corners(
-            corner_model, src, imgsz=args.corner_imgsz, two_pass=args.two_pass)
+        if args.gt_corners:
+            gt_c = gt_corners_by_image.get(image_id)
+            kpts = ([gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")]
+                    if gt_c else None)
+        else:
+            kpts = detect_corners(
+                corner_model, src, imgsz=args.corner_imgsz, two_pass=args.two_pass)
         if kpts is None:
             corner_failures += 1
             boards += 1

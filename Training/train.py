@@ -40,6 +40,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--batch", type=int, default=None)
     ap.add_argument("--device", default=None, help="e.g. mps, 0, cpu")
+    ap.add_argument("--imgsz", type=int, default=None, help="input resolution override")
+    ap.add_argument("--name", default=None, help="run name override")
     args = ap.parse_args()
 
     if args.task == "corners":
@@ -54,9 +56,11 @@ def main():
         overrides["batch"] = args.batch
     if args.device:
         overrides["device"] = args.device
+    if args.imgsz:
+        overrides["imgsz"] = args.imgsz
 
     model = YOLO(base)
-    model.train(data=args.data, name=args.task, **overrides)
+    model.train(data=args.data, name=args.name or args.task, **overrides)
 
 
 if __name__ == "__main__":
