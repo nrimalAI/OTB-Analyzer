@@ -79,3 +79,26 @@ choosing. Copy the winners to `Models/BoardCorners.mlpackage` and
 
 > **License note:** Ultralytics YOLO is AGPL-3. Fine for this GPL-3 app; a
 > proprietary fork would need a different detector (see docs/PLAN.md).
+
+## Accuracy findings (2026-08, ChessReD2K val/test)
+
+Operating point: single-pass corners @640, `pull=0.30` → **97.9% per-square /
+73.2% exact on test** (val: 97.0% / 66.7%). Published end-to-end SOTA on this
+dataset is 15.3% exact.
+
+**Corner precision is the dominant residual error** — with ground-truth
+corners the same pipeline reaches 99.6% / 86.1% (val). Attempts to close that
+gap, all measured, all dead ends:
+
+| Attempt | Result |
+|---|---|
+| Corner inference at 1280 (model trained @640) | Catastrophic — pose decode breaks off-resolution |
+| Two-pass (crop board, re-run corners) | Worse — tight crops are out-of-distribution |
+| Retrain corners @960 (batch 8, 8 h) | Keypoint head never converged (pose mAP 0.0 throughout; box fine) |
+| cornerSubPix on the 4 outer corners | No change — ~50 px model error exceeds the saddle basin; outer corners abut border frames |
+| Interior-grid saddle refinement + RANSAC H refit (win=31) | H genuinely improves (corner err 0.33→0.25 squares) but end-to-end only +0.6 pt exact — H is not the binding constraint mid-board |
+
+Remaining levers for Phase 3 (untested): a dedicated higher-capacity corner
+model (yolo11s-pose @640), heatmap-based keypoint architectures, or learning
+per-piece anchor offsets. Do this together with the license-clean retrain on
+own + CC-BY data rather than as a separate pass.
