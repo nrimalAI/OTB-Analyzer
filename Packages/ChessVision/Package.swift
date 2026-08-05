@@ -17,7 +17,8 @@ let package = Package(
         ),
         .testTarget(
             name: "ChessVisionTests",
-            dependencies: ["ChessVision"]
+            dependencies: ["ChessVision"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

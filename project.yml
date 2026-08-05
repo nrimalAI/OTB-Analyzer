@@ -24,6 +24,8 @@ targets:
       - path: App/Sources
       - path: App/Resources
         buildPhase: resources
+      - path: Models
+        buildPhase: sources  # .mlpackage → compiled .mlmodelc in the bundle
     dependencies:
       - package: ChessVision
       - package: ChessAnalysis

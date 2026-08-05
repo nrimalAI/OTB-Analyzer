@@ -22,6 +22,9 @@ struct ChessAnalyzerApp: App {
                 if EngineSelfTest.isRequested {
                     await EngineSelfTest.run()
                 }
+                if let path = RecognitionSelfTest.requestedImagePath {
+                    await RecognitionSelfTest.run(imagePath: path, recognizer: model.recognizer)
+                }
                 // Dev-only deep link for screenshots/automation:
                 // SIMCTL_CHILD_AUTOFLOW=review|analysis
                 switch ProcessInfo.processInfo.environment["AUTOFLOW"] {

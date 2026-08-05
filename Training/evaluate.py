@@ -44,6 +44,44 @@ def ground_truth_board(piece_anns, categories):
     return board
 
 
+def detect_corners(model, src, imgsz=640, two_pass=False):
+    """Predicted (a1, a8, h8, h1) image points, or None.
+
+    With `two_pass`, re-runs the model on a crop around the first-pass board —
+    the board then fills most of the model input, sharpening keypoints ~3×
+    without retraining. Mirrors what the app does with two Vision requests.
+    """
+    import cv2
+
+    def run(img):
+        r = model(img, imgsz=imgsz, verbose=False)[0]
+        if r.keypoints is None or len(r.keypoints) == 0:
+            return None
+        best = int(r.boxes.conf.argmax()) if r.boxes is not None and len(r.boxes) else 0
+        return r.keypoints.xy[best].tolist()
+
+    first = run(str(src))
+    if first is None or not two_pass:
+        return first
+
+    img = cv2.imread(str(src))
+    h, w = img.shape[:2]
+    xs = [p[0] for p in first]
+    ys = [p[1] for p in first]
+    margin = 0.15 * max(max(xs) - min(xs), max(ys) - min(ys))
+    x1 = int(max(min(xs) - margin, 0))
+    y1 = int(max(min(ys) - margin, 0))
+    x2 = int(min(max(xs) + margin, w))
+    y2 = int(min(max(ys) + margin, h))
+    if x2 - x1 < 32 or y2 - y1 < 32:
+        return first
+
+    second = run(img[y1:y2, x1:x2])
+    if second is None:
+        return first
+    return [[p[0] + x1, p[1] + y1] for p in second]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corners-model", required=True)
@@ -55,6 +93,10 @@ def main():
     ap.add_argument("--pull", type=float, default=0.30,
                     help="anchor pull toward board center (see chess_pipeline)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--corner-imgsz", type=int, default=640,
+                    help="corner-model inference resolution (kpt precision lever)")
+    ap.add_argument("--two-pass", action="store_true",
+                    help="re-run corner model on a board crop for sharper keypoints")
     args = ap.parse_args()
 
     data = json.loads(Path(args.annotations).read_text())
@@ -91,14 +133,13 @@ def main():
             continue
 
         # 1. corners
-        cr = corner_model(str(src), verbose=False)[0]
-        if cr.keypoints is None or len(cr.keypoints) == 0:
+        kpts = detect_corners(
+            corner_model, src, imgsz=args.corner_imgsz, two_pass=args.two_pass)
+        if kpts is None:
             corner_failures += 1
             boards += 1
             total_squares += 64
             continue
-        best = int(cr.boxes.conf.argmax()) if cr.boxes is not None and len(cr.boxes) else 0
-        kpts = cr.keypoints.xy[best].tolist()  # [[x,y] * 4] in a1,a8,h8,h1 order
         H = homography(kpts)
 
         # 2. pieces
