@@ -126,30 +126,32 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         let anchors = array.shape[2].intValue
 
         // Contiguous float32 [1, 17, anchors]: index(c, a) = c * anchors + a.
-        let values: UnsafeBufferPointer<Float32> = try array.withUnsafeBufferPointer(
-            ofType: Float32.self) { UnsafeBufferPointer(rebasing: $0[...]) }
+        // All reads happen inside the closure — the buffer pointer must not
+        // escape its scope.
+        let corners: [CGPoint]? = array.withUnsafeBufferPointer(
+            ofType: Float32.self
+        ) { values in
+            var bestAnchor = -1
+            var bestScore: Float32 = 0
+            for a in 0..<anchors {
+                let score = values[4 * anchors + a]
+                if score > bestScore {
+                    bestScore = score
+                    bestAnchor = a
+                }
+            }
+            guard bestAnchor >= 0, bestScore >= scoreThreshold else { return nil }
 
-        var bestAnchor = -1
-        var bestScore: Float32 = 0
-        for a in 0..<anchors {
-            let score = values[4 * anchors + a]
-            if score > bestScore {
-                bestScore = score
-                bestAnchor = a
+            let sx = Double(imageSize.width) / inputSide
+            let sy = Double(imageSize.height) / inputSide
+            return (0..<4).map { k in
+                CGPoint(
+                    x: Double(values[(5 + k * 3) * anchors + bestAnchor]) * sx,
+                    y: Double(values[(6 + k * 3) * anchors + bestAnchor]) * sy
+                )
             }
         }
-        guard bestAnchor >= 0, bestScore >= scoreThreshold else {
-            throw RecognitionError.boardNotFound
-        }
-
-        let sx = Double(imageSize.width) / inputSide
-        let sy = Double(imageSize.height) / inputSide
-        var corners: [CGPoint] = []
-        for k in 0..<4 {
-            let x = Double(values[(5 + k * 3) * anchors + bestAnchor]) * sx
-            let y = Double(values[(6 + k * 3) * anchors + bestAnchor]) * sy
-            corners.append(CGPoint(x: x, y: y))
-        }
+        guard let corners else { throw RecognitionError.boardNotFound }
         return corners  // (a1, a8, h8, h1) in image coordinates
     }
 

@@ -1,3 +1,4 @@
+import AVFoundation
 import PhotosUI
 import SwiftUI
 
@@ -28,7 +29,7 @@ struct CaptureView: View {
             Spacer()
 
             VStack(spacing: 12) {
-                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                if AVCaptureDevice.default(for: .video) != nil {
                     Button {
                         showCamera = true
                     } label: {
@@ -78,52 +79,18 @@ struct CaptureView: View {
             }
         }
         .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { image in
+            CameraCaptureView { image in
                 showCamera = false
                 if let image {
                     Task { await model.startFromPhoto(image) }
                 }
             }
-            .ignoresSafeArea()
         }
         .alert("Couldn't read the board", isPresented: $model.recognitionFailed) {
             Button("Set Up Manually") { model.startFromScratch(startingPosition: true) }
             Button("OK", role: .cancel) {}
         } message: {
             Text("Try a photo taken more directly over the board, or place the pieces manually.")
-        }
-    }
-}
-
-/// Minimal camera wrapper. A custom AVCaptureSession UI with a board-guide
-/// overlay is a Phase 3 polish item.
-private struct CameraPicker: UIViewControllerRepresentable {
-    let completion: (UIImage?) -> Void
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
-
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let completion: (UIImage?) -> Void
-        init(completion: @escaping (UIImage?) -> Void) { self.completion = completion }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            completion(info[.originalImage] as? UIImage)
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            completion(nil)
         }
     }
 }
