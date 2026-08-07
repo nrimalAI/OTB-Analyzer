@@ -32,7 +32,7 @@ final class AppModel: ObservableObject {
     // MARK: - Flow
 
     func startFromPhoto(_ image: UIImage) async {
-        guard let cgImage = image.cgImage else {
+        guard let cgImage = image.normalizedUprightCGImage() else {
             recognitionFailed = true
             return
         }

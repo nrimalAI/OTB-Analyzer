@@ -21,10 +21,11 @@ enum RecognitionSelfTest {
         }
 
         let isCoreML = recognizer is CoreMLBoardRecognizer
+        // Load through UIImage + upright normalization — the same path real
+        // photos take in AppModel.startFromPhoto, EXIF orientation included.
         guard
-            let source = CGImageSourceCreateWithURL(
-                URL(fileURLWithPath: imagePath) as CFURL, nil),
-            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            let uiImage = UIImage(contentsOfFile: imagePath),
+            let image = uiImage.normalizedUprightCGImage()
         else {
             report("RECOG FAIL: cannot load \(imagePath)")
             return
