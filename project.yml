@@ -34,7 +34,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: "OTB Analyzer"
+        CFBundleDisplayName: "Chess Scanner"
         NSCameraUsageDescription: "Take a photo of a chess board to analyze the position."
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
@@ -49,3 +49,4 @@ targets:
         MARKETING_VERSION: 0.1.0
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 6F2F8RV4WM

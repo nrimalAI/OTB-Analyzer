@@ -60,7 +60,7 @@ struct CaptureView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
         }
-        .navigationTitle("OTB Analyzer")
+        .navigationTitle("Chess Scanner")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

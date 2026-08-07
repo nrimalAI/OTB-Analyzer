@@ -28,3 +28,4 @@ corners_train.log
 pieces_train.log
 pieces.pid
 venv-export/
+build/
