@@ -29,9 +29,6 @@ corners): download from https://data.4tu.nl/datasets/99b5c721-280b-450b-b058-b29
 > evaluation only. The model that ships in the App Store build must be
 > retrained on permissively-licensed + self-captured data (Phase 3).
 
-Optional supplements (CC BY 4.0): chess datasets on Roboflow Universe — export
-in "YOLO" format and merge with `--extra-dataset`.
-
 ```sh
 python prepare_data.py --annotations datasets/chessred2k/annotations.json \
                        --images datasets/chessred2k/images \
@@ -40,11 +37,73 @@ python prepare_data.py --annotations datasets/chessred2k/annotations.json \
 python prepare_data.py --annotations .../annotations.json --inspect
 ```
 
+### More than one dataset
+
+ChessReD is one board and one piece set, so models trained on it alone do not
+transfer well to other boards. `build_dataset.py` downloads the sources listed
+in `sources.yaml` and merges them into `datasets/merged/`:
+
+```sh
+python build_dataset.py list              # sources, download sizes, what is on disk
+python build_dataset.py fetch --dry-run   # what would be downloaded, nothing fetched
+python build_dataset.py fetch             # ~15 GB; needs about twice that free while unpacking
+python build_dataset.py merge             # everything on disk
+python build_dataset.py merge --shippable # only data an App Store model may be trained on
+```
+
+| Source | Photos | Gives | License |
+|---|---|---|---|
+| `chessred2k` | 2,078 real | boxes + corners | CC BY-NC-SA 4.0 — not shippable |
+| `chesscog` | 4,888 rendered | boxes + corners | CC BY 4.0 |
+| `fenit` | 492 real | boxes + corners | CC BY 4.0 |
+| `roboflow` | a few hundred per project, real | boxes only | per project, mostly CC BY 4.0 |
+| `chessred_pseudo` | up to ~8,700 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
+| `own` | your photos | whatever you label | yours |
+
+- **Roboflow** needs a free API key: `export ROBOFLOW_API_KEY=...` before
+  `fetch`. Or download a project's "YOLOv8" export by hand and unzip it into
+  `datasets/roboflow/<name>/`. Add projects to `sources.yaml` freely: Universe
+  is full of forks, and the merge drops repeated photos (same original file
+  name, or same image hash). An image with a label that is not a colored piece
+  (e.g. a bare `bishop`) is dropped whole rather than left half-labelled.
+- **chesscog** gives four unordered corner points; which one is a1 is recovered
+  from the labelled piece squares. Checked against ChessReD2K, where the answer
+  is known: 2,078 of 2,078 correct.
+- **Fenit** (https://data.mendeley.com/datasets/wpp9xnbcp6) is the only real
+  photo set besides ChessReD with board corners, and needs no account. Each
+  photo is named after its position; the corner order is recovered from that.
+  It has no official split, so 20% is held out as `test` and 10% as `val`
+  (`test_fraction` / `val_fraction` in `sources.yaml`), by position. **The
+  adapter has only been tested on stand-in files** built from ChessReD in
+  Fenit's format — check a few label overlays after the first real download,
+  and look at the `skipped` notes in the manifest. The held-out photos come
+  from the same boards as the Fenit training photos, so they measure "boards
+  like Fenit's", not a board never seen.
+- **`chessred_pseudo`** (optional, 24.5 GB download) labels the ChessReD photos
+  that have positions but no boxes — see `pseudo_label.py`. It only adds piece
+  data for the same board, so it is the least valuable source.
+- `datasets/merged/manifest.json` records what went in and what was skipped.
+
+`evaluate.py` on ChessReD's test split is unchanged, so those numbers stay
+comparable (baseline: 97.9% per-square, 73.2% boards exact). To score whole
+boards on the held-out Fenit photos — the closest thing here to "a different
+board" — use the `positions.json` the merge writes:
+
+```sh
+python evaluate.py --corners-model ... --pieces-model ... \
+                   --positions datasets/merged/positions.json --source fenit --split test
+```
+
+Report both numbers for every new model.
+
 ## 2. Train
 
 ```sh
 python train.py corners --data datasets/yolo/corners/data.yaml
 python train.py pieces  --data datasets/yolo/pieces/data.yaml
+# or, on the merged data:
+python train.py corners --data datasets/merged/corners/data.yaml
+python train.py pieces  --data datasets/merged/pieces/data.yaml
 ```
 
 Both default to YOLO11 nano at 640px. On a Mac this uses MPS; expect hours.

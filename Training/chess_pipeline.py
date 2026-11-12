@@ -103,13 +103,19 @@ def board_square(H, point, pull=0.30):
 
 def assign_squares(H, detections, pull=0.30):
     """Detections -> {(file, rank): (cls, confidence)} with conflict resolution."""
+    return {sq: (det.cls, det.confidence)
+            for sq, det in assign_detections(H, detections, pull).items()}
+
+
+def assign_detections(H, detections, pull=0.30):
+    """Like assign_squares, but keeps the winning Detection for each square."""
     board = {}
     for det in sorted(detections, key=lambda d: -d.confidence):
         sq = board_square(H, det.anchor, pull)
         if sq is None:
             continue
         if sq not in board:
-            board[sq] = (det.cls, det.confidence)
+            board[sq] = det
             continue
         # Occupied by a higher-confidence piece: demote to nearest free neighbor.
         bx, by = pulled_board_point(H, det.anchor, pull)
@@ -124,7 +130,7 @@ def assign_squares(H, detections, pull=0.30):
                     candidates.append((dist, (nf, nr)))
         if candidates:
             candidates.sort()
-            board[candidates[0][1]] = (det.cls, det.confidence)
+            board[candidates[0][1]] = det
         # else: dropped
     return board
 

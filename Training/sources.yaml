@@ -1,0 +1,107 @@
+# Dataset sources for build_dataset.py. Paths are relative to Training/.
+#
+# kind:
+#   chessred  ChessReD annotations.json + images (boxes + corners for the 2K subset)
+#   chesscog  rendered boards, one <id>.png + <id>.json per position
+#   fenit     real photos, one YOLO-pose .txt each, position in the file name
+#   roboflow  a folder of YOLO-format exports, one sub-folder per project
+#   native    labels already in our own format (pseudo_label.py, own photos)
+#   raw       download only; not merged directly
+#
+# shippable: may a model trained on it ship in the App Store build?
+#   Omit it to decide from the license text (roboflow: per project).
+# optional: true = `fetch` skips it unless named explicitly.
+
+sources:
+  chessred2k:
+    kind: chessred
+    dir: datasets/chessred2k
+    license: CC BY-NC-SA 4.0
+    shippable: false
+    downloads:
+      - file: annotations.json
+        url: https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/3cae6364-daca-4967-b426-1e4b68cdb64c
+        size: 22204010
+      - file: chessred2k.zip
+        url: https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/410e41c7-dde5-413f-8722-3e112363a1a2
+        size: 4680150747
+        provides: images   # already unpacked -> skip
+
+  chesscog:
+    kind: chesscog
+    dir: datasets/chesscog
+    license: CC BY 4.0   # as stated on https://osf.io/xf3ka
+    downloads:
+      - file: val.zip
+        url: https://osf.io/download/ydtcs/
+        size: 222952872
+        provides: val
+      - file: test.zip
+        url: https://osf.io/download/7p69s/
+        size: 522129163
+        provides: test
+      - file: train.zip          # split archive: train.z01 + train.zip
+        url: https://osf.io/download/z5vgm/
+        size: 2416209370
+        provides: train
+        parts:
+          - file: train.z01
+            url: https://osf.io/download/np56u/
+            size: 4294967296
+
+  # Real photos with piece boxes AND board corners; no account needed.
+  # https://data.mendeley.com/datasets/wpp9xnbcp6 (492 photos, April 2026)
+  fenit:
+    kind: fenit
+    dir: datasets/fenit
+    license: CC BY 4.0
+    mendeley_id: wpp9xnbcp6
+    approx_bytes: 3410000000
+    # No official split. These photos are the only real ones that are not
+    # ChessReD's board, so a share is kept out of training to test on.
+    # Photos of the same position always land in the same split.
+    test_fraction: 0.2
+    val_fraction: 0.1
+
+  roboflow:
+    kind: roboflow
+    dir: datasets/roboflow
+    # `fetch` needs ROBOFLOW_API_KEY (free account). Or skip the API: download a
+    # project's "YOLOv8" export by hand and unzip it to datasets/roboflow/<name>/.
+    # Leave `version` out to take the newest. Add more projects freely — forks
+    # of the same photos are de-duplicated at merge time.
+    projects:
+      - id: roboflow-100/chess-pieces-mjzgj
+      - id: mahdi-ruposh/chesspiece-object-detection
+      - id: luksuz/chess_pieces-nf8av
+      - id: jjgg/chess_detection-cief9
+      - id: cutegander/chess-pieces-b8cbo
+
+  # The other ~8,700 ChessReD photos: positions are labelled, boxes are not.
+  # pseudo_label.py turns them into chessred_pseudo below.
+  chessred_full:
+    kind: raw
+    optional: true
+    dir: datasets/chessred
+    license: CC BY-NC-SA 4.0
+    shippable: false
+    downloads:
+      - file: annotations.json
+        url: https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/3cae6364-daca-4967-b426-1e4b68cdb64c
+        size: 22204010
+      - file: chessred.zip
+        url: https://data.4tu.nl/file/99b5c721-280b-450b-b058-b2900b69a90f/6329e969-616e-48e3-b893-a0379d1c15ba
+        size: 24573697524
+
+  chessred_pseudo:
+    kind: native
+    dir: datasets/chessred_pseudo
+    license: CC BY-NC-SA 4.0
+    shippable: false
+
+  # Your own photos, once labelled (same layout as chessred_pseudo).
+  own:
+    kind: native
+    dir: datasets/own
+    license: own
+    shippable: true

@@ -12,6 +12,11 @@ Reports:
 Ground truth uses ALL annotated images in the split (algebraic positions exist
 for every ChessReD image), so you can also evaluate on images that have no
 bbox/corner labels — the models don't need them at inference time.
+
+To score other data (e.g. the held-out Fenit photos), pass the positions.json
+that build_dataset.py merge writes:
+    python evaluate.py ... --positions datasets/merged/positions.json \
+                           --source fenit --split test
 """
 
 import argparse
@@ -23,7 +28,7 @@ from ultralytics import YOLO
 
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
-    assign_squares, homography,
+    assign_squares, fen_placement_to_board, homography,
 )
 from prepare_data import image_index, normalize_category, official_splits
 
@@ -82,12 +87,58 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
     return [[p[0] + x1, p[1] + y1] for p in second]
 
 
+def chessred_items(args):
+    """(image, true board, annotated corners or None) for a ChessReD split."""
+    data = json.loads(Path(args.annotations).read_text())
+    categories = {c["id"]: normalize_category(c["name"]) for c in data["categories"]}
+    imgs = image_index(data)
+    split_by_id = official_splits(data)
+
+    by_image = defaultdict(list)
+    for p in data["annotations"]["pieces"]:
+        by_image[p["image_id"]].append(p)
+    gt_corners_by_image = {
+        c["image_id"]: c["corners"] for c in data["annotations"].get("corners", [])
+    }
+
+    images_root = Path(args.images)
+    for image_id, piece_anns in sorted(by_image.items()):
+        meta = imgs[image_id]
+        if args.split != "all" and split_by_id.get(image_id) != args.split:
+            continue
+        src = images_root / meta["path"]
+        if not src.exists():
+            alt = images_root / Path(*Path(meta["path"]).parts[1:])
+            if not alt.exists():
+                continue
+            src = alt
+        gt = ground_truth_board(piece_anns, categories)
+        if not gt:
+            continue
+        gt_c = gt_corners_by_image.get(image_id)
+        yield src, gt, gt_c and [
+            gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")]
+
+
+def position_items(args):
+    """The same triples from a positions.json written by build_dataset.py."""
+    for row in json.loads(Path(args.positions).read_text()):
+        if args.split != "all" and row["split"] != args.split:
+            continue
+        if args.source and row["source"] != args.source:
+            continue
+        yield Path(row["image"]), fen_placement_to_board(row["placement"]), None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corners-model", required=True)
     ap.add_argument("--pieces-model", required=True)
-    ap.add_argument("--annotations", required=True)
-    ap.add_argument("--images", required=True)
+    ap.add_argument("--annotations", help="ChessReD annotations.json")
+    ap.add_argument("--images", help="ChessReD image root")
+    ap.add_argument("--positions",
+                    help="positions.json from build_dataset.py merge, instead of ChessReD")
+    ap.add_argument("--source", help="with --positions: only this source, e.g. fenit")
     ap.add_argument("--split", default="test", choices=["train", "val", "test", "all"])
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--pull", type=float, default=0.30,
@@ -101,47 +152,26 @@ def main():
                     help="use annotated ground-truth corners (bottleneck diagnostic)")
     args = ap.parse_args()
 
-    data = json.loads(Path(args.annotations).read_text())
-    categories = {c["id"]: normalize_category(c["name"]) for c in data["categories"]}
-    imgs = image_index(data)
-    split_by_id = official_splits(data)
-
-    by_image = defaultdict(list)
-    for p in data["annotations"]["pieces"]:
-        by_image[p["image_id"]].append(p)
-    gt_corners_by_image = {
-        c["image_id"]: c["corners"] for c in data["annotations"].get("corners", [])
-    }
+    if args.positions:
+        if args.gt_corners:
+            ap.error("--gt-corners needs ChessReD annotations, not --positions")
+        items = position_items(args)
+    elif args.annotations and args.images:
+        items = chessred_items(args)
+    else:
+        ap.error("give --annotations and --images, or --positions")
 
     corner_model = YOLO(args.corners_model)
     piece_model = YOLO(args.pieces_model)
 
-    images_root = Path(args.images)
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = 0
     confusion = Counter()
 
-    items = sorted(by_image.items())
-    for image_id, piece_anns in items:
-        meta = imgs[image_id]
-        if args.split != "all" and split_by_id.get(image_id) != args.split:
-            continue
-        src = images_root / meta["path"]
-        if not src.exists():
-            alt = images_root / Path(*Path(meta["path"]).parts[1:])
-            if not alt.exists():
-                continue
-            src = alt
-
-        gt = ground_truth_board(piece_anns, categories)
-        if not gt:
-            continue
-
+    for src, gt, gt_kpts in items:
         # 1. corners
         if args.gt_corners:
-            gt_c = gt_corners_by_image.get(image_id)
-            kpts = ([gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")]
-                    if gt_c else None)
+            kpts = gt_kpts
         else:
             kpts = detect_corners(
                 corner_model, src, imgsz=args.corner_imgsz, two_pass=args.two_pass)
