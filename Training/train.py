@@ -9,6 +9,13 @@ Notes:
   position, and a mirrored corner labeling is simply wrong.
 - Perspective/rotation augmentation is dialed up instead: camera angle is the
   dominant nuisance variable for over-the-board photos.
+- Corner precision: for a model with 4 keypoints ultralytics scores a keypoint
+  with a tolerance (OKS sigma) of 0.25, against 0.025-0.107 for human joints.
+  With that, a corner one whole square off costs a loss of 0.03: nothing
+  pushes the corners to be exact. --kpt-sigma sets a tighter value for the
+  loss and for the validation metric. Too tight from a cold start gives no
+  gradient at all (0.05 saturates beyond about two squares), so train with
+  the default first and then continue from those weights with --kpt-sigma.
 """
 
 import argparse
@@ -47,6 +54,9 @@ def main():
     ap.add_argument("--device", default=None, help="e.g. mps, 0, cpu")
     ap.add_argument("--imgsz", type=int, default=None, help="input resolution override")
     ap.add_argument("--name", default=None, help="run name override")
+    ap.add_argument("--kpt-sigma", type=float, default=None,
+                    help="corners only: keypoint tolerance for the loss and the "
+                         "metric (ultralytics' default for 4 keypoints is 0.25)")
     args = ap.parse_args()
 
     if args.task == "corners":
@@ -69,9 +79,23 @@ def main():
     # Keep runs under Training/runs/ wherever the script is started from
     # (recent ultralytics would otherwise put them at the repo root).
     project = HERE / "runs" / ("pose" if args.task == "corners" else "detect")
+    name = args.name or args.task
+
+    data = args.data
+    if args.kpt_sigma:
+        if args.task != "corners":
+            ap.error("--kpt-sigma is for the corners model")
+        # ultralytics reads the tolerance from the dataset file, so train from
+        # a copy of it that carries the setting.
+        import yaml
+        spec = yaml.safe_load(Path(args.data).read_text())
+        spec["path"] = str((Path(args.data).parent / spec.get("path", ".")).resolve())
+        spec["kpt_oks_sigmas"] = [args.kpt_sigma] * spec["kpt_shape"][0]
+        project.mkdir(parents=True, exist_ok=True)
+        data = str(project / f"{name}_data.yaml")
+        Path(data).write_text(yaml.safe_dump(spec, sort_keys=False))
     model = YOLO(base)
-    model.train(data=args.data, project=str(project), name=args.name or args.task,
-                **overrides)
+    model.train(data=data, project=str(project), name=name, **overrides)
 
 
 if __name__ == "__main__":
