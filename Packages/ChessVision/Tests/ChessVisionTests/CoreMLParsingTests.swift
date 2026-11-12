@@ -24,22 +24,37 @@ final class CoreMLParsingTests: XCTestCase {
         return array
     }
 
-    func testParseCornersScalesToImageSize() throws {
-        // Keypoints at known 640-space positions; image is 1280×640 → x
-        // doubles, y unchanged.
+    func testParseCornersMapsThroughLetterbox() throws {
+        // A 1280×640 photo letterboxed into the 640 model input fills the full
+        // width and the rows 160..<480. Keypoints are in 640-space.
+        let tensor = try poseTensor(keypoints: [(100, 400), (100, 200), (500, 200), (500, 400)])
+        let corners = try CoreMLBoardRecognizer.parseCorners(
+            from: tensor,
+            letterbox: Letterbox(imageSize: CGSize(width: 1280, height: 640)),
+            scoreThreshold: 0.25)
+        XCTAssertEqual(corners.count, 4)
+        XCTAssertEqual(corners[0].x, 200, accuracy: 1e-6)   // a1: x doubles
+        XCTAssertEqual(corners[0].y, 480, accuracy: 1e-6)   // (400 - 160) × 2
+        XCTAssertEqual(corners[2].x, 1000, accuracy: 1e-6)  // h8
+        XCTAssertEqual(corners[2].y, 80, accuracy: 1e-6)    // (200 - 160) × 2
+    }
+
+    func testParseCornersSquareImageIsPlainScaling() throws {
         let tensor = try poseTensor(keypoints: [(100, 500), (100, 100), (500, 100), (500, 500)])
         let corners = try CoreMLBoardRecognizer.parseCorners(
-            from: tensor, imageSize: CGSize(width: 1280, height: 640), scoreThreshold: 0.25)
-        XCTAssertEqual(corners.count, 4)
-        XCTAssertEqual(corners[0], CGPoint(x: 200, y: 500))  // a1
-        XCTAssertEqual(corners[2], CGPoint(x: 1000, y: 100))  // h8
+            from: tensor,
+            letterbox: Letterbox(imageSize: CGSize(width: 1280, height: 1280)),
+            scoreThreshold: 0.25)
+        XCTAssertEqual(corners[0].x, 200, accuracy: 1e-6)
+        XCTAssertEqual(corners[0].y, 1000, accuracy: 1e-6)
     }
 
     func testParseCornersRespectsThreshold() throws {
         let tensor = try poseTensor(score: 0.1, keypoints: [(0, 0), (0, 0), (0, 0), (0, 0)])
         XCTAssertThrowsError(
             try CoreMLBoardRecognizer.parseCorners(
-                from: tensor, imageSize: CGSize(width: 640, height: 640), scoreThreshold: 0.25)
+                from: tensor, letterbox: Letterbox(imageSize: CGSize(width: 640, height: 640)),
+                scoreThreshold: 0.25)
         ) { error in
             XCTAssertEqual(error as? RecognitionError, .boardNotFound)
         }
@@ -49,7 +64,8 @@ final class CoreMLParsingTests: XCTestCase {
         let bad = try MLMultiArray(shape: [1, 5, 10], dataType: .float32)
         XCTAssertThrowsError(
             try CoreMLBoardRecognizer.parseCorners(
-                from: bad, imageSize: CGSize(width: 640, height: 640), scoreThreshold: 0.25))
+                from: bad, letterbox: Letterbox(imageSize: CGSize(width: 640, height: 640)),
+                scoreThreshold: 0.25))
     }
 
     func testPieceClassParsing() {

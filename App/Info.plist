@@ -24,8 +24,19 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Take a photo of a chess board to analyze the position.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Newsreader-Variable.ttf</string>
+		<string>IBMPlexSans-Variable.ttf</string>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
+		<string>IBMPlexMono-SemiBold.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
