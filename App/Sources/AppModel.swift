@@ -57,6 +57,7 @@ final class AppModel: ObservableObject {
     /// `minimumDuration` keeps the "reading" state on screen long enough to
     /// register when recognition itself is near-instant.
     func startFromPhoto(_ image: UIImage, minimumDuration: Duration = .zero) async {
+        guard !isRecognizing else { return }
         guard let cgImage = image.normalizedUprightCGImage() else {
             recognitionFailed = true
             return
@@ -68,11 +69,18 @@ final class AppModel: ObservableObject {
             let result = try await recognizer.recognize(cgImage)
             let remaining = minimumDuration - (ContinuousClock.now - started)
             if remaining > .zero { try? await Task.sleep(for: remaining) }
+            guard isStillScanning else { return }
             load(result: result)
             path.append(.board)
         } catch {
-            recognitionFailed = true
+            if isStillScanning { recognitionFailed = true }
         }
+    }
+
+    /// False once the user has cancelled or left the scan screen; a read
+    /// that finishes after that must not navigate or raise an alert.
+    private var isStillScanning: Bool {
+        !Task.isCancelled && path.last == .scan
     }
 
     func startFromScratch(startingPosition: Bool) {
@@ -159,9 +167,20 @@ final class AppModel: ObservableObject {
         pieces = parsed
         confidence = [:]
         sideToMove = fields.count > 1 && fields[1] == "b" ? .black : .white
-        castling = fields.count > 2
-            ? Self.castling(fromFENField: fields[2]) ?? .inferred(from: parsed)
-            : .inferred(from: parsed)
+        // Typed rights can only take away from what the placement allows: a
+        // right without its king and rook at home is not just meaningless,
+        // Stockfish reads past the board looking for the rook.
+        let possible = CastlingRights.inferred(from: parsed)
+        if fields.count > 2, let typed = Self.castling(fromFENField: fields[2]) {
+            castling = CastlingRights(
+                whiteKingside: typed.whiteKingside && possible.whiteKingside,
+                whiteQueenside: typed.whiteQueenside && possible.whiteQueenside,
+                blackKingside: typed.blackKingside && possible.blackKingside,
+                blackQueenside: typed.blackQueenside && possible.blackQueenside
+            )
+        } else {
+            castling = possible
+        }
         return true
     }
 

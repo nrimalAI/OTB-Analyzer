@@ -71,6 +71,9 @@ public struct BoardView: View {
                         }
                     }
                 }
+                // A display-only board must let taps through, e.g. to the
+                // row button a thumbnail sits in.
+                .allowsHitTesting(onTap != nil)
 
                 ForEach(Array(arrows.enumerated()), id: \.offset) { _, arrow in
                     arrowView(arrow, boardSize: boardSize, cell: cell)

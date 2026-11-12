@@ -37,7 +37,10 @@ struct PositionPanel: View {
                             .init(value: Piece.Color.black, title: "Black"),
                         ],
                         selection: model.sideToMove,
-                        onSelect: { model.sideToMove = $0 }
+                        onSelect: {
+                            model.sideToMove = $0
+                            fenDraft = nil
+                        }
                     )
                 }
 

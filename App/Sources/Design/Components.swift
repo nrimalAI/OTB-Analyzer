@@ -59,8 +59,8 @@ struct InkSegmentedControl<Value: Hashable>: View {
     struct Segment: Identifiable {
         let value: Value
         let title: String
-        /// Drawn faint, and taps are ignored (e.g. Analysis while the
-        /// position is illegal).
+        /// Drawn faint and disabled (e.g. Analysis while the position is
+        /// illegal).
         var isUnavailable = false
         var id: Value { value }
     }
@@ -75,7 +75,7 @@ struct InkSegmentedControl<Value: Hashable>: View {
             ForEach(segments) { segment in
                 let isOn = segment.value == selection
                 Button {
-                    if !segment.isUnavailable { onSelect(segment.value) }
+                    onSelect(segment.value)
                 } label: {
                     Text(segment.title)
                         .sans(14, weight: .medium)
@@ -87,7 +87,8 @@ struct InkSegmentedControl<Value: Hashable>: View {
                         .background(isOn ? Theme.ink : .clear)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SegmentButtonStyle())
+                .disabled(segment.isUnavailable)
                 .accessibilityAddTraits(isOn ? .isSelected : [])
             }
         }
@@ -102,6 +103,14 @@ struct InkSegmentedControl<Value: Hashable>: View {
     private func foreground(isOn: Bool, isUnavailable: Bool) -> Color {
         if isOn { return Theme.paper }
         return isUnavailable ? Theme.ink.opacity(0.35) : Theme.ink
+    }
+}
+
+/// Leaves the segment's label exactly as drawn; the control colours its own
+/// selected and unavailable states.
+private struct SegmentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }
 

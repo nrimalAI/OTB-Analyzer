@@ -52,21 +52,21 @@ struct BoardWorkspaceView: View {
         }
         .task {
             let history = history
-            session.onFinished = { [weak session] update, fen in
-                Self.save(update, fen: fen, depth: session?.targetDepth ?? update.depth, to: history)
+            session.onFinished = { best, depth, fen in
+                Self.save(best, depth: depth, fen: fen, to: history)
             }
-            if isAnalysis { await startAnalysis() }
+            if isAnalysis { startAnalysis() }
         }
         .onChange(of: model.tab) { _, tab in
             selectedSquare = nil
             if tab == .analysis {
-                Task { await startAnalysis() }
+                startAnalysis()
             } else {
                 session.stop()
             }
         }
         .onChange(of: model.depth) {
-            if isAnalysis { Task { await startAnalysis() } }
+            if isAnalysis { startAnalysis() }
         }
         .onDisappear {
             session.stop()
@@ -92,7 +92,7 @@ struct BoardWorkspaceView: View {
                 ],
                 selection: model.tab,
                 height: 40,
-                onSelect: { model.tab = $0 }
+                onSelect: show
             )
 
             Button {
@@ -150,8 +150,8 @@ struct BoardWorkspaceView: View {
             return model.fromScan ? "Check the position" : "Set up a position"
         }
         if !AnalysisEngine.evaluationNetworksArePresent { return "Engine not installed" }
-        if let score = session.update?.score { return EvalFormat.verdict(score) }
-        if session.update?.isFinal == true { return "No legal moves" }
+        if let best = session.lines.first { return EvalFormat.verdict(best.score) }
+        if session.isFinished { return "No legal moves" }
         return "Analyzing\u{2026}"
     }
 
@@ -160,13 +160,12 @@ struct BoardWorkspaceView: View {
         if !AnalysisEngine.evaluationNetworksArePresent {
             return "Stockfish networks missing \u{2014} run Scripts/download-nnue.sh and rebuild."
         }
-        guard let update = session.update else { return "Stockfish is thinking\u{2026}" }
         guard let best = session.lines.first else {
-            return update.isFinal ? "The game is over in this position." : "Stockfish is thinking\u{2026}"
+            return session.isFinished ? "The game is over in this position." : "Stockfish is thinking\u{2026}"
         }
         var parts: [String] = []
         if let move = best.moves.first { parts.append("Best move \(move)") }
-        parts.append("depth \(session.reachedDepth)" + (update.isFinal ? "" : "\u{2026}"))
+        parts.append("depth \(session.reachedDepth)" + (session.isFinished ? "" : "\u{2026}"))
         parts.append("White win chance \(EvalFormat.whiteWinChance(best.score))%")
         return parts.joined(separator: " \u{00B7} ")
     }
@@ -191,7 +190,7 @@ struct BoardWorkspaceView: View {
 
     private var boardRow: some View {
         HStack(spacing: 6) {
-            EvalBarView(fraction: isAnalysis ? session.update?.score?.whiteWinningFraction ?? 0.5 : 0.5)
+            EvalBarView(fraction: isAnalysis ? session.lines.first?.score.whiteWinningFraction ?? 0.5 : 0.5)
                 .frame(width: 12)
             BoardView(
                 pieces: shownPieces,
@@ -237,7 +236,7 @@ struct BoardWorkspaceView: View {
             VStack(spacing: 0) {
                 Rule()
                 Button("Analyze position") {
-                    model.tab = .analysis
+                    show(.analysis)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(!model.canAnalyze)
@@ -257,33 +256,37 @@ struct BoardWorkspaceView: View {
 
     // MARK: - Actions
 
-    private func startAnalysis() async {
+    /// Switches tab. Going to Analysis starts the search (clearing the
+    /// previous position's results) in the same update as the tab change.
+    private func show(_ tab: BoardTab) {
+        if tab == .analysis {
+            guard model.canAnalyze else { return }
+            session.start(fen: model.fen, depth: model.depth)
+        }
+        model.tab = tab
+    }
+
+    private func startAnalysis() {
         guard model.canAnalyze else {
             model.tab = .position
             return
         }
-        await session.run(fen: model.fen, depth: model.depth)
+        session.start(fen: model.fen, depth: model.depth)
     }
 
     /// Keeps finished analyses on the home screen. The untouched starting
     /// position isn't worth a row.
-    private static func save(
-        _ update: AnalysisUpdate, fen: String, depth: Int, to history: HistoryStore
-    ) {
-        guard let best = update.bestLine,
-              let placement = fen.split(separator: " ").first,
+    private static func save(_ best: AnalysisLine, depth: Int, fen: String, to history: HistoryStore) {
+        guard let placement = fen.split(separator: " ").first,
               placement != Position.standard.fen.split(separator: " ").first
         else { return }
-        history.record(
-            fen: fen,
-            score: best.score,
-            bestMove: LinePlayback.line(from: best, fen: fen).moves.first,
-            depth: min(update.depth, depth))
+        history.record(fen: fen, score: best.score, bestMove: best.moves.first, depth: depth)
     }
 
     private func showToast(_ message: String) {
         toastTask?.cancel()
         withAnimation(.easeOut(duration: 0.15)) { toast = message }
+        AccessibilityNotification.Announcement(message).post()
         toastTask = Task {
             try? await Task.sleep(for: .seconds(1.6))
             guard !Task.isCancelled else { return }

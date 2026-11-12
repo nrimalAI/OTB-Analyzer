@@ -34,14 +34,30 @@ enum LinePlayback {
     /// all three lines and the actions stay on screen under the board.
     static let maxPlies = 5
 
-    /// Lines that can't be replayed from `fen` are dropped as long as some
-    /// line can: the engine library delivers responses out of order, so a
-    /// few lines from the previous search (possibly of another position)
-    /// can arrive at the start of this one.
-    static func lines(from update: AnalysisUpdate, fen: String) -> [AnalysisLine] {
+    /// Lines that can't be replayed from `fen` are dropped: the engine
+    /// library delivers responses out of order, so a few lines from the
+    /// previous search (possibly of another position) can arrive at the
+    /// start of this one. `positionIsOver` says the position has no legal
+    /// move, so nothing the engine sends can be a line of it; otherwise, if
+    /// no line replays at all, the lines are kept for display rather than
+    /// showing an empty analysis.
+    static func lines(
+        from update: AnalysisUpdate, fen: String, positionIsOver: Bool
+    ) -> [AnalysisLine] {
         let all = update.lines.map { line(from: $0, fen: fen) }
         let replayable = all.filter { $0.playableCount > 0 }
-        return replayable.isEmpty ? all : replayable
+        if !replayable.isEmpty { return replayable }
+        return positionIsOver ? [] : all
+    }
+
+    /// Whether the side to move has no legal move (checkmate or stalemate).
+    /// False when the FEN can't be read.
+    static func positionIsOver(fen: String) -> Bool {
+        guard let position = Position(fen: fen) else { return false }
+        let board = Board(position: position)
+        return !position.pieces.contains {
+            $0.color == position.sideToMove && !board.legalMoves(forPieceAt: $0.square).isEmpty
+        }
     }
 
     static func line(from pv: PrincipalVariation, fen: String) -> AnalysisLine {
@@ -86,49 +102,86 @@ enum LinePlayback {
 @MainActor
 final class AnalysisSession: ObservableObject {
 
-    @Published private(set) var update: AnalysisUpdate?
     @Published private(set) var lines: [AnalysisLine] = []
     @Published private(set) var lineIndex = 0
     /// Moves played so far along the selected line.
     @Published private(set) var ply = 0
-    @Published private(set) var isRunning = false
-    /// Depth asked for in the current search.
-    private(set) var targetDepth = 0
-
     /// Depth reached so far. Capped at the depth asked for, because leftover
     /// output from a deeper previous search can inflate the engine's figure.
-    var reachedDepth: Int { min(update?.depth ?? 0, targetDepth) }
+    @Published private(set) var reachedDepth = 0
+    /// The engine has reported at least once for the current search.
+    @Published private(set) var hasResult = false
+    /// The current search ran to completion.
+    @Published private(set) var isFinished = false
 
-    /// Called once per completed search with the final result and its FEN.
-    var onFinished: ((AnalysisUpdate, String) -> Void)?
+    /// Called once per completed search that produced a line, with the best
+    /// line, the depth reached, and the FEN that was searched.
+    var onFinished: ((AnalysisLine, Int, String) -> Void)?
 
     private let engine = AnalysisEngine()
-    private var consumer: Task<Void, Never>?
-    /// Bumped on every run/stop; results from older searches are ignored.
+    /// Depth and FEN of the search whose results are (or will be) on show.
+    private var currentSearch: String?
+    private var isRunning = false
+    private var positionIsOver = false
+    /// Bumped on every start/stop; results from older searches are ignored.
     private var generation = 0
-    /// Depth and FEN of the last search that ran to completion.
-    private var finishedSearch: String?
+    /// Engine work is chained on this so starts and stops reach the engine
+    /// one at a time, in order.
+    private var pending: Task<Void, Never>?
+    /// Reads the current search's output.
+    private var consumer: Task<Void, Never>?
+    private var drainTimedOut = false
 
     // MARK: - Engine
 
-    func run(fen: String, depth: Int) async {
-        // Coming back to a position that was already searched to this depth
-        // (e.g. after a look at the Position tab): keep the result.
+    /// Starts searching `fen`. Clears the previous results at once, so the
+    /// caller never renders one position with another's analysis. Does
+    /// nothing if this exact search is already running or already finished
+    /// (e.g. coming back from a look at the Position tab).
+    func start(fen: String, depth: Int) {
         let key = "\(depth)|\(fen)"
-        if finishedSearch == key, update != nil { return }
-        finishedSearch = nil
+        if currentSearch == key, isRunning || isFinished { return }
+        currentSearch = key
 
         generation += 1
         let current = generation
-        targetDepth = depth
-        update = nil
+        positionIsOver = LinePlayback.positionIsOver(fen: fen)
         lines = []
         lineIndex = 0
         ply = 0
+        reachedDepth = 0
+        hasResult = false
+        isFinished = false
         isRunning = true
 
-        await engine.start(multiPV: 3)
+        enqueue { [weak self] in
+            await self?.begin(fen: fen, depth: depth, generation: current)
+        }
+    }
+
+    /// Stops the search. Finished results stay on show; an interrupted
+    /// search will start over next time.
+    func stop() {
+        generation += 1
+        isRunning = false
+        if !isFinished { currentSearch = nil }
+        enqueue { [engine] in
+            await engine.stopSearch()
+        }
+    }
+
+    private func enqueue(_ work: @escaping @MainActor () async -> Void) {
+        let previous = pending
+        pending = Task {
+            await previous?.value
+            await work()
+        }
+    }
+
+    private func begin(fen: String, depth: Int, generation current: Int) async {
+        guard current == generation else { return }
         await drainPreviousSearch()
+        await engine.start(multiPV: 3)
         guard current == generation else { return }
 
         consumer = Task { [weak self] in
@@ -137,16 +190,9 @@ final class AnalysisSession: ObservableObject {
             // Keep reading after being superseded so the old search's final
             // `bestmove` is consumed here rather than by the next search.
             for await value in stream where current == self.generation {
-                self.apply(value, fen: fen)
-                if value.isFinal { self.finishedSearch = key }
+                self.apply(value, fen: fen, depth: depth)
             }
         }
-    }
-
-    func stop() {
-        generation += 1
-        isRunning = false
-        Task { await engine.stopSearch() }
     }
 
     /// Stops any search still running and waits (bounded) for its stream to
@@ -157,14 +203,23 @@ final class AnalysisSession: ObservableObject {
         await engine.stopSearch()
         let timeout = Task {
             try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self.drainTimedOut = true
             previous.cancel()
         }
         await previous.value
         timeout.cancel()
+
+        // Cancelling the reader ends the engine's one response stream for
+        // good, so restart the engine to get a fresh one.
+        if drainTimedOut {
+            drainTimedOut = false
+            await engine.shutdown()
+        }
     }
 
-    private func apply(_ value: AnalysisUpdate, fen: String) {
-        let newLines = LinePlayback.lines(from: value, fen: fen)
+    private func apply(_ value: AnalysisUpdate, fen: String, depth: Int) {
+        let newLines = LinePlayback.lines(from: value, fen: fen, positionIsOver: positionIsOver)
 
         // Keep the reader's place only while the line they are stepping
         // through still starts with the moves already played.
@@ -176,11 +231,13 @@ final class AnalysisSession: ObservableObject {
             if played != Array(newLines[lineIndex].lan.prefix(ply)) { ply = 0 }
         }
 
-        update = value
         lines = newLines
+        reachedDepth = min(value.depth, depth)
+        hasResult = true
         if value.isFinal {
             isRunning = false
-            onFinished?(value, fen)
+            isFinished = true
+            if let best = newLines.first { onFinished?(best, reachedDepth, fen) }
         }
     }
 

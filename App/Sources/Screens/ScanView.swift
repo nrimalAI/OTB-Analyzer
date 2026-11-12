@@ -13,9 +13,17 @@ struct ScanView: View {
     @State private var pickedItem: PhotosPickerItem?
     /// The photo being read; nil while framing a shot.
     @State private var photo: UIImage?
+    /// A picked photo is still being fetched (it can be an iCloud original).
+    @State private var isLoadingPick = false
+    /// The load-and-read in flight, so leaving the screen can cancel it.
+    @State private var readTask: Task<Void, Never>?
+    @Environment(\.scenePhase) private var scenePhase
 
-    private let hasCamera = AVCaptureDevice.default(for: .video) != nil
+    private static let hasCamera = AVCaptureDevice.default(for: .video) != nil
+    private var hasCamera: Bool { Self.hasCamera }
     private var isReading: Bool { photo != nil }
+    /// Loading or reading a photo: no second shot or pick meanwhile.
+    private var isBusy: Bool { isReading || isLoadingPick }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,15 +38,29 @@ struct ScanView: View {
             photo = nil
             if hasCamera { camera.requestPermissionAndStart() }
         }
-        .onDisappear { camera.stop() }
+        .onDisappear {
+            readTask?.cancel()
+            camera.stop()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // iOS switches the torch off in the background.
+            if phase == .active { camera.refreshTorchState() }
+        }
         .onChange(of: pickedItem) { _, item in
             guard let item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let image = UIImage(data: data) {
-                    await read(image)
+            isLoadingPick = true
+            readTask = Task {
+                defer {
+                    isLoadingPick = false
+                    pickedItem = nil
                 }
-                pickedItem = nil
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let image = UIImage(data: data)
+                else {
+                    if !Task.isCancelled { model.recognitionFailed = true }
+                    return
+                }
+                await read(image)
             }
         }
         .alert("Couldn't read the board", isPresented: $model.recognitionFailed) {
@@ -72,6 +94,7 @@ struct ScanView: View {
     private var topBar: some View {
         HStack {
             Button {
+                readTask?.cancel()
                 model.path = []
             } label: {
                 Text("Cancel")
@@ -94,7 +117,7 @@ struct ScanView: View {
                     .frame(width: 76, height: 44, alignment: .leading)
             }
             .buttonStyle(TextButtonStyle())
-            .disabled(isReading)
+            .disabled(isBusy)
 
             Spacer()
             shutterButton
@@ -111,7 +134,7 @@ struct ScanView: View {
         Button {
             camera.capturePhoto { image in
                 guard let image else { return }
-                Task { await read(image) }
+                readTask = Task { await read(image) }
             }
         } label: {
             Circle()
@@ -121,13 +144,13 @@ struct ScanView: View {
                 .frame(width: 76, height: 76)
         }
         .buttonStyle(TextButtonStyle())
-        .disabled(camera.permission != .authorized || camera.isCapturing || isReading)
+        .disabled(camera.permission != .authorized || camera.isCapturing || isBusy)
         .accessibilityLabel("Take photo")
     }
 
     @ViewBuilder
     private var torchButton: some View {
-        if camera.hasTorch, !isReading {
+        if camera.hasTorch, !isBusy {
             Button {
                 camera.toggleTorch()
             } label: {
@@ -200,11 +223,12 @@ struct ScanView: View {
     }
 
     private var showsTip: Bool {
-        isReading || !hasCamera || camera.permission == .authorized
+        isBusy || !hasCamera || camera.permission == .authorized
     }
 
     private var tip: String {
         if isReading { return "Reading the board\u{2026}" }
+        if isLoadingPick { return "Loading the photo\u{2026}" }
         if !hasCamera { return "No camera here \u{2014} choose a photo" }
         return "Fill the frame with the board"
     }
@@ -459,6 +483,15 @@ final class CameraController: NSObject, ObservableObject {
             } catch {
                 // Torch unavailable; leave state unchanged.
             }
+        }
+    }
+
+    /// Brings `isTorchOn` back in line with the device, which switches the
+    /// torch off by itself when the app leaves the foreground.
+    func refreshTorchState() {
+        sessionQueue.async {
+            let isOn = self.videoDevice?.isTorchActive ?? false
+            DispatchQueue.main.async { self.isTorchOn = isOn }
         }
     }
 
