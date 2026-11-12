@@ -27,6 +27,7 @@ import numpy as np
 from chess_pipeline import (
     FEN_LETTER, PIECE_CLASSES, board_square, fen_placement_to_board, homography,
 )
+from prepare_data import image_size
 
 HERE = Path(__file__).resolve().parent
 CORNER_NAMES = ("a1", "a8", "h8", "h1")
@@ -145,9 +146,7 @@ def check(by_source, placements):
             placement = placements.get(stem)
             if not (placement and "pieces" in entry and "corners" in entry):
                 continue
-            from PIL import Image
-            with Image.open(entry["image"]) as im:
-                w, h = im.size
+            w, h = image_size(entry["image"])
             boxes = read_boxes(entry["pieces"], w, h)
             hits, n = hit_count(boxes, read_corners(entry["corners"], w, h), placement)
             both += 1

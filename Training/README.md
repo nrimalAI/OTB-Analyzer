@@ -140,6 +140,11 @@ python evaluate.py --corners-model ... --pieces-model ... \
                    --positions datasets/merged/positions.json --source fenit --split test
 ```
 
+Board B is only 100 photos: the exact-match rate comes with a 95% interval
+(about +-9 points mid-range), and it is also what setups are compared on, so
+treat a difference of a few boards as noise. `corner_error.py` reports how
+far off the predicted corners are and whether their order is right.
+
 Report both numbers for every new model. `--group A` / `--group B` picks one
 Fenit board whatever the split. To see which model is at fault, replace one
 with the labels: `--gt-corners` (no corner model needed) or `--gt-boxes` (no
@@ -191,6 +196,19 @@ python export_coreml.py --corners runs/pose/corners/weights/best.pt \
 Exports FP16 and INT8 variants; compare their evaluate.py numbers before
 choosing. Copy the winners to `Models/BoardCorners.mlpackage` and
 `Models/Pieces.mlpackage`.
+
+Export settings, fixed in the script because the Swift code depends on them:
+both `format="coreml", imgsz=640`; corners `nms=False` (one raw output
+`[1, 17, 8400]`: box 4, score 1, 4 keypoints x 3, in 640-px input pixels);
+pieces `nms=True, iou=0.7` (a Vision object-detection pipeline with labels
+like `white_pawn`). Checked 2026-11 with torch 2.8.0 / coremltools 9.0 by
+re-exporting `baseline/*.pt`: same inputs and outputs as the models in
+`Models/`, and 97.9% / 74.2% on ChessReD test for FP16 (INT8: 97.8% / 74.2%).
+
+The app scales the photo to 640x640 with Vision's `.scaleFill`, which
+stretches a 3:4 phone photo; `evaluate.py` letterboxes it instead. ChessReD
+photos are square, so the two agreed until now. With non-square training
+photos they no longer do: measure both before shipping a model.
 
 > **License note:** Ultralytics YOLO is AGPL-3. Fine for this GPL-3 app; a
 > proprietary fork would need a different detector (see docs/PLAN.md).

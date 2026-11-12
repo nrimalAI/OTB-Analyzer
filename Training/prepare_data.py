@@ -230,6 +230,18 @@ def main():
     print(f"wrote YOLO datasets under {out}/")
 
 
+def image_size(path):
+    """(width, height) as image loaders show the photo, i.e. after any EXIF
+    rotation -- the frame that both labels and detections are in. PIL's own
+    .size is the stored size, which is sideways for orientations 5-8."""
+    from PIL import Image
+    with Image.open(path) as im:
+        w, h = im.size
+        if im.getexif().get(274) in (5, 6, 7, 8):
+            w, h = h, w
+        return w, h
+
+
 def link(src, dst):
     if dst.exists():
         return

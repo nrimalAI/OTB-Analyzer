@@ -7,6 +7,14 @@
 Exports FP16 and INT8 variants of each; run evaluate.py against both (Ultralytics
 can load .mlpackage on macOS) and keep the smallest one whose accuracy holds.
 Final names the app expects: Models/BoardCorners.mlpackage, Models/Pieces.mlpackage.
+
+The two models are exported differently, because that is what the Swift code
+in Packages/ChessVision reads (CoreMLBoardRecognizer.swift):
+  corners  no NMS: one raw output of shape [1, 17, anchors] (box 4, score 1,
+           4 keypoints x 3), which the app scans for the best-scoring anchor
+  pieces   with NMS: a pipeline Vision turns into VNRecognizedObjectObservation,
+           class labels like "white_pawn", IoU 0.7 / confidence 0.25 defaults
+Both take a 640x640 RGB image named "image".
 """
 
 import argparse
@@ -15,13 +23,14 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
-VARIANTS = {"fp16": dict(half=True), "int8": dict(int8=True)}
+VARIANTS = {"fp16": dict(quantize=16), "int8": dict(quantize=8)}
+MODEL_ARGS = {"BoardCorners": dict(nms=False), "Pieces": dict(nms=True, iou=0.7)}
 
 
 def export(weights, out_dir, base_name):
     for suffix, quant in VARIANTS.items():
         model = YOLO(weights)
-        path = model.export(format="coreml", imgsz=640, nms=True, **quant)
+        path = model.export(format="coreml", imgsz=640, **MODEL_ARGS[base_name], **quant)
         dest = out_dir / f"{base_name}-{suffix}.mlpackage"
         if dest.exists():
             shutil.rmtree(dest)

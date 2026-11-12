@@ -33,7 +33,7 @@ from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, fen_placement_to_board, homography,
 )
-from prepare_data import image_index, normalize_category, official_splits
+from prepare_data import image_index, image_size, normalize_category, official_splits
 
 
 def ground_truth_board(piece_anns, categories):
@@ -132,14 +132,14 @@ def merged_labels(row, src):
     """(corners, boxes) in pixels of `src` from the merged dataset's label
     files for a positions.json row; either is None when it has no label."""
     merged = Path(row["image"])
+    if len(merged.parents) < 4:
+        return None, None
     root, split = merged.parents[3], merged.parent.name
     corner_file = root / "corners" / "labels" / split / f"{merged.stem}.txt"
     box_file = root / "pieces" / "labels" / split / f"{merged.stem}.txt"
     if not (corner_file.exists() or box_file.exists()):
         return None, None
-    from PIL import Image
-    with Image.open(src) as im:
-        w, h = im.size
+    w, h = image_size(src)  # after EXIF rotation, like the detections
     corners = boxes = None
     if corner_file.exists():
         v = [float(x) for x in corner_file.read_text().split()[5:17]]
@@ -168,6 +168,18 @@ def position_items(args):
         corners, boxes = (merged_labels(row, src) if args.gt_corners or args.gt_boxes
                           else (None, None))
         yield src, fen_placement_to_board(row["placement"]), corners, boxes
+
+
+def wilson(hits, n, z=1.96):
+    """95% interval for a rate measured on n boards. On 100 boards it is
+    about +-9 points wide in the middle: differences of a few boards between
+    two models are noise."""
+    if n == 0:
+        return 0.0, 0.0
+    p = hits / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return max(centre - half, 0.0), min(centre + half, 1.0)
 
 
 def main():
@@ -288,7 +300,9 @@ def main():
         print(f"left out, no such label: {unlabelled}")
     print(f"corner detection failed: {corner_failures}")
     print(f"per-square accuracy:     {correct_squares / total_squares:.4%}")
-    print(f"full-board exact match:  {exact / boards:.2%}")
+    low, high = wilson(exact, boards)
+    print(f"full-board exact match:  {exact / boards:.2%}"
+          f"  (95% interval {low:.0%}-{high:.0%} on {boards} boards)")
     print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):

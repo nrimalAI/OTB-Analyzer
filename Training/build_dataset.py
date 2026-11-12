@@ -51,7 +51,8 @@ from chess_pipeline import (
     fen_placement_to_board, homography,
 )
 from prepare_data import (
-    extract_corners, image_index, link, normalize_category, official_splits,
+    extract_corners, image_index, image_size, link, normalize_category,
+    official_splits,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -173,12 +174,6 @@ def occupied_share(ordered, pieces, placement):
     board = fen_placement_to_board(placement)
     H = homography(ordered)
     return sum(board_square(H, _anchor(box)) in board for _, box in pieces) / len(pieces)
-
-
-def image_size(path):
-    from PIL import Image
-    with Image.open(path) as im:
-        return im.size
 
 
 def dhash(path):
@@ -478,8 +473,14 @@ def same_labels(a, b, tolerance=0.02):
     alike (it dropped 100 of 289 different photos in one Roboflow project)."""
     if len(a) != len(b):
         return False
-    return all(x[0] == y[0] and abs(x[1] - y[1]) < tolerance and abs(x[2] - y[2]) < tolerance
-               for x, y in zip(sorted(a), sorted(b)))
+    left = list(b)
+    for box in a:  # each box takes the nearest unclaimed box of its class
+        near = [o for o in left if o[0] == box[0]
+                and abs(o[1] - box[1]) < tolerance and abs(o[2] - box[2]) < tolerance]
+        if not near:
+            return False
+        left.remove(min(near, key=lambda o: abs(o[1] - box[1]) + abs(o[2] - box[2])))
+    return True
 
 
 def read_license(project):
@@ -543,7 +544,7 @@ def training_image(src, stem, max_side, cache):
     if max(w, h) <= max_side:
         return src
     small = cache / f"{stem}.jpg"
-    if not small.exists():
+    if not small.exists() or small.stat().st_mtime < src.stat().st_mtime:
         import cv2
         # JPEG can decode straight to 1/2 or 1/4 size, which is much faster.
         reduce = next((r for r in (4, 2) if max(w, h) / r >= max_side), 1)
@@ -565,9 +566,12 @@ def training_image(src, stem, max_side, cache):
 def write_sample(sample, out, counts, positions, max_side=0, cache=None):
     stem = f"{sample.source}__{sample.stem}"
     image = training_image(sample.image, stem, max_side, cache)
-    if sample.placement and (sample.boxes or sample.corners):
-        task = "pieces" if sample.boxes else "corners"
-        row = {"image": str(out / task / "images" / sample.split / f"{stem}{image.suffix}"),
+    if sample.placement:
+        # A photo whose labels were both unusable is still a photo to score
+        # (often a hard one); it is listed by its own path.
+        task = "pieces" if sample.boxes else "corners" if sample.corners else None
+        merged = out / task / "images" / sample.split / f"{stem}{image.suffix}" if task else sample.image
+        row = {"image": str(merged),
                # evaluate.py scores the photo as taken, not the training copy
                "original": str(sample.image),
                "source": sample.source, "split": sample.split,
@@ -595,12 +599,33 @@ def write_sample(sample, out, counts, positions, max_side=0, cache=None):
         counts[(sample.source, "corners", sample.split)] += 1
 
 
+def readers(out):
+    """Running processes whose command line names something inside `out`,
+    such as a training run started with --data <out>/corners/data.yaml."""
+    inside = {f"{out}/"}
+    try:
+        inside.add(f"{out.relative_to(HERE)}/")
+    except ValueError:
+        pass
+    listing = subprocess.run(["ps", "-axo", "pid=,command="],
+                             capture_output=True, text=True).stdout
+    return [line.strip() for line in listing.splitlines()
+            if any(path in line for path in inside)
+            and line.split(None, 1)[0] != str(os.getpid())]
+
+
 def merge(args, sources):
     out = (HERE / args.out).resolve()
     if out.exists() and any(out.iterdir()):
         if not (out / "manifest.json").exists():
             sys.exit(f"{out} exists and was not written by this script; "
                      "pick another --out or remove it yourself.")
+        busy = readers(out)
+        if busy and not args.force:
+            # merge deletes and rebuilds the folder: files would vanish under the job.
+            sys.exit(f"{out} is in use by a running job:\n  " + "\n  ".join(
+                line[:150] for line in busy)
+                + "\nUse another --out, wait for it, or pass --force.")
         shutil.rmtree(out)
     for task in ("pieces", "corners"):
         for kind in ("images", "labels"):
@@ -871,6 +896,8 @@ def main():
     m.add_argument("--sources", nargs="*")
     m.add_argument("--shippable", action="store_true",
                    help="only data a commercially distributed model may be trained on")
+    m.add_argument("--force", action="store_true",
+                   help="rebuild --out even though a running job is reading it")
     m.add_argument("--max-side", type=int, default=0, metavar="PX",
                    help="write JPEG copies no longer than PX on the long side instead "
                         "of links to the full-size photos (e.g. 1280); faster training")
