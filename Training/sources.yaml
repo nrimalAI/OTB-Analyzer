@@ -70,6 +70,9 @@ sources:
     # project's "YOLOv8" export by hand and unzip it to datasets/roboflow/<name>/.
     # Leave `version` out to take the newest. Add more projects freely — forks
     # of the same photos are de-duplicated at merge time.
+    # Only projects with a published version can be exported. Checked 2026-11:
+    # the first has one; the second has 606 images but no version; the last
+    # three are empty projects.
     projects:
       - id: roboflow-100/chess-pieces-mjzgj
       - id: mahdi-ruposh/chesspiece-object-detection

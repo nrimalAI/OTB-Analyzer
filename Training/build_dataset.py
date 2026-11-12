@@ -366,7 +366,9 @@ def load_fenit(name, cfg, root, skipped):
 
 def load_roboflow(name, cfg, root, skipped, seen):
     """root holds one YOLO export per sub-folder. `seen` carries de-dup state
-    across projects, since Universe is full of forks of the same photos."""
+    across projects, since Universe is full of forks of the same photos: a
+    photo is a repeat if it has the same original file name, or the same image
+    hash and the same labels."""
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         data_yaml = next(iter(sorted(project.rglob("data.yaml"))), None)
         if data_yaml is None:
@@ -425,18 +427,30 @@ def load_roboflow(name, cfg, root, skipped, seen):
             # copies and forks share <original>.
             original = re.sub(r"\.rf\.[0-9a-zA-Z]+$", "", label.stem)
             original = re.sub(r"_(jpe?g|png)$", "", original, flags=re.I)
-            fingerprint = dhash(img)
-            if fingerprint is None:
+            name_key, image_hash = (original, len(boxes)), dhash(img)
+            if image_hash is None:
                 skipped["image cannot be read"] += 1
                 continue
-            keys = {("name", original, len(boxes)), ("hash", fingerprint)}
-            if keys & seen:
+            if name_key in seen["names"] or any(
+                    same_labels(boxes, other) for other in seen["hashes"][image_hash]):
                 skipped["duplicate of another image"] += 1
                 continue
-            seen |= keys
+            seen["names"].add(name_key)
+            seen["hashes"][image_hash].append(boxes)
             bucket = int(hashlib.md5(original.encode()).hexdigest(), 16) % 10
             yield Sample(name, f"{project.name}_{label.stem}", img,
                          "val" if bucket == 0 else "train", boxes, None)
+
+
+def same_labels(a, b, tolerance=0.02):
+    """Two box lists that describe the same photo: same classes at the same
+    places. The image hash alone is not enough to call two images duplicates:
+    photos taken from a tripod differ only in a few small pieces and hash
+    alike (it dropped 100 of 289 different photos in one Roboflow project)."""
+    if len(a) != len(b):
+        return False
+    return all(x[0] == y[0] and abs(x[1] - y[1]) < tolerance and abs(x[2] - y[2]) < tolerance
+               for x, y in zip(sorted(a), sorted(b)))
 
 
 def read_license(project):
@@ -528,7 +542,8 @@ def merge(args, sources):
             for split in SPLITS:
                 (out / task / kind / split).mkdir(parents=True, exist_ok=True)
 
-    counts, manifest, seen, positions = Counter(), {}, set(), []
+    counts, manifest, positions = Counter(), {}, []
+    seen = {"names": set(), "hashes": defaultdict(list)}  # roboflow de-dup state
     for name, cfg in sources.items():
         if args.sources and name not in args.sources:
             continue
@@ -721,6 +736,12 @@ def fetch_roboflow(cfg, root):
             version = project.get("version")
             if not version:
                 info = roboflow_api(f"{workspace}/{slug}", key)
+                if not info.get("versions"):
+                    # Only a published version can be exported.
+                    print(f"roboflow: {project['id']} has no published version "
+                          f"({info.get('project', {}).get('images', 0)} images in the "
+                          "project); nothing to download. Skipped.")
+                    continue
                 version = max(int(str(v["id"]).rsplit("/", 1)[-1]) for v in info["versions"])
             export = roboflow_api(f"{workspace}/{slug}/{version}/yolov8", key)
             dest.mkdir(parents=True, exist_ok=True)

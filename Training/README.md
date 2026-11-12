@@ -53,8 +53,7 @@ python preview_labels.py                  # draw the merged labels on a few phot
 ```
 
 `fetch` was run end to end against the real servers in 2026-11 (ChessReD2K,
-chesscog including the split `train` archive, Fenit); Roboflow is still
-untested. The 4TU and OSF servers are slow (2-3 MB/s per file): fetching
+chesscog including the split `train` archive, Fenit, Roboflow). The 4TU and OSF servers are slow (2-3 MB/s per file): fetching
 sources in separate shells (`fetch chessred2k`, `fetch chesscog`, `fetch
 fenit`) takes about 40 minutes instead of two hours.
 
@@ -63,7 +62,7 @@ fenit`) takes about 40 minutes instead of two hours.
 | `chessred2k` | 2,078 real | boxes + corners | CC BY-NC-SA 4.0 — not shippable |
 | `chesscog` | 4,888 rendered | boxes + corners | CC BY 4.0 |
 | `fenit` | 490 real (two boards) | boxes + corners | CC BY 4.0 |
-| `roboflow` | a few hundred per project, real | boxes only | per project, mostly CC BY 4.0 |
+| `roboflow` | 276 real (one board, so far) | boxes only | per project, mostly CC BY 4.0 |
 | `chessred_pseudo` | up to ~5,000 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
 | `own` | your photos | whatever you label | yours |
 
@@ -71,8 +70,13 @@ fenit`) takes about 40 minutes instead of two hours.
   `fetch`. Or download a project's "YOLOv8" export by hand and unzip it into
   `datasets/roboflow/<name>/`. Add projects to `sources.yaml` freely: Universe
   is full of forks, and the merge drops repeated photos (same original file
-  name, or same image hash). An image with a label that is not a colored piece
-  (e.g. a bare `bishop`) is dropped whole rather than left half-labelled.
+  name, or same image hash and same labels). An image with a label that is
+  not a colored piece (e.g. a bare `bishop`) is dropped whole rather than left
+  half-labelled. Only a project with a published version can be downloaded.
+  State in 2026-11: of the five projects listed, only
+  `roboflow-100/chess-pieces-mjzgj` has one (289 photos of one green vinyl
+  board, 276 kept); `mahdi-ruposh/chesspiece-object-detection` has 606 images
+  but no version, and the other three projects are empty.
 - **chesscog** gives four unordered corner points; which one is a1 is recovered
   from the labelled piece squares. Checked against ChessReD2K, where the answer
   is known: 2,078 of 2,078 correct. On the real download all 4,888 images get
