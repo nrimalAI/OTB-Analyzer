@@ -77,7 +77,8 @@ sources:
       - id: jjgg/chess_detection-cief9
       - id: cutegander/chess-pieces-b8cbo
 
-  # The other ~8,700 ChessReD photos: positions are labelled, boxes are not.
+  # The rest of ChessReD: positions are labelled, boxes are not. About 5,000
+  # of them (the train split) can be used.
   # pseudo_label.py turns them into chessred_pseudo below.
   chessred_full:
     kind: raw

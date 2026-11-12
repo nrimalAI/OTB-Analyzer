@@ -1,4 +1,4 @@
-"""Turn the ~8,700 ChessReD photos that have no bounding boxes into piece
+"""Turn ChessReD photos that have no bounding boxes (about 5,000 usable) into piece
 training data, using the current models and the known positions as a check.
 
 ChessReD labels every photo with the position (which piece is on which
@@ -11,7 +11,8 @@ square) but only the 2K subset with boxes. For each remaining photo:
      piece becomes a corrected label, which is the useful part)
 
 Only photos from ChessReD's train split are used, and never ones in the 2K
-subset, so val/test stay clean.
+subset, so val/test stay clean: 5,037 candidates, none from a game that the
+2K val or test split uses. Expect roughly two thirds to be accepted.
 
 Corner labels are NOT written by default: they would be the corner model's
 own predictions, and corner precision is exactly what needs to improve, so

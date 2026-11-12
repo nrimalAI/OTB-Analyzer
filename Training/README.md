@@ -57,7 +57,7 @@ python build_dataset.py merge --shippable # only data an App Store model may be 
 | `chesscog` | 4,888 rendered | boxes + corners | CC BY 4.0 |
 | `fenit` | 492 real | boxes + corners | CC BY 4.0 |
 | `roboflow` | a few hundred per project, real | boxes only | per project, mostly CC BY 4.0 |
-| `chessred_pseudo` | up to ~8,700 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
+| `chessred_pseudo` | up to ~5,000 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
 | `own` | your photos | whatever you label | yours |
 
 - **Roboflow** needs a free API key: `export ROBOFLOW_API_KEY=...` before

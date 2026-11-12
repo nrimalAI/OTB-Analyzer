@@ -353,6 +353,7 @@ def load_roboflow(name, cfg, root, skipped, seen):
         if isinstance(names, list):
             names = dict(enumerate(names))
         class_map = {i: canonical_class(n) for i, n in names.items()}
+        is_pose = bool(meta.get("kpt_shape"))
         ignorable = {i for i, n in names.items()
                      if normalize_category(str(n)).lower() in NON_PIECE}
         license_ = (meta.get("roboflow") or {}).get("license") or read_license(project)
@@ -381,7 +382,9 @@ def load_roboflow(name, cfg, root, skipped, seen):
                 if class_map.get(cls) is None:
                     unknown = True
                     break
-                if len(vals) > 4:  # segmentation polygon -> its bounding box
+                if is_pose:  # box followed by keypoints
+                    vals = vals[:4]
+                elif len(vals) > 4:  # segmentation polygon -> its bounding box
                     xs, ys = vals[0::2], vals[1::2]
                     vals = [(min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2,
                             max(xs) - min(xs), max(ys) - min(ys)]
@@ -399,7 +402,11 @@ def load_roboflow(name, cfg, root, skipped, seen):
             # copies and forks share <original>.
             original = re.sub(r"\.rf\.[0-9a-zA-Z]+$", "", label.stem)
             original = re.sub(r"_(jpe?g|png)$", "", original, flags=re.I)
-            keys = {("name", original, len(boxes)), ("hash", dhash(img))}
+            fingerprint = dhash(img)
+            if fingerprint is None:
+                skipped["image cannot be read"] += 1
+                continue
+            keys = {("name", original, len(boxes)), ("hash", fingerprint)}
             if keys & seen:
                 skipped["duplicate of another image"] += 1
                 continue
@@ -446,8 +453,8 @@ def is_shippable(license_):
     text = (license_ or "").lower()
     if "nc" in re.split(r"[^a-z]+", text) or "noncommercial" in text.replace("-", ""):
         return False
-    return text == "own" or any(
-        k in text for k in ("cc by 4", "cc0", "public domain", "mit", "apache"))
+    return text == "own" or bool(
+        re.search(r"\b(cc by 4|cc0|public domain|mit|apache)\b", text))
 
 
 def source_shippable(cfg):
@@ -516,8 +523,13 @@ def merge(args, sources):
                   "fenit": load_fenit, "native": load_native}.get(kind)
         samples = (load_roboflow(name, cfg, root, skipped, seen) if kind == "roboflow"
                    else loader(name, cfg, root, skipped))
-        n = 0
+        n, stems = 0, set()
         for sample in samples:
+            if sample.stem in stems:
+                # Writing it would pair the first photo with these labels.
+                skipped["file name collides with another image"] += 1
+                continue
+            stems.add(sample.stem)
             write_sample(sample, out, counts, positions)
             n += 1
         print(f"- {name}: {n} images" + "".join(
@@ -562,14 +574,21 @@ def download(url, dest, size=None):
     have = dest.stat().st_size if dest.exists() else 0
     if dest.exists() and (size is None or have == size):
         return
-    # Room for the rest of the download plus the unpacked copy.
-    need = ((size or 0) - have) + (size or 0)
+    need = max((size or 0) - have, 0)
     free = shutil.disk_usage(dest.parent).free
     if need > free:
         sys.exit(f"Not enough disk for {dest.name}: need about {human(need)}, "
                  f"{human(free)} free.")
     print(f"downloading {dest.name}" + (f" ({human(size)})" if size else ""))
-    subprocess.run(["curl", "-L", "--fail", "-C", "-", "-o", str(dest), url], check=True)
+    command = ["curl", "-L", "--fail", "-C", "-", "-o", str(dest), url]
+    if subprocess.run(command).returncode:
+        # A resume the server refuses (e.g. the local file is already longer
+        # than the remote one) can never succeed: start this file over once.
+        dest.unlink(missing_ok=True)
+        subprocess.run(command, check=True)
+    if size and dest.stat().st_size != size:
+        print(f"note: {dest.name} is {dest.stat().st_size} bytes, sources.yaml says "
+              f"{size}; update sources.yaml if the publisher changed the file.")
 
 
 def fetch_files(cfg, root):
@@ -577,8 +596,25 @@ def fetch_files(cfg, root):
     for item in cfg.get("downloads", []):
         dest = root / item["file"]
         marker = root / f".{item['file']}.extracted"
-        if marker.exists() or (item.get("provides") and (root / item["provides"]).exists()):
+        files = [item] + item.get("parts", [])
+        on_disk = [f for f in files if (root / f["file"]).exists()]
+        if marker.exists():
             continue
+        # A folder unpacked by hand, with no archive left beside it, counts as
+        # done. With an archive present the unpack may have been interrupted,
+        # so it is done again.
+        if item.get("provides") and (root / item["provides"]).exists() and not on_disk:
+            continue
+        # Peak disk use: what is left to download, a joined copy of a split
+        # archive, and the unpacked files (about the archive's size again).
+        total = sum(f.get("size", 0) for f in files)
+        left = sum(max(f.get("size", 0) - (root / f["file"]).stat().st_size, 0)
+                   if (root / f["file"]).exists() else f.get("size", 0) for f in files)
+        need = left + (total * (2 if item.get("parts") else 1) if dest.suffix == ".zip" else 0)
+        free = shutil.disk_usage(root).free
+        if need > free:
+            sys.exit(f"Not enough disk for {item['file']}: need about {human(need)} "
+                     f"at peak, {human(free)} free.")
         for part in item.get("parts", []):
             download(part["url"], root / part["file"], part.get("size"))
         download(item["url"], dest, item.get("size"))
@@ -589,7 +625,8 @@ def fetch_files(cfg, root):
             archive = root / f"joined-{item['file']}"
             subprocess.run(["zip", "-q", "-s", "0", str(dest), "--out", str(archive)],
                            check=True)
-        subprocess.run(["unzip", "-q", "-n", str(archive), "-d", str(root)], check=True)
+        # -o: a file cut short by an interrupted unpack is written again.
+        subprocess.run(["unzip", "-q", "-o", str(archive), "-d", str(root)], check=True)
         marker.touch()
         if archive != dest:
             archive.unlink()
@@ -664,8 +701,9 @@ def fetch_roboflow(cfg, root):
             export = roboflow_api(f"{workspace}/{slug}/{version}/yolov8", key)
             dest.mkdir(parents=True, exist_ok=True)
             archive = dest / "export.zip"
+            archive.unlink(missing_ok=True)  # size unknown: a leftover may be partial
             download(export["export"]["link"], archive)
-            subprocess.run(["unzip", "-q", "-n", str(archive), "-d", str(dest)], check=True)
+            subprocess.run(["unzip", "-q", "-o", str(archive), "-d", str(dest)], check=True)
             archive.unlink()
             print(f"roboflow: fetched {project['id']} v{version}")
         except Exception as e:  # one bad project should not stop the rest
@@ -684,8 +722,9 @@ def fetch(args, sources):
         elif args.dry_run:
             pending = [i["file"] for i in cfg.get("downloads", [])
                        if not (root / f".{i['file']}.extracted").exists()
-                       and not (i.get("provides") and (root / i["provides"]).exists())
-                       and not ((root / i["file"]).exists()
+                       and not (i.get("provides") and (root / i["provides"]).exists()
+                                and not (root / i["file"]).exists())
+                       and not (not i["file"].endswith(".zip") and (root / i["file"]).exists()
                                 and (root / i["file"]).stat().st_size == i.get("size"))]
             pending = pending or [p["id"] for p in cfg.get("projects", [])]
             if pending:
