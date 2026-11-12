@@ -15,8 +15,10 @@ import Vision
 ///   `VNRecognizedObjectObservation`s with normalized bounding boxes
 ///   (lower-left origin) and class labels like `"white_pawn"`.
 ///
-/// Both requests use `.scaleFill`, so model coordinates map back to the
-/// original image by plain axis scaling.
+/// Both models see the photo letterboxed into a square (`Letterbox`), as in
+/// training, never stretched. The square is passed to Vision with
+/// `.scaleFill`, which for a square only resizes; `Letterbox` maps the
+/// models' answers back to pixels of the original photo.
 public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     private let cornerModel: VNCoreMLModel
@@ -72,15 +74,18 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     // MARK: - BoardRecognizer
 
     public func recognize(_ image: CGImage) async throws -> RecognitionResult {
-        let width = CGFloat(image.width)
-        let height = CGFloat(image.height)
+        let letterbox = Letterbox(
+            imageSize: CGSize(width: image.width, height: image.height))
+        guard let square = letterbox.render(image) else {
+            throw RecognitionError.boardNotFound
+        }
 
-        let corners = try detectCorners(in: image, imageSize: CGSize(width: width, height: height))
+        let corners = try detectCorners(in: square, letterbox: letterbox)
         guard let homography = Homography(corners: corners) else {
             throw RecognitionError.boardNotFound
         }
 
-        let detections = try detectPieces(in: image, imageSize: CGSize(width: width, height: height))
+        let detections = try detectPieces(in: square, letterbox: letterbox)
         let board = SquareAssignment.assign(
             detections: detections, homography: homography, pull: pull)
 
@@ -93,10 +98,12 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     // MARK: - Corner model
 
-    private func detectCorners(in image: CGImage, imageSize: CGSize) throws -> [CGPoint] {
+    /// `square` is the letterboxed photo; corners come back in pixels of the
+    /// original photo.
+    private func detectCorners(in square: CGImage, letterbox: Letterbox) throws -> [CGPoint] {
         let request = VNCoreMLRequest(model: cornerModel)
-        request.imageCropAndScaleOption = .scaleFill
-        try VNImageRequestHandler(cgImage: image).perform([request])
+        request.imageCropAndScaleOption = .scaleFill  // square in, square out: resize only
+        try VNImageRequestHandler(cgImage: square).perform([request])
 
         guard
             let observation = request.results?
@@ -107,16 +114,17 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
         return try Self.parseCorners(
             from: array,
-            imageSize: imageSize,
+            letterbox: letterbox,
             scoreThreshold: cornerScoreThreshold,
             inputSide: cornerInputSide
         )
     }
 
-    /// Parses the raw `[1, 17, anchors]` pose tensor. Internal for testing.
+    /// Parses the raw `[1, 17, anchors]` pose tensor, whose keypoints are in
+    /// pixels of the square model input. Internal for testing.
     static func parseCorners(
         from array: MLMultiArray,
-        imageSize: CGSize,
+        letterbox: Letterbox,
         scoreThreshold: Float,
         inputSide: Double = 640
     ) throws -> [CGPoint] {
@@ -142,13 +150,11 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             }
             guard bestAnchor >= 0, bestScore >= scoreThreshold else { return nil }
 
-            let sx = Double(imageSize.width) / inputSide
-            let sy = Double(imageSize.height) / inputSide
             return (0..<4).map { k in
-                CGPoint(
-                    x: Double(values[(5 + k * 3) * anchors + bestAnchor]) * sx,
-                    y: Double(values[(6 + k * 3) * anchors + bestAnchor]) * sy
-                )
+                letterbox.imagePoint(fromSquare: CGPoint(
+                    x: Double(values[(5 + k * 3) * anchors + bestAnchor]) / inputSide,
+                    y: Double(values[(6 + k * 3) * anchors + bestAnchor]) / inputSide
+                ))
             }
         }
         guard let corners else { throw RecognitionError.boardNotFound }
@@ -157,10 +163,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     // MARK: - Piece model
 
-    private func detectPieces(in image: CGImage, imageSize: CGSize) throws -> [PieceDetection] {
+    private func detectPieces(in square: CGImage, letterbox: Letterbox) throws -> [PieceDetection] {
         let request = VNCoreMLRequest(model: pieceModel)
-        request.imageCropAndScaleOption = .scaleFill
-        try VNImageRequestHandler(cgImage: image).perform([request])
+        request.imageCropAndScaleOption = .scaleFill  // square in, square out: resize only
+        try VNImageRequestHandler(cgImage: square).perform([request])
 
         let observations = request.results?
             .compactMap { $0 as? VNRecognizedObjectObservation } ?? []
@@ -170,14 +176,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
                 let label = obs.labels.first,
                 let (kind, color) = Self.pieceClass(fromLabel: label.identifier)
             else { return nil }
-            // Vision boxes are normalized with a lower-left origin.
+            // Vision boxes are fractions of the square with a lower-left origin.
             let bb = obs.boundingBox
-            let rect = CGRect(
-                x: bb.minX * imageSize.width,
-                y: (1 - bb.maxY) * imageSize.height,
-                width: bb.width * imageSize.width,
-                height: bb.height * imageSize.height
-            )
+            let rect = letterbox.imageRect(fromSquare: CGRect(
+                x: bb.minX, y: 1 - bb.maxY, width: bb.width, height: bb.height))
             return PieceDetection(
                 piece: kind, color: color,
                 confidence: label.confidence,
