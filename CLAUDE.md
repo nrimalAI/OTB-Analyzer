@@ -66,6 +66,7 @@ The owner is abroad from 2026-11-13 with only the MacBook. They want the Mac min
 - The model interfaces are unchanged (corners: raw `[1,17,8400]`, no NMS; pieces: NMS pipeline with the same class labels), scored through the exported `.mlpackage`, letterboxed.
 - `origin/main` is merged into the branch first (it has the letterbox fix in `Packages/ChessVision`), and `swift test` in `Packages/ChessVision` passes with the new models in place.
 - The weights of every model that reaches `main` are kept under `Training/baseline/` with a line in its README, so any step can be undone. Merge commits only: never force-push, never rewrite `main`.
+- **Every pull request is reviewed with Fable before it is merged, and the review's changes are applied** (owner, 2026-11-12: "always review a PR and apply changes with fable before merging"). Open the pull request, have a Fable reviewer (`claude-fable-5-2`; `/code-review` on the pull request, or a reviewer subagent on that model) read the whole diff, check each finding against the code, apply the ones that hold up, re-run the tests and re-score if the change could affect a score, push, and only then merge. Say in the pull request what the review found and what was done about each finding. This applies to every pull request, not only ones that replace models.
 
 **Limits that still apply:**
 
