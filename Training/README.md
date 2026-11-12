@@ -69,21 +69,40 @@ scores the original photos.
 | `chessred2k` | 2,078 real | boxes + corners | CC BY-NC-SA 4.0 — not shippable |
 | `chesscog` | 4,888 rendered (1,500 of the 4,400 train renders used) | boxes + corners | CC BY 4.0 |
 | `fenit` | 490 real (two boards) | boxes + corners | CC BY 4.0 |
-| `roboflow` | 276 real (one board, so far) | boxes only | per project, mostly CC BY 4.0 |
+| `roboflow` | 4,696 from 8 projects | boxes only | per project, mostly CC BY 4.0 |
 | `chessred_pseudo` | up to ~5,000 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
 | `own` | your photos | whatever you label | yours |
 
 - **Roboflow** needs a free API key: `export ROBOFLOW_API_KEY=...` before
   `fetch`. Or download a project's "YOLOv8" export by hand and unzip it into
-  `datasets/roboflow/<name>/`. Add projects to `sources.yaml` freely: Universe
-  is full of forks, and the merge drops repeated photos (same original file
-  name, or same image hash and same labels). An image with a label that is
-  not a colored piece (e.g. a bare `bishop`) is dropped whole rather than left
-  half-labelled. Only a project with a published version can be downloaded.
-  State in 2026-11: of the five projects listed, only
-  `roboflow-100/chess-pieces-mjzgj` has one (289 photos of one green vinyl
-  board, 276 kept); `mahdi-ruposh/chesspiece-object-detection` has 606 images
-  but no version, and the other three projects are empty.
+  `datasets/roboflow/<name>/`. Only a project with a published version can be
+  downloaded. Each project in `sources.yaml` is a different board or set of
+  boards, which is what the piece model lacks; they give boxes only, so they
+  do nothing for the corner model. Per project: `version` (pin one without
+  flipped or rotated copies), `max_images` (a fixed random sample; default
+  `max_per_project`), `only_splits`, `license`.
+
+  The eight in use (2026-11; overlays of six photos from each looked at):
+
+  | Project | Used | What it is |
+  |---|---|---|
+  | `roboflow-100/chess-pieces-mjzgj` | 275 | green vinyl board, tripod |
+  | `multichess/chess-vision-ljby5` v1 | 1,500 of 40,261 | tournament video frames, 8+ boards, faces blacked out |
+  | `chess-xezgz/chess-hndwj` v2 | 800 | dark-green/white vinyl on a wooden table |
+  | `mars-lab-2/getchess` v1 | 600 of 7,231 | several wooden boards; about half are top-down boards pasted on backgrounds |
+  | `m-s-teslaenthusiast/anotador-xadrez` | 503 | brown/beige board with an ornate border |
+  | `tawan-afcpc/chess-f0mbu` | 500 | a rendered mahogany board, not photos |
+  | `politechnika-warszawska/chess-bprbi` v4 | 261 | natural-wood folding board; valid+test only |
+  | `captainred-aslrv/chess-vision-jmf56` v14 | 257 | product and web photos, nearly all different sets; license doubtful, marked not shippable |
+
+  Photos are 640 px (stretched to a square by Roboflow) except hndwj (1280)
+  and multichess (960x1080). The merge drops repeats: the same original file
+  name with the same pieces (augmented copies, forks), or the same image hash
+  with the same labels. An image with a label that is not a colored piece
+  (e.g. a bare `bishop`) is dropped whole rather than left half-labelled.
+  Dropped after a look: `logan-44qjh/chess-pieces-8slll` (pieces without
+  boxes), `senku/chess-piece-vrw2r` (only flipped and rotated copies), and
+  four of the original five (no published version, or empty).
 - **chesscog** gives four unordered corner points; which one is a1 is recovered
   from the labelled piece squares. Checked against ChessReD2K, where the answer
   is known: 2,078 of 2,078 correct. On the real download all 4,888 images get

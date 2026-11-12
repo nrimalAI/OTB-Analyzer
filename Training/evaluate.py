@@ -68,7 +68,7 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
         best = int(r.boxes.conf.argmax()) if r.boxes is not None and len(r.boxes) else 0
         return r.keypoints.xy[best].tolist()
 
-    first = run(str(src))
+    first = run(src if not isinstance(src, Path) else str(src))
     if first is None or not two_pass:
         return first
 
@@ -88,6 +88,16 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
     if second is None:
         return first
     return [[p[0] + x1, p[1] + y1] for p in second]
+
+
+def stretched(src, side=640):
+    """The photo as the app hands it to the models: scaled to side x side
+    without keeping its shape (Vision's .scaleFill). Returns the image and the
+    factors that take model coordinates back to photo pixels."""
+    import cv2
+    img = cv2.imread(str(src))
+    h, w = img.shape[:2]
+    return cv2.resize(img, (side, side), interpolation=cv2.INTER_AREA), w / side, h / side
 
 
 def chessred_items(args):
@@ -205,8 +215,13 @@ def main():
                     help="use the labelled corners instead of the corner model")
     ap.add_argument("--gt-boxes", action="store_true",
                     help="use the labelled piece boxes instead of the piece model")
+    ap.add_argument("--stretch", action="store_true",
+                    help="feed the models the photo stretched to 640x640, as the app "
+                         "does (.scaleFill), instead of letterboxed")
     args = ap.parse_args()
 
+    if args.stretch and args.two_pass:
+        ap.error("--stretch and --two-pass cannot be combined")
     if not args.gt_corners and not args.corners_model:
         ap.error("give --corners-model or --gt-corners")
     if not args.gt_boxes and not args.pieces_model:
@@ -232,12 +247,15 @@ def main():
         if (args.gt_corners and not gt_kpts) or (args.gt_boxes and not gt_boxes):
             unlabelled += 1
             continue
+        photo, sx, sy = stretched(src) if args.stretch else (src, 1.0, 1.0)
         # 1. corners
         if args.gt_corners:
             kpts = gt_kpts
         else:
             kpts = detect_corners(
-                corner_model, src, imgsz=args.corner_imgsz, two_pass=args.two_pass)
+                corner_model, photo, imgsz=args.corner_imgsz, two_pass=args.two_pass)
+            if kpts is not None:
+                kpts = [[x * sx, y * sy] for x, y in kpts]
         if kpts is None:
             corner_failures += 1
             boards += 1
@@ -250,12 +268,14 @@ def main():
         if args.gt_boxes:
             detections = gt_boxes
         else:
-            pr = piece_model(str(src), conf=args.conf, verbose=False)[0]
+            pr = piece_model(photo if args.stretch else str(src), conf=args.conf,
+                             verbose=False)[0]
             if pr.boxes is not None:
                 for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
                                           pr.boxes.conf.tolist()):
-                    detections.append(
-                        Detection(PIECE_CLASSES[int(cls)], float(conf), tuple(box)))
+                    x1, y1, x2, y2 = box
+                    detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
+                                                (x1 * sx, y1 * sy, x2 * sx, y2 * sy)))
 
         predicted = assign_squares(H, detections, pull=args.pull)
         pred_letters = {sq: FEN_LETTER[cls] for sq, (cls, _) in predicted.items()}

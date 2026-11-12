@@ -39,6 +39,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -392,7 +393,14 @@ def load_roboflow(name, cfg, root, skipped, seen):
     """root holds one YOLO export per sub-folder. `seen` carries de-dup state
     across projects, since Universe is full of forks of the same photos: a
     photo is a repeat if it has the same original file name, or the same image
-    hash and the same labels."""
+    hash and the same labels.
+
+    Per-project settings in sources.yaml: `max_images` (default: the source's
+    `max_per_project`) keeps a fixed random sample, so one large project of
+    video frames cannot swamp the rest; `only_splits` reads just those of the
+    export's train/valid/test folders, for exports whose train folder holds
+    augmented copies; `license` overrides what the export states."""
+    settings = {p["id"].split("/")[-1]: p for p in cfg.get("projects", [])}
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         data_yaml = next(iter(sorted(project.rglob("data.yaml"))), None)
         if data_yaml is None:
@@ -405,13 +413,26 @@ def load_roboflow(name, cfg, root, skipped, seen):
         is_pose = bool(meta.get("kpt_shape"))
         ignorable = {i for i, n in names.items()
                      if normalize_category(str(n)).lower() in NON_PIECE}
-        license_ = (meta.get("roboflow") or {}).get("license") or read_license(project)
+        mine = settings.get(project.name, {})
+        license_ = (mine.get("license") or (meta.get("roboflow") or {}).get("license")
+                    or read_license(project))
         cfg.setdefault("project_licenses", {})[project.name] = license_
         if cfg.get("only_shippable") and not is_shippable(license_):
             skipped[f"{project.name}: license '{license_}' not shippable"] += 1
             continue
 
-        for label in sorted(data_yaml.parent.rglob("labels/*.txt")):
+        labels = sorted(data_yaml.parent.rglob("labels/*.txt"))
+        if mine.get("only_splits"):
+            labels = [l for l in labels if l.parent.parent.name in mine["only_splits"]]
+        cap = mine.get("max_images", cfg.get("max_per_project"))
+        if cap and len(labels) > cap:
+            random.Random(0).shuffle(labels)  # a fixed order; stop once `cap` are kept
+        else:
+            cap = None
+        kept = 0
+        for label in labels:
+            if cap and kept >= cap:
+                break
             img = next((label.parent.parent / "images" / (label.stem + ext)
                         for ext in IMAGE_EXTS
                         if (label.parent.parent / "images" / (label.stem + ext)).exists()),
@@ -451,7 +472,11 @@ def load_roboflow(name, cfg, root, skipped, seen):
             # copies and forks share <original>.
             original = re.sub(r"\.rf\.[0-9a-zA-Z]+$", "", label.stem)
             original = re.sub(r"_(jpe?g|png)$", "", original, flags=re.I)
-            name_key, image_hash = (original, len(boxes)), dhash(img)
+            # Same original name and the same pieces: an augmented copy or a
+            # fork. The name alone is not enough -- exports are full of
+            # unrelated photos called "10" or "IMG_1".
+            name_key = (original, tuple(sorted(box[0] for box in boxes)))
+            image_hash = dhash(img)
             if image_hash is None:
                 skipped["image cannot be read"] += 1
                 continue
@@ -462,8 +487,10 @@ def load_roboflow(name, cfg, root, skipped, seen):
             seen["names"].add(name_key)
             seen["hashes"][image_hash].append(boxes)
             bucket = int(hashlib.md5(original.encode()).hexdigest(), 16) % 10
+            kept += 1
             yield Sample(name, f"{project.name}_{label.stem}", img,
                          "val" if bucket == 0 else "train", boxes, None)
+        skipped[f"note: {project.name} gives {kept} of {len(labels)} labelled images"] = kept
 
 
 def same_labels(a, b, tolerance=0.02):
@@ -663,7 +690,8 @@ def merge(args, sources):
                          HERE / "datasets" / "_resized" / str(args.max_side))
             n += 1
         print(f"- {name}: {n} images" + "".join(
-            f"\n    skipped {v}: {k}" for k, v in skipped.items()))
+            f"\n    {k}" if k.startswith("note: ") and " gives " in k
+            else f"\n    skipped {v}: {k}" for k, v in skipped.items()))
         manifest[name] = {
             "license": cfg.get("project_licenses") or cfg.get("license"),
             "images": n,
@@ -836,6 +864,17 @@ def fetch_roboflow(cfg, root):
                     continue
                 version = max(int(str(v["id"]).rsplit("/", 1)[-1]) for v in info["versions"])
             export = roboflow_api(f"{workspace}/{slug}/{version}/yolov8", key)
+            # The first request for a format nobody has exported yet only
+            # starts the export; the link appears a little later.
+            for _ in range(12):
+                if "export" in export:
+                    break
+                time.sleep(10)
+                export = roboflow_api(f"{workspace}/{slug}/{version}/yolov8", key)
+            if "export" not in export:
+                print(f"roboflow: {project['id']} v{version} is still being prepared "
+                      "by Roboflow; run fetch again in a few minutes.")
+                continue
             dest.mkdir(parents=True, exist_ok=True)
             archive = dest / "export.zip"
             archive.unlink(missing_ok=True)  # size unknown: a leftover may be partial

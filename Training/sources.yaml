@@ -79,15 +79,37 @@ sources:
     # project's "YOLOv8" export by hand and unzip it to datasets/roboflow/<name>/.
     # Leave `version` out to take the newest. Add more projects freely — forks
     # of the same photos are de-duplicated at merge time.
-    # Only projects with a published version can be exported. Checked 2026-11:
-    # the first has one; the second has 606 images but no version; the last
-    # three are empty projects.
+    # Each project is a different board or set of boards, which is what the
+    # piece model lacks. Chosen 2026-11 from a search of Universe for real
+    # photos with colour+type classes, a published version and no heavy
+    # augmentation. `version` pins one without flips/rotations where it exists.
+    # A project is capped at max_per_project images unless it sets max_images.
+    max_per_project: 800
     projects:
-      - id: roboflow-100/chess-pieces-mjzgj
-      - id: mahdi-ruposh/chesspiece-object-detection
-      - id: luksuz/chess_pieces-nf8av
-      - id: jjgg/chess_detection-cief9
-      - id: cutegander/chess-pieces-b8cbo
+      - id: roboflow-100/chess-pieces-mjzgj        # green vinyl "US Chess" board, tripod
+      - id: multichess/chess-vision-ljby5          # tournament video frames, 8+ boards
+        version: 1                                 # 40,261 frames, no augmentation
+        max_images: 1500
+      - id: mars-lab-2/getchess                    # several wooden and paper boards;
+        version: 1                                 # about half are top-down boards
+        max_images: 600                            # pasted on backgrounds
+      - id: chess-xezgz/chess-hndwj                # dark-green/white vinyl, wooden table
+        version: 2
+      - id: tawan-afcpc/chess-f0mbu                # rendered mahogany/maple board (not photos)
+      - id: m-s-teslaenthusiast/anotador-xadrez    # brown/beige board, ornate border
+      - id: politechnika-warszawska/chess-bprbi    # natural-wood folding board
+        version: 4
+        only_splits: [valid, test]                 # its train folder is rotated/flipped copies
+      - id: captainred-aslrv/chess-vision-jmf56    # ~260 photos, nearly all different boards
+        version: 14
+        # The uploader says Public Domain, but the photos look collected from
+        # the web and from videos: not for a model that ships.
+        license: unknown (web photos)
+    # Tried and dropped: mahdi-ruposh/chesspiece-object-detection (no published
+    # version); luksuz/chess_pieces-nf8av, jjgg/chess_detection-cief9,
+    # cutegander/chess-pieces-b8cbo (empty projects); senku/chess-piece-vrw2r
+    # (every version is flipped and rotated copies); logan-44qjh/chess-pieces-8slll
+    # (pieces on the board without a box in 2 of 6 photos looked at).
 
   # The rest of ChessReD: positions are labelled, boxes are not. About 5,000
   # of them (the train split) can be used.
