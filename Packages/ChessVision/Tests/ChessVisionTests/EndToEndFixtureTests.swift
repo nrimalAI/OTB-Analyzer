@@ -108,4 +108,89 @@ final class EndToEndFixtureTests: XCTestCase {
         print(String(format: "fixture aggregate: %.1f%% per-square", accuracy * 100))
         XCTAssertGreaterThanOrEqual(accuracy, 0.94)
     }
+
+    /// Phone photos are 3:4, the fixtures are square. Each fixture is turned
+    /// into a 3:4 photo (grey above and below, like extra table) and must
+    /// still be read: the recognizer letterboxes it rather than stretching it.
+    /// The same photos stretched to a square, which is what the app used to
+    /// do, are scored alongside for comparison.
+    func testRecognizesFixturesAsPortraitPhotos() async throws {
+        let recognizer = try makeRecognizer()
+        let fixtures = try XCTUnwrap(
+            Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self,
+            from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+
+        var letterboxed = 0
+        var stretched = 0
+        var totalSquares = 0
+        for (file, expectedPlacement) in manifest.sorted(by: { $0.key < $1.key }) {
+            guard
+                let source = CGImageSourceCreateWithURL(
+                    fixtures.appending(path: file) as CFURL, nil),
+                let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            else {
+                XCTFail("could not load \(file)")
+                continue
+            }
+            let expected = try XCTUnwrap(FENBuilder.pieces(fromPlacement: expectedPlacement))
+            let portrait = try XCTUnwrap(
+                Self.redraw(image, width: image.width, height: image.width * 4 / 3, stretch: false))
+            XCTAssertEqual(portrait.height * 3, portrait.width * 4)
+            let squashed = try XCTUnwrap(
+                Self.redraw(portrait, width: image.width, height: image.width, stretch: true))
+
+            let good = Self.correctSquares(
+                try await recognizer.recognize(portrait).pieces.mapValues(\.piece), expected)
+            let bad = Self.correctSquares(
+                (try? await recognizer.recognize(squashed).pieces.mapValues(\.piece)) ?? [:],
+                expected)
+            letterboxed += good
+            stretched += bad
+            totalSquares += 64
+            print("portrait \(file): letterboxed \(good)/64, stretched \(bad)/64")
+        }
+        let accuracy = Double(letterboxed) / Double(totalSquares)
+        print(String(
+            format: "portrait aggregate: letterboxed %.1f%%, stretched %.1f%% per-square",
+            accuracy * 100, Double(stretched) / Double(totalSquares) * 100))
+        XCTAssertGreaterThanOrEqual(accuracy, 0.90)
+    }
+
+    private static func correctSquares(_ got: [Square: Piece], _ expected: [Square: Piece]) -> Int {
+        var correct = 0
+        for rank in 1...8 {
+            for file in 1...8 {
+                let sq = FENBuilder.square(file: file, rank: rank)!
+                if expected[sq].map({ FENBuilder.fenLetter(for: $0) })
+                    == got[sq].map({ FENBuilder.fenLetter(for: $0) })
+                {
+                    correct += 1
+                }
+            }
+        }
+        return correct
+    }
+
+    /// Draws `image` into a grey canvas: centred at its own size, or stretched
+    /// to fill it.
+    private static func redraw(_ image: CGImage, width: Int, height: Int, stretch: Bool) -> CGImage? {
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return nil }
+        context.setFillColor(red: 0.45, green: 0.45, blue: 0.45, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.interpolationQuality = .high
+        let rect = stretch
+            ? CGRect(x: 0, y: 0, width: width, height: height)
+            : CGRect(
+                x: (width - image.width) / 2, y: (height - image.height) / 2,
+                width: image.width, height: image.height)
+        context.draw(image, in: rect)
+        return context.makeImage()
+    }
 }
