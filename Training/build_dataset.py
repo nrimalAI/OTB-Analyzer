@@ -163,6 +163,15 @@ def orient_corners_by_position(points, pieces, placement):
     return _pick_rotation(points, len(pieces), hits, 0.6)
 
 
+def occupied_share(ordered, pieces, placement):
+    """Share of boxes that land on a square the position has a piece on,
+    whatever the piece — a check on the corners that a wrong class label on a
+    box does not disturb."""
+    board = fen_placement_to_board(placement)
+    H = homography(ordered)
+    return sum(board_square(H, _anchor(box)) in board for _, box in pieces) / len(pieces)
+
+
 def image_size(path):
     from PIL import Image
     with Image.open(path) as im:
@@ -262,9 +271,10 @@ FENIT_NAMES = ["Board", "White-King", "White-Pawn", "Black-Pawn", "Black-King",
 
 
 def placement_from_name(stem):
-    """Fenit names each photo after its position: the eight FEN rows joined by
-    '_', sometimes followed by ' w' or ' b'. Returns the placement, or None."""
-    rows = stem.split()[0].split("_") if stem.strip() else []
+    """Fenit names most photos after their position: the eight FEN rows joined
+    by '_' or '-', sometimes followed by ' w' or ' b'. Returns the placement,
+    or None (some photos are named by timestamp instead)."""
+    rows = re.split(r"[_-]", stem.split()[0]) if stem.strip() else []
     if len(rows) != 8:
         return None
     for row in rows:
@@ -322,18 +332,31 @@ def load_fenit(name, cfg, root, skipped):
 
         placement = placement_from_name(label.stem)
         corners = None
-        if placement is None:
-            skipped["file name is not a position (boxes kept, no corners)"] += 1
-        elif board_pts is None:
+        if board_pts is None:  # mostly close-ups of a single piece on the floor
             skipped["no board outline labelled (boxes kept)"] += 1
+        elif placement is None:
+            skipped["file name is not a position (boxes kept, no corners)"] += 1
         else:
-            if len(boxes) != len(fen_placement_to_board(placement)):
-                skipped["note: box count differs from the position in the name"] += 1
             ordered = orient_corners_by_position(board_pts, lettered, placement)
             if ordered is None:
                 skipped["corner order ambiguous (boxes kept)"] += 1
+            elif occupied_share(ordered, lettered, placement) < 0.8:
+                # Seen where the board runs out of the frame and the outline
+                # was clicked on the image edge instead of the real corner.
+                skipped["corners do not fit the position (boxes kept)"] += 1
             else:
                 corners = [(x / w, y / h) for x, y in ordered]
+
+        # The name is the more reliable of the two: where it lists more pieces
+        # than there are boxes, a piece on the board was left unlabelled, and
+        # training on that teaches the detector to miss pieces.
+        if placement is not None:
+            pieces = len(fen_placement_to_board(placement))
+            if len(boxes) < pieces:
+                skipped["a piece has no box (boxes dropped, corners kept)"] += 1
+                boxes = None
+            elif len(boxes) > pieces:
+                skipped["note: more boxes than pieces in the name (kept)"] += 1
 
         bucket = int(hashlib.md5((placement or label.stem).encode()).hexdigest(), 16) % 100
         split = "test" if bucket < test_cut else "val" if bucket < val_cut else "train"
@@ -468,16 +491,17 @@ def source_shippable(cfg):
 
 def write_sample(sample, out, counts, positions):
     stem = f"{sample.source}__{sample.stem}"
+    if sample.placement and (sample.boxes or sample.corners):
+        task = "pieces" if sample.boxes else "corners"
+        positions.append({
+            "image": str(out / task / "images" / sample.split / f"{stem}{sample.image.suffix}"),
+            "source": sample.source, "split": sample.split, "placement": sample.placement})
     if sample.boxes:
         base = out / "pieces"
         (base / "labels" / sample.split / f"{stem}.txt").write_text("\n".join(
             f"{c} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}" for c, cx, cy, w, h in sample.boxes))
-        merged = base / "images" / sample.split / f"{stem}{sample.image.suffix}"
-        link(sample.image, merged)
+        link(sample.image, base / "images" / sample.split / f"{stem}{sample.image.suffix}")
         counts[(sample.source, "pieces", sample.split)] += 1
-        if sample.placement:
-            positions.append({"image": str(merged), "source": sample.source,
-                              "split": sample.split, "placement": sample.placement})
     if sample.corners:
         xs = [p[0] for p in sample.corners]
         ys = [p[1] for p in sample.corners]

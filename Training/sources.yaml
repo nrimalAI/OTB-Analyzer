@@ -50,7 +50,7 @@ sources:
             size: 4294967296
 
   # Real photos with piece boxes AND board corners; no account needed.
-  # https://data.mendeley.com/datasets/wpp9xnbcp6 (492 photos, April 2026)
+  # https://data.mendeley.com/datasets/wpp9xnbcp6 (490 photos, April 2026)
   fenit:
     kind: fenit
     dir: datasets/fenit

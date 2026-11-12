@@ -49,13 +49,20 @@ python build_dataset.py fetch --dry-run   # what would be downloaded, nothing fe
 python build_dataset.py fetch             # ~15 GB; needs about twice that free while unpacking
 python build_dataset.py merge             # everything on disk
 python build_dataset.py merge --shippable # only data an App Store model may be trained on
+python preview_labels.py                  # draw the merged labels on a few photos per source
 ```
+
+`fetch` was run end to end against the real servers in 2026-11 (ChessReD2K,
+chesscog including the split `train` archive, Fenit); Roboflow is still
+untested. The 4TU and OSF servers are slow (2-3 MB/s per file): fetching
+sources in separate shells (`fetch chessred2k`, `fetch chesscog`, `fetch
+fenit`) takes about 40 minutes instead of two hours.
 
 | Source | Photos | Gives | License |
 |---|---|---|---|
 | `chessred2k` | 2,078 real | boxes + corners | CC BY-NC-SA 4.0 — not shippable |
 | `chesscog` | 4,888 rendered | boxes + corners | CC BY 4.0 |
-| `fenit` | 492 real | boxes + corners | CC BY 4.0 |
+| `fenit` | 490 real (two boards) | boxes + corners | CC BY 4.0 |
 | `roboflow` | a few hundred per project, real | boxes only | per project, mostly CC BY 4.0 |
 | `chessred_pseudo` | up to ~5,000 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
 | `own` | your photos | whatever you label | yours |
@@ -68,17 +75,40 @@ python build_dataset.py merge --shippable # only data an App Store model may be 
   (e.g. a bare `bishop`) is dropped whole rather than left half-labelled.
 - **chesscog** gives four unordered corner points; which one is a1 is recovered
   from the labelled piece squares. Checked against ChessReD2K, where the answer
-  is known: 2,078 of 2,078 correct.
+  is known: 2,078 of 2,078 correct. On the real download all 4,888 images get
+  an order and every box lands on its square. Note it is a single rendered
+  board and piece set, and it makes up 72% of the merged training images.
 - **Fenit** (https://data.mendeley.com/datasets/wpp9xnbcp6) is the only real
   photo set besides ChessReD with board corners, and needs no account. Each
-  photo is named after its position; the corner order is recovered from that.
-  It has no official split, so 20% is held out as `test` and 10% as `val`
-  (`test_fraction` / `val_fraction` in `sources.yaml`), by position. **The
-  adapter has only been tested on stand-in files** built from ChessReD in
-  Fenit's format — check a few label overlays after the first real download,
-  and look at the `skipped` notes in the manifest. The held-out photos come
-  from the same boards as the Fenit training photos, so they measure "boards
-  like Fenit's", not a board never seen.
+  photo with a position is named after it; the corner order is recovered from
+  that. It has no official split, so 20% is held out as `test` and 10% as
+  `val` (`test_fraction` / `val_fraction` in `sources.yaml`), by position.
+  The held-out photos come from the same boards as the Fenit training photos,
+  so they measure "boards like Fenit's", not a board never seen.
+
+  What the real download contains (checked 2026-11, all 490 photos looked at):
+  - **Two boards, two piece sets.** Board A: cream / dark-brown roll-up board,
+    light-wood and black pieces, 305 photos from three phones (names use `_`
+    between rows). Board B: white / grey-brown board with an orange-brown
+    edge, red-brown and black pieces, 185 photos from one phone (names use
+    `-`, or are timestamps).
+  - 386 photos show a position and are named after it. The names are right;
+    the labels are not always: 18 photos have a piece with no box (their
+    boxes are dropped), about 0.7% of boxes carry the wrong class, and 5
+    photos have the board outline clicked on the image edge where the board
+    runs out of frame (their corners are dropped).
+  - 54 photos are close-ups of one piece on the floor (kept, boxes only) and
+    56 are empty boards (not used: no pieces, and nothing to tell a1 from h8).
+  - The board outline's keypoints are in image order (top-left first), not
+    board order, so the order really does have to come from the position.
+  - Fed through `chess_pipeline` with their own boxes and corners, the test
+    photos come out 86% exact / 99.5% per-square. That is the ceiling for the
+    Fenit number: the camera is much lower than in ChessReD, and the
+    bottom-centre anchor rule misses more often.
+
+  `python preview_labels.py` draws the merged labels on a few photos per
+  source; `python preview_labels.py --check` counts, for every photo, how many
+  boxes land on the square the position says they should.
 - **`chessred_pseudo`** (optional, 24.5 GB download) labels the ChessReD photos
   that have positions but no boxes — see `pseudo_label.py`. It only adds piece
   data for the same board, so it is the least valuable source.
