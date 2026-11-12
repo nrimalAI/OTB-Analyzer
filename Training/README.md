@@ -232,6 +232,91 @@ photos they no longer do: measure both before shipping a model.
 > **License note:** Ultralytics YOLO is AGPL-3. Fine for this GPL-3 app; a
 > proprietary fork would need a different detector (see docs/PLAN.md).
 
+## Retraining 2026-11: where it stands and how to carry on
+
+Written so that a new session can continue from this file and
+`.notes/training.md` (which says what is running right now).
+
+**Setup on the Mac mini.** `Training/venv` is the system Python 3.9.6 with
+torch 2.8.0, ultralytics 8.4.211, coremltools 9.0. Everything on disk is under
+`Training/datasets/` (git-ignored): the four sources, `_resized/1280/` (the
+cache of small training copies), `_dropped/` (a Roboflow project taken out),
+and three merged sets, all built with `--max-side 1280`:
+
+| Folder | Built with | Used by |
+|---|---|---|
+| `merged` | `merge --max-side 1280` before the extra Roboflow projects | both corner runs; its `positions.json` is the one to score with |
+| `merged_v2` | `merge --max-side 1280 --out datasets/merged_v2` | `pieces_s_rf` |
+| `merged_norf` | the same with `--sources chessred2k chesscog fenit` | `pieces_s_norf` |
+
+Corner labels are identical in all three (Roboflow has none). `merge` refuses
+to rebuild a folder a running job reads.
+
+**Running jobs.** Start them detached and awake, so no session has to stay
+open: `nohup caffeinate -i ./venv/bin/python -u train.py ... > runs/<name>.log 2>&1 &`.
+`runs/queue.sh` chains runs (it waits for any `train.py corners` process, then
+runs its list in order and writes `runs/queue.log`). A run that was cut off
+continues with `yolo train resume model=runs/<task>/<name>/weights/last.pt`.
+Two runs at once only slow each other down on 16 GB.
+
+**Scoring a run.** Always `best.pt` and `last.pt` (validation is 90% boards
+the model knows, so `best.pt` is not chosen on what matters):
+
+```sh
+C=runs/pose/<name>/weights/last.pt;  P=runs/detect/<name>/weights/last.pt
+POS="--positions datasets/merged/positions.json --source fenit"
+python corner_error.py --corners-model $C --source fenit                      # boards A and B
+python corner_error.py --corners-model $C --source chessred2k --split test
+python evaluate.py --corners-model $C --pieces-model $P $POS --split test     # board B: the number
+python evaluate.py --corners-model $C --pieces-model $P --split test \
+    --annotations datasets/chessred2k/annotations.json --images datasets/chessred2k/images
+python evaluate.py --pieces-model $P --gt-corners $POS --group B              # pieces alone
+python evaluate.py --corners-model $C --gt-boxes  $POS --group B              # corners alone
+```
+
+Until a new corner model exists, score piece models with `--gt-corners`; until
+a new piece model exists, corner models with `--gt-boxes`. `corner_error.py`
+runs on the CPU and can be used next to a training job; `evaluate.py` uses the
+GPU and slows it a little.
+
+**Runs so far.**
+
+| Run | What | Result |
+|---|---|---|
+| `corners_s_exp1` | yolo11s-pose, 640, 40 epochs, default tolerance | epoch 8 / 20 median corner error in squares: ChessReD test 1.31 / 0.63, Fenit A 0.82 / 0.84, board B 1.88 / 1.41. Final: see notes |
+| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued |
+| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (with 8 Roboflow projects) | queued |
+| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | queued |
+
+**What has been learned, and what to try next.**
+
+- The corner model is the bottleneck, and only three boards have corner
+  labels to train on (ChessReD, the chesscog render, Fenit A). Roboflow adds
+  boards for the piece model only. More boards *with corners* is the lever
+  most likely to matter: rendered boards (corners are exact by construction),
+  or photos whose corners can be derived.
+- Validation pose mAP says little: at exp1 epoch 20 it was 0.87 (mAP50-95)
+  with corners 0.6-0.8 squares off, because the default tolerance is loose
+  (see `train.py`). Judge corner models with `corner_error.py`. About 0.25
+  squares is what a piece on the edge of a square needs.
+- On the unseen board the corner *order* is wrong about half the time (at
+  epoch 20: right 43, turned 90 degrees 15, turned 180 degrees 34 of 93).
+  Which side is White cannot be read off an unfamiliar set from four corners
+  alone. `corner_error.py` prints the score with the best rotation, i.e. what
+  location alone would give; if location gets good and order does not, the
+  order should come from the pieces after detection, which is an app change
+  (note it for the MacBook side; the app already lets the user flip the board).
+- Scoring on the 1280-px copies instead of the original photos changes
+  little (Fenit A 0.84 -> 0.67 squares, ChessReD the same), so the resize is
+  not what limits precision.
+- Not yet tried: all 4,400 chesscog renders for corners; `kpt_oks_sigmas`
+  between 0.05 and 0.25; a longer first stage; yolo11m (about 2.5x slower).
+
+**Things that are not in the repo.** The Roboflow API key (only needed to
+fetch more Roboflow projects: `export ROBOFLOW_API_KEY=...`). Roboflow
+Universe's website refuses pages from this network until about 05:50 UTC on
+2026-11-13 (a search used up its quota); the API is unaffected.
+
 ## Baseline on other boards (2026-11)
 
 `baseline/*.pt` (yolo11n, ChessReD2K only) on every Fenit photo with a known
