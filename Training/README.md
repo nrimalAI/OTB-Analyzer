@@ -283,8 +283,9 @@ GPU and slows it a little.
 
 | Run | What | Result |
 |---|---|---|
-| `corners_s_exp1` | yolo11s-pose, 640, 40 epochs, default tolerance | epoch 8 / 20 median corner error in squares: ChessReD test 1.31 / 0.63, Fenit A 0.82 / 0.84, board B 1.88 / 1.41. Final: see notes |
-| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued |
+| `corners_s_exp1` | yolo11s-pose, 640, 40 epochs, default tolerance | Finished. `last.pt` / `best.pt`, median corner error in squares: ChessReD test 0.32 / 0.34 (baseline 0.31), Fenit A 0.29 / 0.34, **board B 0.92 / 0.99**, board not found in 11 / 9 of 93, order right in 41 / 43. With labelled boxes: ChessReD test 78.4% / 75.8% exact, board B 2.1% / 3.2% exact (63-65% per-square, below an empty board) |
+| `corners_s_exp3` | continues exp1 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_synth` (3,000 synthetic boards added) | running since 17:33 on 2026-11-12, moved ahead of exp2 |
+| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued after exp3 (stopped 5 minutes in to let exp3 go first) |
 | `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (with 8 Roboflow projects) | queued |
 | `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | queued |
 
@@ -295,6 +296,14 @@ GPU and slows it a little.
   boards for the piece model only. More boards *with corners* is the lever
   most likely to matter: rendered boards (corners are exact by construction),
   or photos whose corners can be derived.
+- exp1 learned the boards it was shown and nothing more: on ChessReD and
+  Fenit A it matches the baseline (0.3 squares), on board B it is a square
+  off and often draws its quadrilateral around a patch in the middle of the
+  board. That happens at every piece count (median 0.95-1.36 squares from 0-7
+  to 32+ pieces), so it is the unfamiliar board, not sparse positions. Board
+  B is a plain brown-and-white board on a tiled floor: nothing about it is
+  hard except that it is new. Hence exp3 on synthetic boards before exp2.
+- Scores of each run are kept in `runs/scores/<run>_<best|last>.txt`.
 - Validation pose mAP says little: at exp1 epoch 20 it was 0.87 (mAP50-95)
   with corners 0.6-0.8 squares off, because the default tolerance is loose
   (see `train.py`). Judge corner models with `corner_error.py`. About 0.25
