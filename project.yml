@@ -36,7 +36,9 @@ targets:
       properties:
         CFBundleDisplayName: "Chess Scanner"
         NSCameraUsageDescription: "Take a photo of a chess board to analyze the position."
-        UILaunchScreen: {}
+        # Paper-coloured launch screen so the app doesn't flash white.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # No network use at all; declaring exempt avoids the export-compliance
         # question on every App Store Connect upload.

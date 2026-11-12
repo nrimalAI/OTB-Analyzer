@@ -12,59 +12,106 @@ struct AboutView: View {
     private static let chesskitURL = URL(string: "https://github.com/chesskit-app")!
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Privacy") {
-                    Label {
-                        Text("Everything happens on your device. Photos, positions, and analysis never leave your iPhone — this app makes no network connections and collects no data.")
-                            .font(.subheadline)
-                    } icon: {
-                        Image(systemName: "lock.shield")
-                    }
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Done")
+                        .sans(16, weight: .medium)
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
                 }
+                .buttonStyle(TextButtonStyle())
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
 
-                Section("Powered by") {
-                    Link(destination: Self.stockfishURL) {
-                        row("Stockfish 17", detail: "Chess engine — GPL-3.0, © the Stockfish developers")
-                    }
-                    Link(destination: Self.chesskitURL) {
-                        row("ChessKit", detail: "Chess rules & engine bindings — MIT")
-                    }
-                    row("Board recognition", detail: "On-device CoreML models trained for this app")
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Chess Scanner")
+                        .eyebrow(tracking: 1.5)
+                    Text("About")
+                        .serif(44)
+                        .tracking(-0.44)
+                        .padding(.top, 6)
+                        .accessibilityAddTraits(.isHeader)
 
-                Section("Open source") {
-                    Link(destination: Self.sourceURL) {
-                        row("Source code", detail: "This app is free software under GPL-3.0. Complete corresponding source, including the bundled Stockfish, is available here.")
+                    section("Privacy") {
+                        Text("Everything happens on your device. Photos, positions, and analysis stay on your iPhone \u{2014} this app makes no network connections and collects no data. The one way a position leaves is if you choose to: Share, or the Lichess button, which opens it in your browser.")
+                            .sans(14)
+                            .padding(.vertical, 14)
+                        Rule()
                     }
-                    Link(destination: Self.gplURL) {
-                        row("GNU GPL-3.0 license", detail: "Read the full license text")
-                    }
-                }
 
-                Section {
+                    section("Powered by") {
+                        row("Stockfish 17", detail: "Chess engine \u{2014} GPL-3.0, \u{00A9} the Stockfish developers", link: Self.stockfishURL)
+                        row("ChessKit", detail: "Chess rules & engine bindings \u{2014} MIT", link: Self.chesskitURL)
+                        row("Board recognition", detail: "On-device CoreML models trained for this app")
+                    }
+
+                    section("Open source") {
+                        row("Source code", detail: "This app is free software under GPL-3.0. Complete corresponding source, including the bundled Stockfish, is available here.", link: Self.sourceURL)
+                        row("GNU GPL-3.0 license", detail: "Read the full license text", link: Self.gplURL)
+                    }
+
                     Text("Version \(Bundle.main.shortVersion) (\(Bundle.main.buildNumber))")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .mono(11)
+                        .foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
                 }
-                .listRowBackground(Color.clear)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
             }
-            .navigationTitle("About")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
+        }
+        .background(Theme.paper.ignoresSafeArea())
+        .foregroundStyle(Theme.ink)
+    }
+
+    private func section<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .eyebrow()
+                .padding(.top, 26)
+                .padding(.bottom, 8)
+                .accessibilityAddTraits(.isHeader)
+            Rule(weight: .heavy)
+            content()
         }
     }
 
-    private func row(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).foregroundStyle(.primary)
-            Text(detail).font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder
+    private func row(_ title: String, detail: String, link: URL? = nil) -> some View {
+        let label = HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .serif(19)
+                Text(detail)
+                    .sans(13)
+                    .foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if link != nil {
+                Text("\u{2197}")
+                    .sans(15, weight: .medium)
+                    .accessibilityHidden(true)
+            }
         }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+
+        if let link {
+            Link(destination: link) { label }
+                .buttonStyle(TextButtonStyle())
+        } else {
+            label
+        }
+        Rule()
     }
 }
 

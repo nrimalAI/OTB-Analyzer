@@ -66,4 +66,38 @@ final class BoardGeometryTests: XCTestCase {
             XCTAssertFalse(PieceGlyph.glyph(for: kind).isEmpty)
         }
     }
+
+    func testOutlineGlyphsExistForAllKinds() {
+        for kind in Piece.Kind.allCases {
+            XCTAssertFalse(PieceGlyph.outlineGlyph(for: kind).isEmpty)
+            XCTAssertNotEqual(PieceGlyph.outlineGlyph(for: kind), PieceGlyph.glyph(for: kind))
+        }
+    }
+
+    func testRotatedSquares() {
+        XCTAssertEqual(BoardGeometry.rotated(.a1), .h8)
+        XCTAssertEqual(BoardGeometry.rotated(.e2), .d7)
+        XCTAssertEqual(BoardGeometry.rotated(.h1), .a8)
+        for square in Square.allCases {
+            XCTAssertEqual(BoardGeometry.rotated(BoardGeometry.rotated(square)), square)
+        }
+    }
+
+    func testArrowGeometry() throws {
+        // b1 → b3 on an 800pt board (cell 100): straight up the b-file.
+        let from = BoardGeometry.center(of: .b1, boardSize: 800, orientation: .whiteBottom)
+        let to = BoardGeometry.center(of: .b3, boardSize: 800, orientation: .whiteBottom)
+        let arrow = try XCTUnwrap(BoardGeometry.arrow(from: from, to: to, cell: 100))
+        XCTAssertEqual(arrow.shaftStart.x, 150, accuracy: 0.01)
+        XCTAssertEqual(arrow.shaftStart.y, 728, accuracy: 0.01)
+        XCTAssertEqual(arrow.tip.y, 558, accuracy: 0.01)
+        XCTAssertEqual(arrow.shaftEnd.y, 600, accuracy: 0.01)
+        XCTAssertEqual(abs(arrow.headLeft.x - arrow.headRight.x), 48, accuracy: 0.01)
+        XCTAssertEqual(arrow.shaftWidth, 17, accuracy: 0.01)
+    }
+
+    func testArrowBetweenSamePointIsNil() {
+        let p = CGPoint(x: 50, y: 50)
+        XCTAssertNil(BoardGeometry.arrow(from: p, to: p, cell: 100))
+    }
 }

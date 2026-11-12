@@ -7,43 +7,50 @@ public struct BoardArrow: Equatable {
     public let to: Square
     public let color: Color
 
-    public init(from: Square, to: Square, color: Color = .blue) {
+    public init(from: Square, to: Square, color: Color = BoardPalette.accent) {
         self.from = from
         self.to = to
         self.color = color
     }
 }
 
-/// Renders a chess position. Squares can be tinted (confidence / validation),
-/// selected, tapped, and overlaid with arrows. Pure display — all state lives
-/// with the caller.
+/// Renders a chess position as a printed diagram: paper squares, ink border,
+/// outline/solid pieces. Squares can be selected, flagged (to double-check),
+/// highlighted (last move), tapped, and overlaid with arrows. Pure display —
+/// all state lives with the caller.
 public struct BoardView: View {
 
     let pieces: [Square: Piece]
     let orientation: BoardDisplayOrientation
     let selected: Square?
-    let squareTint: (Square) -> Color?
+    let flagged: Set<Square>
+    let highlighted: Set<Square>
     let arrows: [BoardArrow]
+    let showsCoordinates: Bool
+    let borderWidth: CGFloat
     let onTap: ((Square) -> Void)?
 
     public init(
         pieces: [Square: Piece],
         orientation: BoardDisplayOrientation = .whiteBottom,
         selected: Square? = nil,
-        squareTint: @escaping (Square) -> Color? = { _ in nil },
+        flagged: Set<Square> = [],
+        highlighted: Set<Square> = [],
         arrows: [BoardArrow] = [],
+        showsCoordinates: Bool = true,
+        borderWidth: CGFloat = 1.5,
         onTap: ((Square) -> Void)? = nil
     ) {
         self.pieces = pieces
         self.orientation = orientation
         self.selected = selected
-        self.squareTint = squareTint
+        self.flagged = flagged
+        self.highlighted = highlighted
         self.arrows = arrows
+        self.showsCoordinates = showsCoordinates
+        self.borderWidth = borderWidth
         self.onTap = onTap
     }
-
-    private let lightColor = Color(red: 0.93, green: 0.89, blue: 0.79)
-    private let darkColor = Color(red: 0.55, green: 0.44, blue: 0.30)
 
     public var body: some View {
         GeometryReader { proxy in
@@ -51,7 +58,10 @@ public struct BoardView: View {
             let cell = boardSize / 8
 
             ZStack(alignment: .topLeading) {
-                // Squares + pieces
+                Checkerboard()
+                    .fill(BoardPalette.darkSquare)
+                    .background(BoardPalette.lightSquare)
+
                 VStack(spacing: 0) {
                     ForEach(0..<8, id: \.self) { row in
                         HStack(spacing: 0) {
@@ -62,103 +72,131 @@ public struct BoardView: View {
                     }
                 }
 
-                // Arrows on top
                 ForEach(Array(arrows.enumerated()), id: \.offset) { _, arrow in
-                    ArrowShape(
-                        from: BoardGeometry.center(
-                            of: arrow.from, boardSize: boardSize, orientation: orientation),
-                        to: BoardGeometry.center(
-                            of: arrow.to, boardSize: boardSize, orientation: orientation),
-                        thickness: cell * 0.18
-                    )
-                    .fill(arrow.color.opacity(0.7))
-                    .allowsHitTesting(false)
+                    arrowView(arrow, boardSize: boardSize, cell: cell)
                 }
+
+                Rectangle()
+                    .strokeBorder(BoardPalette.ink, lineWidth: borderWidth)
+                    .allowsHitTesting(false)
             }
             .frame(width: boardSize, height: boardSize)
         }
         .aspectRatio(1, contentMode: .fit)
     }
 
+    // MARK: - Squares
+
     @ViewBuilder
     private func squareView(column: Int, row: Int, cell: CGFloat) -> some View {
         if let square = BoardGeometry.square(column: column, row: row, orientation: orientation) {
+            let isFlagged = flagged.contains(square)
+            let piece = pieces[square]
             ZStack {
-                Rectangle()
-                    .fill(BoardGeometry.isLight(square) ? lightColor : darkColor)
-                if let tint = squareTint(square) {
-                    Rectangle().fill(tint)
+                if isFlagged {
+                    Rectangle().fill(BoardPalette.accent.opacity(0.16))
+                } else if highlighted.contains(square) {
+                    Rectangle().fill(BoardPalette.accent.opacity(0.2))
                 }
-                if selected == square {
-                    Rectangle()
-                        .strokeBorder(Color.accentColor, lineWidth: max(2, cell * 0.07))
-                }
-                if let piece = pieces[square] {
+                if let piece {
                     PieceView(piece: piece, size: cell)
                 }
-                coordinateLabels(square: square, column: column, row: row, cell: cell)
+                if showsCoordinates {
+                    coordinateLabels(square: square, column: column, row: row)
+                }
+                if selected == square {
+                    Rectangle().strokeBorder(BoardPalette.ink, lineWidth: 3)
+                } else if isFlagged {
+                    Rectangle().strokeBorder(BoardPalette.accent, lineWidth: 2.5)
+                }
             }
             .frame(width: cell, height: cell)
             .contentShape(Rectangle())
             .onTapGesture { onTap?(square) }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel(square: square, piece: piece, isFlagged: isFlagged))
+            .accessibilityAddTraits(accessibilityTraits(for: square))
         }
     }
 
-    @ViewBuilder
-    private func coordinateLabels(square: Square, column: Int, row: Int, cell: CGFloat) -> some View {
-        let labelColor = BoardGeometry.isLight(square) ? darkColor : lightColor
-        ZStack(alignment: .topLeading) {
-            Color.clear
+    private func accessibilityLabel(square: Square, piece: Piece?, isFlagged: Bool) -> String {
+        var label = "\(square.notation), \(piece.map(PieceGlyph.name(for:)) ?? "empty")"
+        if isFlagged { label += ", double-check" }
+        return label
+    }
+
+    private func accessibilityTraits(for square: Square) -> AccessibilityTraits {
+        var traits: AccessibilityTraits = []
+        if onTap != nil { traits.formUnion(.isButton) }
+        if selected == square { traits.formUnion(.isSelected) }
+        return traits
+    }
+
+    /// Rank numbers down the left edge (top-left of the square), file letters
+    /// along the bottom (bottom-right of the square).
+    private func coordinateLabels(square: Square, column: Int, row: Int) -> some View {
+        ZStack {
             if column == 0 {
                 Text("\(square.rank.value)")
-                    .font(.system(size: cell * 0.2, weight: .semibold))
-                    .foregroundStyle(labelColor)
-                    .padding(1.5)
+                    .padding(.top, 2)
+                    .padding(.leading, 3)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-        }
-        .overlay(alignment: .bottomTrailing) {
             if row == 7 {
                 Text(square.file.rawValue)
-                    .font(.system(size: cell * 0.2, weight: .semibold))
-                    .foregroundStyle(labelColor)
-                    .padding(1.5)
+                    .padding(.bottom, 2)
+                    .padding(.trailing, 3)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
+        }
+        .font(.system(size: 9, weight: .medium, design: .monospaced))
+        .foregroundStyle(BoardPalette.coordinate)
+    }
+
+    // MARK: - Arrows
+
+    @ViewBuilder
+    private func arrowView(_ arrow: BoardArrow, boardSize: CGFloat, cell: CGFloat) -> some View {
+        let from = BoardGeometry.center(of: arrow.from, boardSize: boardSize, orientation: orientation)
+        let to = BoardGeometry.center(of: arrow.to, boardSize: boardSize, orientation: orientation)
+        if let geometry = BoardGeometry.arrow(from: from, to: to, cell: cell) {
+            ZStack {
+                Path { path in
+                    path.move(to: geometry.shaftStart)
+                    path.addLine(to: geometry.shaftEnd)
+                }
+                .stroke(arrow.color, style: StrokeStyle(lineWidth: geometry.shaftWidth, lineCap: .round))
+                Path { path in
+                    path.move(to: geometry.tip)
+                    path.addLine(to: geometry.headLeft)
+                    path.addLine(to: geometry.headRight)
+                    path.closeSubpath()
+                }
+                .fill(arrow.color)
+            }
+            // Flatten first so the shaft/head overlap doesn't show through.
+            .compositingGroup()
+            .opacity(0.9)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 }
 
-/// A tapered arrow between two points.
-struct ArrowShape: Shape {
-    let from: CGPoint
-    let to: CGPoint
-    let thickness: CGFloat
-
+/// The 32 dark squares of an 8×8 board. The top-left square is light in
+/// either orientation (a8 from White's side, h1 from Black's).
+private struct Checkerboard: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let dx = to.x - from.x
-        let dy = to.y - from.y
-        let length = sqrt(dx * dx + dy * dy)
-        guard length > 1 else { return path }
-
-        let dirX = dx / length
-        let dirY = dy / length
-        let perpX = -dirY
-        let perpY = dirX
-
-        let headLength = min(thickness * 2.2, length * 0.4)
-        let headWidth = thickness * 2.0
-        let shaftEndX = to.x - dirX * headLength
-        let shaftEndY = to.y - dirY * headLength
-        let half = thickness / 2
-
-        path.move(to: CGPoint(x: from.x + perpX * half, y: from.y + perpY * half))
-        path.addLine(to: CGPoint(x: shaftEndX + perpX * half, y: shaftEndY + perpY * half))
-        path.addLine(to: CGPoint(x: shaftEndX + perpX * headWidth / 2, y: shaftEndY + perpY * headWidth / 2))
-        path.addLine(to: to)
-        path.addLine(to: CGPoint(x: shaftEndX - perpX * headWidth / 2, y: shaftEndY - perpY * headWidth / 2))
-        path.addLine(to: CGPoint(x: shaftEndX - perpX * half, y: shaftEndY - perpY * half))
-        path.addLine(to: CGPoint(x: from.x - perpX * half, y: from.y - perpY * half))
-        path.closeSubpath()
+        let cell = min(rect.width, rect.height) / 8
+        for row in 0..<8 {
+            for column in 0..<8 where (row + column) % 2 == 1 {
+                path.addRect(CGRect(
+                    x: rect.minX + CGFloat(column) * cell,
+                    y: rect.minY + CGFloat(row) * cell,
+                    width: cell, height: cell))
+            }
+        }
         return path
     }
 }
