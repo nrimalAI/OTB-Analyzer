@@ -34,6 +34,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -46,7 +47,8 @@ from pathlib import Path
 import yaml
 
 from chess_pipeline import (
-    FEN_LETTER, PIECE_CLASSES, board_square, fen_placement_to_board, homography,
+    FEN_LETTER, PIECE_CLASSES, board_square, board_to_fen_placement,
+    fen_placement_to_board, homography,
 )
 from prepare_data import (
     extract_corners, image_index, link, normalize_category, official_splits,
@@ -73,6 +75,7 @@ class Sample:
     boxes: list = None     # [(class_id, cx, cy, w, h)] normalized, or None
     corners: list = None   # [(x, y)] * 4 normalized, order a1 a8 h8 h1, or None
     placement: str = None  # FEN placement field, when the position is known
+    group: str = None      # a sub-set evaluate.py can pick out, e.g. Fenit's board
 
 
 # --------------------------------------------------------------------------
@@ -219,15 +222,19 @@ def load_chessred(name, cfg, root, skipped):
             skipped["missing image or split"] += 1
             continue
         w, h = meta["width"], meta["height"]
-        out = []
+        out, board = [], {}
         for p in boxes[image_id]:
             cls = categories[p["category_id"]]
             if cls in CLASS_ID:
                 x, y, bw, bh = p["bbox"]
                 out.append((CLASS_ID[cls], (x + bw / 2) / w, (y + bh / 2) / h,
                             bw / w, bh / h))
+                pos = p.get("chessboard_position")
+                if pos:
+                    board[(ord(pos[0]) - ord("a"), int(pos[1]) - 1)] = (cls, 1.0)
         yield Sample(name, f"img{image_id:06d}", src, split, out,
-                     [(x / w, y / h) for x, y in corners[image_id]])
+                     [(x / w, y / h) for x, y in corners[image_id]],
+                     board_to_fen_placement(board) if len(board) == len(out) else None)
 
 
 def find_image(root, rel):
@@ -243,7 +250,13 @@ def find_image(root, rel):
 
 def load_chesscog(name, cfg, root, skipped):
     for split in SPLITS:
-        for js in sorted((root / split).glob("*.json")):
+        files = sorted((root / split).glob("*.json"))
+        cap = cfg.get("max_train")
+        if split == "train" and cap and len(files) > cap:
+            # One rendered board should not outweigh every real photo.
+            skipped[f"note: train capped at {cap} of {len(files)} (max_train)"] = len(files) - cap
+            files = sorted(random.Random(0).sample(files, cap))
+        for js in files:
             img = js.with_suffix(".png")
             if not img.exists():
                 skipped["missing image or split"] += 1
@@ -285,6 +298,15 @@ def placement_from_name(stem):
     return "/".join(rows)
 
 
+def fenit_board(stem):
+    """Fenit photographs two boards (see README). Board B's photos are the ones
+    named by timestamp or with '-' between the FEN rows; the rest are board A."""
+    head = stem.split()[0] if stem.strip() else ""
+    if re.fullmatch(r"\d{8}_\d{6}", head) or len(head.split("-")) == 8:
+        return "B"
+    return "A"
+
+
 def load_fenit(name, cfg, root, skipped):
     """Fenit (Mendeley Data, CC BY 4.0): real photos, one YOLO-pose .txt each.
     The 'Board' line carries the four corners as keypoints; piece lines carry a
@@ -292,7 +314,9 @@ def load_fenit(name, cfg, root, skipped):
     it is recovered from the position in the file name.
 
     There is no official split, and photos of one position must stay together,
-    so the split is a hash of the position."""
+    so the split is a hash of the position. With `holdout: B` (or A) in
+    sources.yaml every photo of that board is the test split instead, a board
+    the models never see, and the other board is train/val only."""
     names = FENIT_NAMES
     data_yaml = next(iter(sorted(root.rglob("data.yaml"))), None)
     if data_yaml is not None:
@@ -359,9 +383,14 @@ def load_fenit(name, cfg, root, skipped):
                 skipped["note: more boxes than pieces in the name (kept)"] += 1
 
         bucket = int(hashlib.md5((placement or label.stem).encode()).hexdigest(), 16) % 100
-        split = "test" if bucket < test_cut else "val" if bucket < val_cut else "train"
+        board = fenit_board(label.stem)
+        if cfg.get("holdout"):
+            split = ("test" if board == cfg["holdout"]
+                     else "val" if bucket < val_cut - test_cut else "train")
+        else:
+            split = "test" if bucket < test_cut else "val" if bucket < val_cut else "train"
         yield Sample(name, re.sub(r"[^A-Za-z0-9_.-]+", "-", label.stem), img, split,
-                     boxes, corners, placement)
+                     boxes, corners, placement, board)
 
 
 def load_roboflow(name, cfg, root, skipped, seen):
@@ -503,18 +532,54 @@ def source_shippable(cfg):
 # --------------------------------------------------------------------------
 # merge
 
-def write_sample(sample, out, counts, positions):
+def training_image(src, stem, max_side, cache):
+    """The file to put in the dataset: the photo itself, or with max_side a
+    JPEG copy no longer than that on its long side. Phone photos are 9-24 MP
+    and training uses 640 px, so decoding them is wasted time. Copies are kept
+    in `cache` so the next merge does not make them again."""
+    if not max_side:
+        return src
+    w, h = image_size(src)
+    if max(w, h) <= max_side:
+        return src
+    small = cache / f"{stem}.jpg"
+    if not small.exists():
+        import cv2
+        # JPEG can decode straight to 1/2 or 1/4 size, which is much faster.
+        reduce = next((r for r in (4, 2) if max(w, h) / r >= max_side), 1)
+        flag = {4: cv2.IMREAD_REDUCED_COLOR_4, 2: cv2.IMREAD_REDUCED_COLOR_2,
+                1: cv2.IMREAD_COLOR}[reduce]
+        img = cv2.imread(str(src), flag)
+        if img is None:
+            return src
+        scale = max_side / max(img.shape[:2])
+        img = cv2.resize(img, (round(img.shape[1] * scale), round(img.shape[0] * scale)),
+                         interpolation=cv2.INTER_AREA)
+        cache.mkdir(parents=True, exist_ok=True)
+        partial = cache / f"{stem}.partial.jpg"
+        cv2.imwrite(str(partial), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        partial.rename(small)
+    return small
+
+
+def write_sample(sample, out, counts, positions, max_side=0, cache=None):
     stem = f"{sample.source}__{sample.stem}"
+    image = training_image(sample.image, stem, max_side, cache)
     if sample.placement and (sample.boxes or sample.corners):
         task = "pieces" if sample.boxes else "corners"
-        positions.append({
-            "image": str(out / task / "images" / sample.split / f"{stem}{sample.image.suffix}"),
-            "source": sample.source, "split": sample.split, "placement": sample.placement})
+        row = {"image": str(out / task / "images" / sample.split / f"{stem}{image.suffix}"),
+               # evaluate.py scores the photo as taken, not the training copy
+               "original": str(sample.image),
+               "source": sample.source, "split": sample.split,
+               "placement": sample.placement}
+        if sample.group:
+            row["group"] = sample.group
+        positions.append(row)
     if sample.boxes:
         base = out / "pieces"
         (base / "labels" / sample.split / f"{stem}.txt").write_text("\n".join(
             f"{c} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}" for c, cx, cy, w, h in sample.boxes))
-        link(sample.image, base / "images" / sample.split / f"{stem}{sample.image.suffix}")
+        link(image, base / "images" / sample.split / f"{stem}{image.suffix}")
         counts[(sample.source, "pieces", sample.split)] += 1
     if sample.corners:
         xs = [p[0] for p in sample.corners]
@@ -526,7 +591,7 @@ def write_sample(sample, out, counts, positions):
         base = out / "corners"
         (base / "labels" / sample.split / f"{stem}.txt").write_text(
             f"0 {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {x2 - x1:.6f} {y2 - y1:.6f} {kpts}")
-        link(sample.image, base / "images" / sample.split / f"{stem}{sample.image.suffix}")
+        link(image, base / "images" / sample.split / f"{stem}{image.suffix}")
         counts[(sample.source, "corners", sample.split)] += 1
 
 
@@ -569,7 +634,8 @@ def merge(args, sources):
                 skipped["file name collides with another image"] += 1
                 continue
             stems.add(sample.stem)
-            write_sample(sample, out, counts, positions)
+            write_sample(sample, out, counts, positions, args.max_side,
+                         HERE / "datasets" / "_resized" / str(args.max_side))
             n += 1
         print(f"- {name}: {n} images" + "".join(
             f"\n    skipped {v}: {k}" for k, v in skipped.items()))
@@ -588,7 +654,8 @@ def merge(args, sources):
         f"path: {out / 'corners'}\ntrain: images/train\nval: images/val\ntest: images/test\n"
         "kpt_shape: [4, 3]\nflip_idx: [0, 1, 2, 3]\nnames:\n  0: board\n")
     (out / "manifest.json").write_text(json.dumps(
-        {"shippable_only": args.shippable, "sources": manifest}, indent=2))
+        {"shippable_only": args.shippable, "max_side": args.max_side,
+         "sources": manifest}, indent=2))
     (out / "positions.json").write_text(json.dumps(positions))
 
     print("\ntotals:")
@@ -804,6 +871,9 @@ def main():
     m.add_argument("--sources", nargs="*")
     m.add_argument("--shippable", action="store_true",
                    help="only data a commercially distributed model may be trained on")
+    m.add_argument("--max-side", type=int, default=0, metavar="PX",
+                   help="write JPEG copies no longer than PX on the long side instead "
+                        "of links to the full-size photos (e.g. 1280); faster training")
     args = ap.parse_args()
 
     sources = yaml.safe_load(Path(args.config).read_text())["sources"]

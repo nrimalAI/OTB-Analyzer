@@ -48,19 +48,26 @@ python build_dataset.py list              # sources, download sizes, what is on 
 python build_dataset.py fetch --dry-run   # what would be downloaded, nothing fetched
 python build_dataset.py fetch             # ~15 GB; needs about twice that free while unpacking
 python build_dataset.py merge             # everything on disk
+python build_dataset.py merge --max-side 1280  # same, with small JPEG copies to train on
 python build_dataset.py merge --shippable # only data an App Store model may be trained on
 python preview_labels.py                  # draw the merged labels on a few photos per source
 ```
 
 `fetch` was run end to end against the real servers in 2026-11 (ChessReD2K,
-chesscog including the split `train` archive, Fenit, Roboflow). The 4TU and OSF servers are slow (2-3 MB/s per file): fetching
-sources in separate shells (`fetch chessred2k`, `fetch chesscog`, `fetch
-fenit`) takes about 40 minutes instead of two hours.
+chesscog including the split `train` archive, Fenit, Roboflow). The 4TU and
+OSF servers are slow (2-3 MB/s per file): fetching sources in separate shells
+(`fetch chessred2k`, `fetch chesscog`, `fetch fenit`) takes about 40 minutes
+instead of two hours.
+
+`--max-side 1280` writes a JPEG copy of every photo larger than that (kept in
+`datasets/_resized/`, so later merges are quick) and trains on the copies;
+labels are normalised and do not change. `evaluate.py --positions` still
+scores the original photos.
 
 | Source | Photos | Gives | License |
 |---|---|---|---|
 | `chessred2k` | 2,078 real | boxes + corners | CC BY-NC-SA 4.0 — not shippable |
-| `chesscog` | 4,888 rendered | boxes + corners | CC BY 4.0 |
+| `chesscog` | 4,888 rendered (1,500 of the 4,400 train renders used) | boxes + corners | CC BY 4.0 |
 | `fenit` | 490 real (two boards) | boxes + corners | CC BY 4.0 |
 | `roboflow` | 276 real (one board, so far) | boxes only | per project, mostly CC BY 4.0 |
 | `chessred_pseudo` | up to ~5,000 real | boxes only | CC BY-NC-SA 4.0 — not shippable |
@@ -80,21 +87,24 @@ fenit`) takes about 40 minutes instead of two hours.
 - **chesscog** gives four unordered corner points; which one is a1 is recovered
   from the labelled piece squares. Checked against ChessReD2K, where the answer
   is known: 2,078 of 2,078 correct. On the real download all 4,888 images get
-  an order and every box lands on its square. Note it is a single rendered
-  board and piece set, and it makes up 72% of the merged training images.
+  an order and every box lands on its square. It is a single rendered board
+  and piece set and would be 72% of the training images, so `max_train: 1500`
+  in `sources.yaml` uses a fixed random sample of its train renders.
 - **Fenit** (https://data.mendeley.com/datasets/wpp9xnbcp6) is the only real
   photo set besides ChessReD with board corners, and needs no account. Each
   photo with a position is named after it; the corner order is recovered from
-  that. It has no official split, so 20% is held out as `test` and 10% as
-  `val` (`test_fraction` / `val_fraction` in `sources.yaml`), by position.
-  The held-out photos come from the same boards as the Fenit training photos,
-  so they measure "boards like Fenit's", not a board never seen.
+  that. It has two boards. `holdout: B` in `sources.yaml` makes every board B
+  photo the `test` split (100 with positions), a board and piece set the
+  models never see, and splits board A 90/10 into train/val. Without that
+  line 20% of positions from both boards are `test` and 10% `val`
+  (`test_fraction` / `val_fraction`), which only measures "boards like
+  Fenit's". Take the line out to train the final model on both boards.
 
   What the real download contains (checked 2026-11, all 490 photos looked at):
   - **Two boards, two piece sets.** Board A: cream / dark-brown roll-up board,
     light-wood and black pieces, 305 photos from three phones (names use `_`
     between rows). Board B: white / grey-brown board with an orange-brown
-    edge, red-brown and black pieces, 185 photos from one phone (names use
+    edge, red-brown and black pieces, 186 photos from one phone (names use
     `-`, or are timestamps).
   - 386 photos show a position and are named after it. The names are right;
     the labels are not always: 18 photos have a piece with no box (their
@@ -105,10 +115,12 @@ fenit`) takes about 40 minutes instead of two hours.
     56 are empty boards (not used: no pieces, and nothing to tell a1 from h8).
   - The board outline's keypoints are in image order (top-left first), not
     board order, so the order really does have to come from the position.
-  - Fed through `chess_pipeline` with their own boxes and corners, the test
-    photos come out 86% exact / 99.5% per-square. That is the ceiling for the
-    Fenit number: the camera is much lower than in ChessReD, and the
-    bottom-centre anchor rule misses more often.
+  - Fed through `chess_pipeline` with their own boxes and corners, board A
+    comes out 91.8% exact and board B 78.5% (99.8% / 99.0% per-square). Most
+    of the misses are label errors, not geometry: of 41 missed photos, 19 have
+    a wrong class on a box, 9 an extra box, and 13 (10 of them board B, where
+    the board often runs out of frame) a box that lands on the wrong square.
+    A model can therefore score above these figures.
 
   `python preview_labels.py` draws the merged labels on a few photos per
   source; `python preview_labels.py --check` counts, for every photo, how many
@@ -120,15 +132,19 @@ fenit`) takes about 40 minutes instead of two hours.
 
 `evaluate.py` on ChessReD's test split is unchanged, so those numbers stay
 comparable (baseline: 97.9% per-square, 73.2% boards exact). To score whole
-boards on the held-out Fenit photos — the closest thing here to "a different
-board" — use the `positions.json` the merge writes:
+boards on the held-out Fenit photos — board B, a board the models have not
+seen — use the `positions.json` the merge writes:
 
 ```sh
 python evaluate.py --corners-model ... --pieces-model ... \
                    --positions datasets/merged/positions.json --source fenit --split test
 ```
 
-Report both numbers for every new model.
+Report both numbers for every new model. `--group A` / `--group B` picks one
+Fenit board whatever the split. To see which model is at fault, replace one
+with the labels: `--gt-corners` (no corner model needed) or `--gt-boxes` (no
+piece model needed); with both, no model runs and the score is what the
+geometry alone allows.
 
 ## 2. Train
 
@@ -141,6 +157,12 @@ python train.py pieces  --data datasets/merged/pieces/data.yaml
 ```
 
 Both default to YOLO11 nano at 640px. On a Mac this uses MPS; expect hours.
+Runs are written to `Training/runs/`. Measured on the Mac mini (M4, 16 GB),
+yolo11s-pose, batch 16: 0.103 s per image on the full-size photos and 0.084 s
+on the `--max-side 1280` copies (19% faster; the GPU is the limit, not
+decoding), i.e. about 5 minutes per epoch for 3,200 training photos and about
+20 hours for 120 epochs on the full uncapped set. `cache="disk"` is not usable:
+it stores every photo at full size (8.5 GB for 330 ChessReD photos).
 A cloud GPU (Colab, Lambda) is much faster — the scripts run unchanged.
 
 ## 3. Evaluate (product metrics, not just mAP)
@@ -172,6 +194,30 @@ choosing. Copy the winners to `Models/BoardCorners.mlpackage` and
 
 > **License note:** Ultralytics YOLO is AGPL-3. Fine for this GPL-3 app; a
 > proprietary fork would need a different detector (see docs/PLAN.md).
+
+## Baseline on other boards (2026-11)
+
+`baseline/*.pt` (yolo11n, ChessReD2K only) on every Fenit photo with a known
+position; per-square / boards exact. An empty prediction already scores 79%
+(A) and 73% (B) per-square, so anything below that is worse than nothing.
+
+| | Board A (286) | Board B (100) |
+|---|---|---|
+| Both models | 72.1% / 0% | 58.0% / 0%, corners not found in 12 |
+| Piece model + labelled corners | 92.2% / 1.5% | 84.2% / 0% |
+| Corner model + labelled boxes | 72.8% / 0% | 59.9% / 0% |
+| Labelled boxes + labelled corners | 99.8% / 91.8% | 99.0% / 78.5% |
+
+**The corner model is what fails first on a new board**: with perfect boxes
+it is still below the empty-board score, i.e. the corners it finds are wrong,
+not just imprecise. The piece model also fails (it misses or misreads enough
+pieces that almost no board is fully right), but far less badly.
+
+**The anchor `pull` is not the problem.** With labelled boxes and corners,
+boards exact by `pull`: ChessReD2K 100% for every value from 0.05 to 0.65;
+chesscog 100% from 0.10 to 0.50; Fenit A 91.8% from 0.05 to 0.40; Fenit B
+77.4-78.5% from 0.00 to 0.30, falling above 0.40. One fixed value serves all
+four, so the default stays 0.30 and no angle-dependent pull is needed.
 
 ## Accuracy findings (2026-08, ChessReD2K val/test)
 

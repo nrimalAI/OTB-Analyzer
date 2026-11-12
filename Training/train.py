@@ -12,8 +12,11 @@ Notes:
 """
 
 import argparse
+from pathlib import Path
 
 from ultralytics import YOLO
+
+HERE = Path(__file__).resolve().parent
 
 COMMON = dict(
     imgsz=640,
@@ -38,6 +41,8 @@ def main():
     ap.add_argument("--data", required=True)
     ap.add_argument("--model", default=None, help="base checkpoint override")
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--patience", type=int, default=None,
+                    help="stop after this many epochs without improvement")
     ap.add_argument("--batch", type=int, default=None)
     ap.add_argument("--device", default=None, help="e.g. mps, 0, cpu")
     ap.add_argument("--imgsz", type=int, default=None, help="input resolution override")
@@ -52,6 +57,8 @@ def main():
     overrides = dict(COMMON)
     if args.epochs:
         overrides["epochs"] = args.epochs
+    if args.patience is not None:
+        overrides["patience"] = args.patience
     if args.batch:
         overrides["batch"] = args.batch
     if args.device:
@@ -59,8 +66,12 @@ def main():
     if args.imgsz:
         overrides["imgsz"] = args.imgsz
 
+    # Keep runs under Training/runs/ wherever the script is started from
+    # (recent ultralytics would otherwise put them at the repo root).
+    project = HERE / "runs" / ("pose" if args.task == "corners" else "detect")
     model = YOLO(base)
-    model.train(data=args.data, name=args.name or args.task, **overrides)
+    model.train(data=args.data, project=str(project), name=args.name or args.task,
+                **overrides)
 
 
 if __name__ == "__main__":

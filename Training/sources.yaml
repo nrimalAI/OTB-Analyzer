@@ -31,6 +31,10 @@ sources:
     kind: chesscog
     dir: datasets/chesscog
     license: CC BY 4.0   # as stated on https://osf.io/xf3ka
+    # It is one rendered board and would be 72% of the training photos.
+    # A fixed random sample of this many train renders is used; val and test
+    # are kept whole. Remove the line to use all 4,400.
+    max_train: 1500
     downloads:
       - file: val.zip
         url: https://osf.io/download/ydtcs/
@@ -62,6 +66,11 @@ sources:
     # Photos of the same position always land in the same split.
     test_fraction: 0.2
     val_fraction: 0.1
+    # Fenit is two boards (A and B, see README). With `holdout`, every photo of
+    # that board is the test split -- a board and piece set the models never
+    # see -- and the other board is train/val only (test_fraction is unused).
+    # Remove the line to train on both boards, e.g. for the final model.
+    holdout: B
 
   roboflow:
     kind: roboflow

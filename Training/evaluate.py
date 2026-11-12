@@ -17,14 +17,17 @@ To score other data (e.g. the held-out Fenit photos), pass the positions.json
 that build_dataset.py merge writes:
     python evaluate.py ... --positions datasets/merged/positions.json \
                            --source fenit --split test
+
+To see which model is at fault, swap one for the labels: --gt-corners uses the
+labelled corners (no corner model needed), --gt-boxes the labelled boxes (no
+piece model needed). With both, no model runs at all and the score is what
+chess_pipeline's geometry alone allows, e.g. for trying --pull values.
 """
 
 import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
-
-from ultralytics import YOLO
 
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
@@ -116,29 +119,67 @@ def chessred_items(args):
         if not gt:
             continue
         gt_c = gt_corners_by_image.get(image_id)
+        boxes = [Detection(categories[p["category_id"]], 1.0,
+                           (p["bbox"][0], p["bbox"][1],
+                            p["bbox"][0] + p["bbox"][2], p["bbox"][1] + p["bbox"][3]))
+                 for p in piece_anns
+                 if p.get("bbox") and categories[p["category_id"]] in FEN_LETTER]
         yield src, gt, gt_c and [
-            gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")]
+            gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")], boxes
+
+
+def merged_labels(row, src):
+    """(corners, boxes) in pixels of `src` from the merged dataset's label
+    files for a positions.json row; either is None when it has no label."""
+    merged = Path(row["image"])
+    root, split = merged.parents[3], merged.parent.name
+    corner_file = root / "corners" / "labels" / split / f"{merged.stem}.txt"
+    box_file = root / "pieces" / "labels" / split / f"{merged.stem}.txt"
+    if not (corner_file.exists() or box_file.exists()):
+        return None, None
+    from PIL import Image
+    with Image.open(src) as im:
+        w, h = im.size
+    corners = boxes = None
+    if corner_file.exists():
+        v = [float(x) for x in corner_file.read_text().split()[5:17]]
+        corners = [[v[i] * w, v[i + 1] * h] for i in range(0, 12, 3)]
+    if box_file.exists():
+        boxes = []
+        for line in box_file.read_text().splitlines():
+            c, cx, cy, bw, bh = line.split()[:5]
+            cx, cy, bw, bh = float(cx) * w, float(cy) * h, float(bw) * w, float(bh) * h
+            boxes.append(Detection(PIECE_CLASSES[int(c)], 1.0,
+                                   (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)))
+    return corners, boxes
 
 
 def position_items(args):
-    """The same triples from a positions.json written by build_dataset.py."""
+    """The same tuples from a positions.json written by build_dataset.py. The
+    photo scored is the original one, not a resized training copy."""
     for row in json.loads(Path(args.positions).read_text()):
         if args.split != "all" and row["split"] != args.split:
             continue
         if args.source and row["source"] != args.source:
             continue
-        yield Path(row["image"]), fen_placement_to_board(row["placement"]), None
+        if args.group and row.get("group") != args.group:
+            continue
+        src = Path(row.get("original") or row["image"])
+        corners, boxes = (merged_labels(row, src) if args.gt_corners or args.gt_boxes
+                          else (None, None))
+        yield src, fen_placement_to_board(row["placement"]), corners, boxes
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corners-model", required=True)
-    ap.add_argument("--pieces-model", required=True)
+    ap.add_argument("--corners-model", help="not needed with --gt-corners")
+    ap.add_argument("--pieces-model", help="not needed with --gt-boxes")
     ap.add_argument("--annotations", help="ChessReD annotations.json")
     ap.add_argument("--images", help="ChessReD image root")
     ap.add_argument("--positions",
                     help="positions.json from build_dataset.py merge, instead of ChessReD")
     ap.add_argument("--source", help="with --positions: only this source, e.g. fenit")
+    ap.add_argument("--group", help="with --positions: only this group, e.g. Fenit board A or B")
     ap.add_argument("--split", default="test", choices=["train", "val", "test", "all"])
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--pull", type=float, default=0.30,
@@ -149,26 +190,36 @@ def main():
     ap.add_argument("--two-pass", action="store_true",
                     help="re-run corner model on a board crop for sharper keypoints")
     ap.add_argument("--gt-corners", action="store_true",
-                    help="use annotated ground-truth corners (bottleneck diagnostic)")
+                    help="use the labelled corners instead of the corner model")
+    ap.add_argument("--gt-boxes", action="store_true",
+                    help="use the labelled piece boxes instead of the piece model")
     args = ap.parse_args()
 
+    if not args.gt_corners and not args.corners_model:
+        ap.error("give --corners-model or --gt-corners")
+    if not args.gt_boxes and not args.pieces_model:
+        ap.error("give --pieces-model or --gt-boxes")
     if args.positions:
-        if args.gt_corners:
-            ap.error("--gt-corners needs ChessReD annotations, not --positions")
         items = position_items(args)
     elif args.annotations and args.images:
         items = chessred_items(args)
     else:
         ap.error("give --annotations and --images, or --positions")
 
-    corner_model = YOLO(args.corners_model)
-    piece_model = YOLO(args.pieces_model)
+    if not (args.gt_corners and args.gt_boxes):
+        from ultralytics import YOLO
+    corner_model = None if args.gt_corners else YOLO(args.corners_model)
+    piece_model = None if args.gt_boxes else YOLO(args.pieces_model)
 
     total_squares = correct_squares = 0
-    boards = exact = corner_failures = flip_suspects = 0
+    boards = exact = corner_failures = flip_suspects = unlabelled = 0
     confusion = Counter()
 
-    for src, gt, gt_kpts in items:
+    for src, gt, gt_kpts, gt_boxes in items:
+        # A photo without the label that was asked for cannot take part.
+        if (args.gt_corners and not gt_kpts) or (args.gt_boxes and not gt_boxes):
+            unlabelled += 1
+            continue
         # 1. corners
         if args.gt_corners:
             kpts = gt_kpts
@@ -183,13 +234,16 @@ def main():
         H = homography(kpts)
 
         # 2. pieces
-        pr = piece_model(str(src), conf=args.conf, verbose=False)[0]
         detections = []
-        if pr.boxes is not None:
-            for box, cls, conf in zip(
-                    pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(), pr.boxes.conf.tolist()):
-                detections.append(
-                    Detection(PIECE_CLASSES[int(cls)], float(conf), tuple(box)))
+        if args.gt_boxes:
+            detections = gt_boxes
+        else:
+            pr = piece_model(str(src), conf=args.conf, verbose=False)[0]
+            if pr.boxes is not None:
+                for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
+                                          pr.boxes.conf.tolist()):
+                    detections.append(
+                        Detection(PIECE_CLASSES[int(cls)], float(conf), tuple(box)))
 
         predicted = assign_squares(H, detections, pull=args.pull)
         pred_letters = {sq: FEN_LETTER[cls] for sq, (cls, _) in predicted.items()}
@@ -230,6 +284,8 @@ def main():
         return
 
     print(f"boards evaluated:        {boards}")
+    if unlabelled:
+        print(f"left out, no such label: {unlabelled}")
     print(f"corner detection failed: {corner_failures}")
     print(f"per-square accuracy:     {correct_squares / total_squares:.4%}")
     print(f"full-board exact match:  {exact / boards:.2%}")
