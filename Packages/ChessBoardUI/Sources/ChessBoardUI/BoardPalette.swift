@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// Fonts for the few pieces of text the board package draws. The defaults
+/// are system fonts; a host app can swap in its own once at launch.
+public enum BoardTypography {
+    /// Rank/file labels in the board's corners.
+    public static var coordinate = Font.system(size: 9, weight: .medium, design: .monospaced)
+    /// Text keys such as the tray's "Empty".
+    public static var label = Font.system(size: 13, weight: .medium)
+}
+
 /// The "scoresheet" board colours: a printed diagram on warm paper. Shared by
 /// the board, the piece tray, and the app's own theme so they never drift.
 public enum BoardPalette {

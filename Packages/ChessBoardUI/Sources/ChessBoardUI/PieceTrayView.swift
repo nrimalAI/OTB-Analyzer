@@ -29,7 +29,7 @@ public struct PieceTrayView: View {
                 onSelect(nil)
             } label: {
                 Text("Empty")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(BoardTypography.label)
                     .foregroundStyle(BoardPalette.ink)
                     .frame(width: 58, height: keyHeight * 2 + gap)
                     .overlay(

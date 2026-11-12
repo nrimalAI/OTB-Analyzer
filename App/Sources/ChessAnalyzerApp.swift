@@ -4,6 +4,10 @@ import SwiftUI
 struct ChessAnalyzerApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        Theme.applyBoardTypography()
+    }
+
     var body: some Scene {
         WindowGroup {
             NavigationStack(path: $model.path) {

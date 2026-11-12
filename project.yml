@@ -40,6 +40,13 @@ targets:
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Bundled typefaces (SIL OFL), see App/Resources/Fonts.
+        UIAppFonts:
+          - Newsreader-Variable.ttf
+          - IBMPlexSans-Variable.ttf
+          - IBMPlexMono-Regular.ttf
+          - IBMPlexMono-Medium.ttf
+          - IBMPlexMono-SemiBold.ttf
         # No network use at all; declaring exempt avoids the export-compliance
         # question on every App Store Connect upload.
         ITSAppUsesNonExemptEncryption: false

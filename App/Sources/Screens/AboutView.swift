@@ -10,6 +10,8 @@ struct AboutView: View {
     private static let stockfishURL = URL(string: "https://stockfishchess.org")!
     private static let gplURL = URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!
     private static let chesskitURL = URL(string: "https://github.com/chesskit-app")!
+    private static let newsreaderURL = URL(string: "https://github.com/productiontype/Newsreader")!
+    private static let plexURL = URL(string: "https://github.com/IBM/plex")!
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,6 +51,11 @@ struct AboutView: View {
                         row("Stockfish 17", detail: "Chess engine \u{2014} GPL-3.0, \u{00A9} the Stockfish developers", link: Self.stockfishURL)
                         row("ChessKit", detail: "Chess rules & engine bindings \u{2014} MIT", link: Self.chesskitURL)
                         row("Board recognition", detail: "On-device CoreML models trained for this app")
+                    }
+
+                    section("Typefaces") {
+                        row("Newsreader", detail: "Production Type \u{2014} SIL Open Font License 1.1", link: Self.newsreaderURL)
+                        row("IBM Plex Sans & Mono", detail: "\u{00A9} IBM Corp. \u{2014} SIL Open Font License 1.1", link: Self.plexURL)
                     }
 
                     section("Open source") {

@@ -149,7 +149,7 @@ public struct BoardView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
-        .font(.system(size: 9, weight: .medium, design: .monospaced))
+        .font(BoardTypography.coordinate)
         .foregroundStyle(BoardPalette.coordinate)
     }
 
