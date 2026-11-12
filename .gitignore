@@ -29,3 +29,8 @@ pieces_train.log
 pieces.pid
 venv-export/
 build/
+
+# Project notes: a clone of nrimalAI/otb_analyzer_notes, managed by .claude/hooks/memory.sh
+/.notes*
+.claude/settings.local.json
+.claude/worktrees/
