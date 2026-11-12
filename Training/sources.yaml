@@ -111,6 +111,14 @@ sources:
     # (every version is flipped and rotated copies); logan-44qjh/chess-pieces-8slll
     # (pieces on the board without a box in 2 of 6 photos looked at).
 
+  # Synthetic boards with exact corner labels, made by synth_boards.py (random
+  # board colours, borders, floors and cameras; piece cut-outs from chesscog
+  # and Fenit). Corners only: more boards for the corner model to learn from.
+  synth:
+    kind: native
+    dir: datasets/synth
+    license: CC BY 4.0
+
   # The rest of ChessReD: positions are labelled, boxes are not. About 5,000
   # of them (the train split) can be used.
   # pseudo_label.py turns them into chessred_pseudo below.
