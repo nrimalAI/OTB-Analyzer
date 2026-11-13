@@ -90,6 +90,9 @@ sources:
       - id: multichess/chess-vision-ljby5          # tournament video frames, 8+ boards
         version: 1                                 # 40,261 frames, no augmentation
         max_images: 1500
+        # 6,966 of its files are copies of chesscog and of every ChessReD2K
+        # photo (test split included, and ChessReD is NonCommercial).
+        exclude_prefixes: [chesscog_, chessred2k_]
       - id: mars-lab-2/getchess                    # several wooden and paper boards;
         version: 1                                 # about half are top-down boards
         max_images: 600                            # pasted on backgrounds

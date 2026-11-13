@@ -399,7 +399,10 @@ def load_roboflow(name, cfg, root, skipped, seen):
     `max_per_project`) keeps a fixed random sample, so one large project of
     video frames cannot swamp the rest; `only_splits` reads just those of the
     export's train/valid/test folders, for exports whose train folder holds
-    augmented copies; `license` overrides what the export states."""
+    augmented copies; `exclude_prefixes` drops files whose names start with
+    one of them, for projects that re-upload other datasets (copies of our own
+    test photos would otherwise end up in training); `license` overrides what
+    the export states."""
     settings = {p["id"].split("/")[-1]: p for p in cfg.get("projects", [])}
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         data_yaml = next(iter(sorted(project.rglob("data.yaml"))), None)
@@ -424,6 +427,12 @@ def load_roboflow(name, cfg, root, skipped, seen):
         labels = sorted(data_yaml.parent.rglob("labels/*.txt"))
         if mine.get("only_splits"):
             labels = [l for l in labels if l.parent.parent.name in mine["only_splits"]]
+        prefixes = tuple(mine.get("exclude_prefixes") or ())
+        if prefixes:
+            copies = [l for l in labels if l.name.startswith(prefixes)]
+            if copies:
+                skipped[f"{project.name}: copy of another dataset"] += len(copies)
+                labels = [l for l in labels if not l.name.startswith(prefixes)]
         cap = mine.get("max_images", cfg.get("max_per_project"))
         if cap and len(labels) > cap:
             random.Random(0).shuffle(labels)  # a fixed order; stop once `cap` are kept
