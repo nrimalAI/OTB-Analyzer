@@ -254,9 +254,10 @@ to rebuild a folder a running job reads.
 
 **Running jobs.** Start them detached and awake, so no session has to stay
 open: `nohup caffeinate -i ./venv/bin/python -u train.py ... > runs/<name>.log 2>&1 &`.
-`runs/queue.sh` chains runs (it waits for any `train.py corners` process, then
-runs its list in order and writes `runs/queue.log`). A run that was cut off
-continues with `yolo train resume model=runs/<task>/<name>/weights/last.pt`.
+`queue.sh` chains runs: it takes `runs/queue.txt` top to bottom, keeps
+the running line in `runs/queue.current`, and when started again after a
+power cut continues that run from its `last.pt` (start it with
+`nohup bash queue.sh > /dev/null 2>&1 &`; the file's header has the rest).
 Two runs at once only slow each other down on 16 GB.
 
 **Scoring a run.** Always `best.pt` and `last.pt` (validation is 90% boards
@@ -284,10 +285,10 @@ GPU and slows it a little.
 | Run | What | Result |
 |---|---|---|
 | `corners_s_exp1` | yolo11s-pose, 640, 40 epochs, default tolerance | Finished. `last.pt` / `best.pt`, median corner error in squares: ChessReD test 0.32 / 0.34 (baseline 0.31), Fenit A 0.29 / 0.34, **board B 0.92 / 0.99**, board not found in 11 / 9 of 93, order right in 41 / 43. With labelled boxes: ChessReD test 78.4% / 75.8% exact, board B 2.1% / 3.2% exact (63-65% per-square, below an empty board) |
-| `corners_s_exp3` | continues exp1 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_synth` (3,000 synthetic boards added) | running since 17:33 on 2026-11-12, moved ahead of exp2 |
-| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued after exp3 (stopped 5 minutes in to let exp3 go first) |
-| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (with 8 Roboflow projects) | queued |
+| `corners_s_exp3` | continues exp1 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_synth` (3,000 synthetic boards added); cut by a power failure after 5 epochs and continued | Finished (`best.pt` = `last.pt`). Median corner error: ChessReD test **0.22** (exp1 0.32), Fenit A 0.24, **board B 0.84** (order right 26 of 93). With labelled boxes: ChessReD test **95.8% exact** (exp1 78.4%), board B 3.2%, 23.7% with the best rotation. With the baseline piece model: ChessReD test 99.35% / **84.0% exact** (baseline pair 97.9% / 73.5%), board B 66.4% / 0% (baseline 58.0% / 0%) |
+| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | running since 21:34 on 2026-11-12 |
 | `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | queued |
+| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued last; exp3 already shows what a tighter tolerance does |
 
 **What has been learned, and what to try next.**
 
@@ -304,6 +305,30 @@ GPU and slows it a little.
   B is a plain brown-and-white board on a tiled floor: nothing about it is
   hard except that it is new. Hence exp3 on synthetic boards before exp2.
 - Scores of each run are kept in `runs/scores/<run>_<best|last>.txt`.
+- A tighter keypoint tolerance is what made corners precise on boards the
+  model knows (exp3: ChessReD test 78% -> 96% exact with labelled boxes). It
+  did nothing for a new board, and neither did 3,000 synthetic boards.
+- **A classical detector finds the grid on boards no model has seen**
+  (`grid_corners.py`: x-corners, a projective lattice fit, a self-check that
+  returns nothing when unsure). Accepted results, median error in squares:
+  board B 0.06 (90% of photos accepted), Fenit A 0.11 (92%), ChessReD test
+  0.03 (97%), none more than a square off; its thresholds were tuned on those
+  sets. With labelled boxes and the right rotation its corners give 77% of
+  board B exact, the same as the labelled corners. Two uses: an app-side
+  corner step (needs Swift, see the notes), and labels for training
+  (`derive_corners.py` labels corners on the Roboflow photos, checks them
+  against the piece boxes and takes a1 from square colour and pieces).
+- Which corner is a1 cannot be had from the corner model on a new board
+  (right in 26-43 of 93 on B). From the pieces alone (true positions) the
+  right rotation is picked in 97% of ChessReD and chesscog positions, 82% of
+  Fenit A and 86% of board B, which are endgame-heavy.
+- 60 of 98 corner labels on board B are clipped at the photo edge, so corner
+  errors there are overstated by up to half a square. Exact-board scores do
+  not use the corner labels.
+- **`chess-vision-ljby5` contains copies of every ChessReD2K photo and 4,888
+  chesscog renders** (`chessred2k_*`, `chesscog_*`); 254 were in `merged_v2`'s
+  piece training data. `exclude_prefixes` in `sources.yaml` now drops them and
+  `merged_v2` was rebuilt before any piece run used it.
 - Validation pose mAP says little: at exp1 epoch 20 it was 0.87 (mAP50-95)
   with corners 0.6-0.8 squares off, because the default tolerance is loose
   (see `train.py`). Judge corner models with `corner_error.py`. About 0.25
