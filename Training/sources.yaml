@@ -7,10 +7,13 @@
 #   roboflow  a folder of YOLO-format exports, one sub-folder per project
 #   native    labels already in our own format (pseudo_label.py, own photos)
 #   raw       download only; not merged directly
+#   chessq, ylichess, fen_json, fen_names, pgn_games
+#             the test-only sources at the end of this file
 #
 # shippable: may a model trained on it ship in the App Store build?
 #   Omit it to decide from the license text (roboflow: per project).
 # optional: true = `fetch` skips it unless named explicitly.
+# test_only: true = never trained or tuned on; see the end of this file.
 
 sources:
   chessred2k:
@@ -31,6 +34,10 @@ sources:
     kind: chesscog
     dir: datasets/chesscog
     license: CC BY 4.0   # as stated on https://osf.io/xf3ka
+    # It is one rendered board and would be 72% of the training photos.
+    # A fixed random sample of this many train renders is used; val and test
+    # are kept whole. Remove the line to use all 4,400.
+    max_train: 1500
     downloads:
       - file: val.zip
         url: https://osf.io/download/ydtcs/
@@ -50,7 +57,7 @@ sources:
             size: 4294967296
 
   # Real photos with piece boxes AND board corners; no account needed.
-  # https://data.mendeley.com/datasets/wpp9xnbcp6 (492 photos, April 2026)
+  # https://data.mendeley.com/datasets/wpp9xnbcp6 (490 photos, April 2026)
   fenit:
     kind: fenit
     dir: datasets/fenit
@@ -62,6 +69,11 @@ sources:
     # Photos of the same position always land in the same split.
     test_fraction: 0.2
     val_fraction: 0.1
+    # Fenit is two boards (A and B, see README). With `holdout`, every photo of
+    # that board is the test split -- a board and piece set the models never
+    # see -- and the other board is train/val only (test_fraction is unused).
+    # Remove the line to train on both boards, e.g. for the final model.
+    holdout: B
 
   roboflow:
     kind: roboflow
@@ -70,12 +82,68 @@ sources:
     # project's "YOLOv8" export by hand and unzip it to datasets/roboflow/<name>/.
     # Leave `version` out to take the newest. Add more projects freely — forks
     # of the same photos are de-duplicated at merge time.
+    # Each project is a different board or set of boards, which is what the
+    # piece model lacks. Chosen 2026-11 from a search of Universe for real
+    # photos with colour+type classes, a published version and no heavy
+    # augmentation. `version` pins one without flips/rotations where it exists.
+    # A project is capped at max_per_project images unless it sets max_images.
+    max_per_project: 800
     projects:
-      - id: roboflow-100/chess-pieces-mjzgj
-      - id: mahdi-ruposh/chesspiece-object-detection
-      - id: luksuz/chess_pieces-nf8av
-      - id: jjgg/chess_detection-cief9
-      - id: cutegander/chess-pieces-b8cbo
+      - id: roboflow-100/chess-pieces-mjzgj        # green vinyl "US Chess" board, tripod
+      - id: multichess/chess-vision-ljby5          # tournament video frames, 8+ boards
+        version: 1                                 # 40,261 frames, no augmentation
+        max_images: 1500
+        # 6,966 of its files are copies of chesscog and of every ChessReD2K
+        # photo (test split included, and ChessReD is NonCommercial).
+        exclude_prefixes: [chesscog_, chessred2k_]
+      - id: mars-lab-2/getchess                    # several wooden and paper boards;
+        version: 1                                 # about half are top-down boards
+        max_images: 600                            # pasted on backgrounds
+      - id: chess-xezgz/chess-hndwj                # dark-green/white vinyl, wooden table
+        version: 2
+      - id: tawan-afcpc/chess-f0mbu                # rendered mahogany/maple board (not photos)
+      - id: m-s-teslaenthusiast/anotador-xadrez    # brown/beige board, ornate border
+      - id: politechnika-warszawska/chess-bprbi    # natural-wood folding board
+        version: 4
+        only_splits: [valid, test]                 # its train folder is rotated/flipped copies
+      - id: captainred-aslrv/chess-vision-jmf56    # ~260 photos, nearly all different boards
+        version: 14
+        # The uploader says Public Domain, but the photos look collected from
+        # the web and from videos: not for a model that ships.
+        license: unknown (web photos)
+    # Tried and dropped: mahdi-ruposh/chesspiece-object-detection (no published
+    # version); luksuz/chess_pieces-nf8av, jjgg/chess_detection-cief9,
+    # cutegander/chess-pieces-b8cbo (empty projects); senku/chess-piece-vrw2r
+    # (every version is flipped and rotated copies); logan-44qjh/chess-pieces-8slll
+    # (pieces on the board without a box in 2 of 6 photos looked at).
+
+  # Synthetic boards with exact corner labels, made by synth_boards.py (random
+  # board colours, borders, floors and cameras; piece cut-outs from chesscog
+  # and Fenit). Corners only: more boards for the corner model to learn from.
+  synth:
+    kind: native
+    dir: datasets/synth
+    license: CC BY 4.0
+
+  # Rendered in Blender by render_boards.py: a new piece set, board, floor,
+  # light and camera for every image, from a low side view to straight above,
+  # with exact boxes and corners. Ours, so a model trained on it may ship.
+  # (The positions on the boards are taken from the merged train split, games
+  # of ChessReD among them: positions are facts about games, not the photos.)
+  render:
+    kind: native
+    dir: datasets/render
+    license: own
+
+  # Corner labels for Roboflow photos, derived by derive_corners.py with the
+  # classical grid detector (grid_corners.py): real boards for the corner
+  # model. Corners only. 13 photos are from chess-vision-jmf56 (licence
+  # unknown), hence not shippable as built.
+  rf_corners:
+    kind: native
+    dir: datasets/rf_corners
+    license: "CC BY 4.0 (13 photos from chess-vision-jmf56 have no stated licence)"
+    shippable: false
 
   # The rest of ChessReD: positions are labelled, boxes are not. About 5,000
   # of them (the train split) can be used.
@@ -106,3 +174,157 @@ sources:
     dir: datasets/own
     license: own
     shippable: true
+
+  # ------------------------------------------------------------------------
+  # TEST ONLY: the second held-out test set ("heldout2"). Real photos of
+  # boards and piece sets that are in no training source (not ChessReD's, not
+  # Fenit's, none of the Roboflow projects), each with its full position.
+  #
+  # `test_only: true` means: never train on it, and never choose a threshold,
+  # a prior, an epoch or a model on it. Score finished candidates and report
+  # the number. A setting kept because it scored better here turns this into
+  # one more tuning set, and the only unseen boards left are gone. `merge`
+  # enforces what it can: these sources are left out unless named, cannot be
+  # merged together with a training source, and every photo is split `test`.
+  # They get a folder of their own, so the scripts that read datasets/merged*/
+  # (training, synth_boards.py, derive_corners.py, grid_corners.py) never see
+  # them:
+  #
+  #     python build_dataset.py fetch chessq ylichess chesscog_real samryan chesscv_games
+  #     python build_dataset.py merge --out datasets/heldout2 \
+  #         --sources chessq ylichess chesscog_real samryan chesscv_games
+  #     python evaluate.py ... --positions datasets/heldout2/positions.json --split test
+  #
+  # None needs an account or a key. All are `shippable: false`: that flag is
+  # about training, and nothing here is trained on, whatever its licence.
+  # What was looked at and not taken is in README.md ("Second held-out test set").
+
+  # ChessQ Test (Joël Seytre, 2026): 50 phone photos, 50 positions, 15 kinds
+  # of chess set, at most five photos of each; labels reviewed by hand. The
+  # most varied of the five, and the one closest to how the app is used.
+  # https://huggingface.co/datasets/joelseytre/chessq-test
+  chessq:
+    kind: chessq
+    test_only: true
+    optional: true
+    dir: datasets/chessq
+    license: CC BY-NC 4.0
+    shippable: false
+    hf_dataset: joelseytre/chessq-test
+    hf_revision: e1f55828c9ac1b045efac767f79df6a54bf3f3e4
+    hf_path: data/test
+    approx_bytes: 282725083
+
+  # Y-LIChess multi-board dataset (Benitez-Garcia & Takahashi, IVCNZ 2025):
+  # 1920x1080 webcam frames, one fixed high camera. Piece boxes and the board
+  # outline; the position is derived from them (see load_ylichess).
+  # https://github.com/GibranBenitez/Y-LIChess
+  # Only the light-wood board is used (204 photos). The dataset has three more
+  # boards (plastic_bw, wood_dark, mat_green: 615 photos), but their boxes are
+  # a detector's output, not labels, and no position can be had from them;
+  # their archives are not fetched.
+  ylichess:
+    kind: ylichess
+    test_only: true
+    optional: true
+    dir: datasets/ylichess
+    license: CC BY 4.0   # LICENSE-DATA in the repository
+    shippable: false
+    boards:
+      wood180:
+        # Photos numbered up to this have White on the far side (a1 top right
+        # in the frame); the later ones are set up the other way round.
+        white_far_until: 100
+        # Two king-and-pawn endings where that rule cannot be trusted: with
+        # the a1 it gives, pawns have passed each other on two files; turned
+        # 180 degrees both are ordinary endings. Which way they were set up
+        # cannot be told from the photo, so they go with the layouts.
+        a1_unclear: [43, 144]
+    downloads:
+      - file: wood180_train.zip
+        provides: wood180_train
+        size: 106565492
+        url: "https://drive.usercontent.google.com/download?id=1hKhfI15mhZrVXOkHa4HTCp_qyQ3hQc1U&export=download&confirm=t"
+      - file: wood180_valid.zip
+        provides: wood180_valid
+        size: 15624191
+        url: "https://drive.usercontent.google.com/download?id=1dluWD7-0pdoNBYBCaP0oyeK6FEHvGtiu&export=download&confirm=t"
+
+  # The real photos of chesscog's "transfer learning" experiment (Wölflein &
+  # Arandjelović 2021): one game on a black-bordered wooden board, iPhone, low
+  # player's-eye view; 27 positions and the start position from both sides.
+  # One JSON per photo with the position. The link is the one in
+  # chesscog/transfer_learning/download_dataset.py.
+  chesscog_real:
+    kind: fen_json
+    test_only: true
+    optional: true
+    dir: datasets/chesscog_real
+    license: "none stated for the photos (chesscog's code is MIT)"
+    shippable: false
+    downloads:
+      - file: transfer_learning_dataset.zip
+        provides: test
+        url: "https://drive.usercontent.google.com/download?id=1Z9fTXRb7FlqzgTTXoywgiQP-Z1cH1v3W&export=download&confirm=t"
+        size: 53654564
+
+  # samryan18/chess-dataset (2019): 500 photos taken straight down (Nikon
+  # D3400, 6000x4000) of one green vinyl tournament mat on the floor, each
+  # named after its position. Straight above is a view the training data
+  # hardly has; it says little about a photo taken from a player's seat.
+  # https://github.com/samryan18/chess-dataset
+  samryan:
+    kind: fen_names
+    test_only: true
+    optional: true
+    dir: datasets/samryan
+    subdir: labeled_originals
+    license: MIT
+    shippable: false
+    git: https://github.com/samryan18/chess-dataset
+    git_rev: 62a8f5b0a45a931c91fd11bf6e1fe0c9fa0d25d9
+    git_paths: [labeled_originals]
+    approx_bytes: 1271247945
+
+  # Rizo-R/chess-cv: eight famous games replayed on a folding brown and cream
+  # board and photographed by hand after every move, from White's side
+  # (orig/) and from Black's (rev/): 840 phone photos, 2048x1536. The position
+  # of photo N is the game after ply N. Neighbouring photos differ by one
+  # move, so this is 8 games rather than 840 independent boards.
+  # https://github.com/Rizo-R/chess-cv
+  chesscv_games:
+    kind: pgn_games
+    test_only: true
+    optional: true
+    dir: datasets/chesscv_games
+    license: "none stated (scored here only; not redistributed)"
+    shippable: false
+    downloads:
+      - file: games.zip
+        provides: games
+        size: 744516299
+        url: "https://drive.usercontent.google.com/download?id=1Ynge-pn1szzJlmQPIAd1BMGaSkOw_vly&export=download&confirm=t"
+      - file: pgns/alekhine_nimzowitsch.pgn
+        size: 591
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/alekhine_nimzowitsch.pgn
+      - file: pgns/anderssen_dufresne.pgn
+        size: 490
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/anderssen_dufresne.pgn
+      - file: pgns/bertok_fischer.pgn
+        size: 610
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/bertok_fischer.pgn
+      - file: pgns/hewitt_steinitz.pgn
+        size: 494
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/hewitt_steinitz.pgn
+      - file: pgns/karpov_kasparov.pgn
+        size: 759
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/karpov_kasparov.pgn
+      - file: pgns/rossolimo_reissmann.pgn
+        size: 502
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/rossolimo_reissmann.pgn
+      - file: pgns/runau_schmidt.pgn
+        size: 411
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/runau_schmidt.pgn
+      - file: pgns/thorsteinsson_karlsson.pgn
+        size: 408
+        url: https://raw.githubusercontent.com/Rizo-R/chess-cv/535da3055e7dcc45a1c2bc60f3ebe09965bab4a0/data/raw/pgns/thorsteinsson_karlsson.pgn

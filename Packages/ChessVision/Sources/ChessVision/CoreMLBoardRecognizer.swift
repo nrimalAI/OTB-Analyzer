@@ -15,6 +15,11 @@ import Vision
 ///   `VNRecognizedObjectObservation`s with normalized bounding boxes
 ///   (lower-left origin) and class labels like `"white_pawn"`.
 ///
+/// After the models, two steps that need no learning (`docs/RECOGNITION.md`):
+/// the corners are replaced by the classical grid fit (`GridCorners`) where it
+/// accepts its own result, and which corner is a1 is checked against the
+/// pieces (`BoardOrientation`).
+///
 /// Both models see the photo letterboxed into a square (`Letterbox`), as in
 /// training, never stretched. The square is passed to Vision with
 /// `.scaleFill`, which for a square only resizes; `Letterbox` maps the
@@ -25,17 +30,31 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     private let pieceModel: VNCoreMLModel
     private let cornerScoreThreshold: Float
     private let pull: Double
+    private let a1Prior: Double?
+    private let gridFit: Bool
 
+    /// - Parameters:
+    ///   - a1Prior: which corner is a1 is checked against the pieces
+    ///     (`BoardOrientation.orient`); this is how much the corner model's
+    ///     own choice counts. `nil` keeps the corner model's a1 as it is.
+    ///   - gridFit: take the corners from the classical grid fit
+    ///     (`GridCorners`) where it accepts its own result, and from the
+    ///     corner model where it does not. With it, a board the corner model
+    ///     does not find can still be read.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
         cornerScoreThreshold: Float = 0.25,
-        pull: Double = 0.30  // = SquareAssignment.defaultPull
+        pull: Double = 0.30,  // = SquareAssignment.defaultPull
+        a1Prior: Double? = 6,  // = BoardOrientation.appPrior
+        gridFit: Bool = true
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
         self.cornerScoreThreshold = cornerScoreThreshold
         self.pull = pull
+        self.a1Prior = a1Prior
+        self.gridFit = gridFit
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -80,12 +99,29 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             throw RecognitionError.boardNotFound
         }
 
-        let corners = try detectCorners(in: square, letterbox: letterbox)
+        // Corners: the model's, the grid fit's, or both (see `corners(model:in:gridFit:)`).
+        var modelCorners: [CGPoint]?
+        do {
+            let found = try detectCorners(in: square, letterbox: letterbox)
+            if Homography(corners: found) != nil {
+                modelCorners = found
+            }
+        } catch RecognitionError.boardNotFound {
+            // The grid fit may still find the board.
+        }
+        guard let located = Self.corners(model: modelCorners, in: image, gridFit: gridFit) else {
+            throw RecognitionError.boardNotFound
+        }
+        var corners = located.corners
+
+        let detections = try detectPieces(in: square, letterbox: letterbox)
+        if let prior = Self.orientationPrior(fromModel: located.fromModel, configured: a1Prior) {
+            corners = BoardOrientation.orient(
+                corners: corners, detections: detections, pull: pull, prior: prior)
+        }
         guard let homography = Homography(corners: corners) else {
             throw RecognitionError.boardNotFound
         }
-
-        let detections = try detectPieces(in: square, letterbox: letterbox)
         let board = SquareAssignment.assign(
             detections: detections, homography: homography, pull: pull)
 
@@ -94,6 +130,45 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             corners: corners,
             orientationGuess: Self.orientationGuess(corners: corners)
         )
+    }
+
+    // MARK: - Grid fit
+
+    /// The board's corners from what the corner model and the grid fit say,
+    /// as `evaluate.py --grid-corners` combines them. Internal for testing.
+    ///
+    /// - The model found the board and the fit accepts its own result: the
+    ///   fit's corners (it says where they are exactly), turned to the
+    ///   rotation nearest the model's (it has an opinion on which is a1; the
+    ///   fit has none).
+    /// - The model found the board and the fit rejects itself, or is switched
+    ///   off: the model's corners.
+    /// - The model found no board and the fit accepts: the fit's corners, in
+    ///   no particular rotation (`fromModel` false: a1 must come from the
+    ///   pieces alone).
+    /// - Neither: nil, no board.
+    static func corners(
+        model: [CGPoint]?, in image: CGImage, gridFit: Bool
+    ) -> (corners: [CGPoint], fromModel: Bool)? {
+        let fit = gridFit ? GridCorners.find(in: image) : nil
+        switch (model, fit) {
+        case let (model?, fit?):
+            return (GridCorners.turned(fit.corners, nearestTo: model), true)
+        case let (model?, nil):
+            return (model, true)
+        case let (nil, fit?):
+            return (fit.corners, false)
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    /// The head start the corners as given get when a1 is checked against the
+    /// pieces; nil for no check. Corners that are the grid fit's alone carry
+    /// no opinion on a1 to weigh against the pieces: they decide alone (0),
+    /// whatever was configured, as in `evaluate.py`. Internal for testing.
+    static func orientationPrior(fromModel: Bool, configured: Double?) -> Double? {
+        fromModel ? configured : 0
     }
 
     // MARK: - Corner model
@@ -110,7 +185,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
                 .compactMap({ $0 as? VNCoreMLFeatureValueObservation })
                 .first(where: { $0.featureValue.multiArrayValue != nil }),
             let array = observation.featureValue.multiArrayValue
-        else { throw RecognitionError.boardNotFound }
+        // Not "no board": the model did not answer in the form expected. It
+        // must not be mistaken for a photo without a board, which the grid
+        // fit may still read.
+        else { throw RecognitionError.modelUnavailable }
 
         return try Self.parseCorners(
             from: array,

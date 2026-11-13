@@ -17,6 +17,11 @@ To score other data (e.g. the held-out Fenit photos), pass the positions.json
 that build_dataset.py merge writes:
     python evaluate.py ... --positions datasets/merged/positions.json \
                            --source fenit --split test
+
+To see which model is at fault, swap one for the labels: --gt-corners uses the
+labelled corners (no corner model needed), --gt-boxes the labelled boxes (no
+piece model needed). With both, no model runs at all and the score is what
+chess_pipeline's geometry alone allows, e.g. for trying --pull values.
 """
 
 import argparse
@@ -24,13 +29,12 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from ultralytics import YOLO
-
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
-    assign_squares, fen_placement_to_board, homography,
+    assign_squares, fen_placement_to_board, homography, orient_by_pieces,
 )
-from prepare_data import image_index, normalize_category, official_splits
+from canonical_corners import a1_order
+from prepare_data import image_index, image_size, normalize_category, official_splits
 
 
 def ground_truth_board(piece_anns, categories):
@@ -49,7 +53,23 @@ def ground_truth_board(piece_anns, categories):
     return board
 
 
-def detect_corners(model, src, imgsz=640, two_pass=False):
+def placement_of(board):
+    """{(file, rank): fen_letter} -> FEN placement field."""
+    rows = []
+    for rank in range(7, -1, -1):
+        row, empty = "", 0
+        for file in range(8):
+            letter = board.get((file, rank))
+            if letter is None:
+                empty += 1
+                continue
+            row += (str(empty) if empty else "") + letter
+            empty = 0
+        rows.append(row + (str(empty) if empty else ""))
+    return "/".join(rows)
+
+
+def detect_corners(model, src, imgsz=640, two_pass=False, device=None):
     """Predicted (a1, a8, h8, h1) image points, or None.
 
     With `two_pass`, re-runs the model on a crop around the first-pass board —
@@ -59,13 +79,15 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
     import cv2
 
     def run(img):
-        r = model(img, imgsz=imgsz, verbose=False)[0]
+        r = model(img, imgsz=imgsz, verbose=False, device=device)[0]
         if r.keypoints is None or len(r.keypoints) == 0:
             return None
         best = int(r.boxes.conf.argmax()) if r.boxes is not None and len(r.boxes) else 0
-        return r.keypoints.xy[best].tolist()
+        cls = r.boxes.cls[best] if r.boxes is not None and len(r.boxes) else 0
+        # A model trained with canonical_corners.py says where a1 is by class.
+        return a1_order(r.keypoints.xy[best].tolist(), cls, r.names)
 
-    first = run(str(src))
+    first = run(src if not isinstance(src, Path) else str(src))
     if first is None or not two_pass:
         return first
 
@@ -85,6 +107,33 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
     if second is None:
         return first
     return [[p[0] + x1, p[1] + y1] for p in second]
+
+
+def one_per_spot(detections, max_iou):
+    """Detections without the ones that overlap a more confident detection
+    (of any class) by more than max_iou."""
+    def iou(a, b):
+        w = min(a[2], b[2]) - max(a[0], b[0])
+        h = min(a[3], b[3]) - max(a[1], b[1])
+        if w <= 0 or h <= 0:
+            return 0.0
+        inter = w * h
+        return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    kept = []
+    for det in sorted(detections, key=lambda d: -d.confidence):
+        if all(iou(det.bbox, k.bbox) <= max_iou for k in kept):
+            kept.append(det)
+    return kept
+
+
+def stretched(src, side=640):
+    """The photo as the app hands it to the models: scaled to side x side
+    without keeping its shape (Vision's .scaleFill). Returns the image and the
+    factors that take model coordinates back to photo pixels."""
+    import cv2
+    img = cv2.imread(str(src))
+    h, w = img.shape[:2]
+    return cv2.resize(img, (side, side), interpolation=cv2.INTER_AREA), w / side, h / side
 
 
 def chessred_items(args):
@@ -116,29 +165,79 @@ def chessred_items(args):
         if not gt:
             continue
         gt_c = gt_corners_by_image.get(image_id)
+        boxes = [Detection(categories[p["category_id"]], 1.0,
+                           (p["bbox"][0], p["bbox"][1],
+                            p["bbox"][0] + p["bbox"][2], p["bbox"][1] + p["bbox"][3]))
+                 for p in piece_anns
+                 if p.get("bbox") and categories[p["category_id"]] in FEN_LETTER]
         yield src, gt, gt_c and [
-            gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")]
+            gt_c[k] for k in ("bottom_left", "top_left", "top_right", "bottom_right")], boxes
+
+
+def merged_labels(row, src):
+    """(corners, boxes) in pixels of `src` from the merged dataset's label
+    files for a positions.json row; either is None when it has no label."""
+    merged = Path(row["image"])
+    if len(merged.parents) < 4:
+        return None, None
+    root, split = merged.parents[3], merged.parent.name
+    corner_file = root / "corners" / "labels" / split / f"{merged.stem}.txt"
+    box_file = root / "pieces" / "labels" / split / f"{merged.stem}.txt"
+    if not (corner_file.exists() or box_file.exists()):
+        return None, None
+    w, h = image_size(src)  # after EXIF rotation, like the detections
+    corners = boxes = None
+    if corner_file.exists():
+        v = [float(x) for x in corner_file.read_text().split()[5:17]]
+        corners = [[v[i] * w, v[i + 1] * h] for i in range(0, 12, 3)]
+    if box_file.exists():
+        boxes = []
+        for line in box_file.read_text().splitlines():
+            c, cx, cy, bw, bh = line.split()[:5]
+            cx, cy, bw, bh = float(cx) * w, float(cy) * h, float(bw) * w, float(bh) * h
+            boxes.append(Detection(PIECE_CLASSES[int(c)], 1.0,
+                                   (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)))
+    return corners, boxes
 
 
 def position_items(args):
-    """The same triples from a positions.json written by build_dataset.py."""
+    """The same tuples from a positions.json written by build_dataset.py. The
+    photo scored is the original one, not a resized training copy."""
     for row in json.loads(Path(args.positions).read_text()):
         if args.split != "all" and row["split"] != args.split:
             continue
         if args.source and row["source"] != args.source:
             continue
-        yield Path(row["image"]), fen_placement_to_board(row["placement"]), None
+        if args.group and row.get("group") != args.group:
+            continue
+        src = Path(row.get("original") or row["image"])
+        corners, boxes = (merged_labels(row, src) if args.gt_corners or args.gt_boxes
+                          else (None, None))
+        yield src, fen_placement_to_board(row["placement"]), corners, boxes
+
+
+def wilson(hits, n, z=1.96):
+    """95% interval for a rate measured on n boards. On 100 boards it is
+    about +-9 points wide in the middle: differences of a few boards between
+    two models are noise."""
+    if n == 0:
+        return 0.0, 0.0
+    p = hits / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return max(centre - half, 0.0), min(centre + half, 1.0)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corners-model", required=True)
-    ap.add_argument("--pieces-model", required=True)
+    ap.add_argument("--corners-model", help="not needed with --gt-corners")
+    ap.add_argument("--pieces-model", help="not needed with --gt-boxes")
     ap.add_argument("--annotations", help="ChessReD annotations.json")
     ap.add_argument("--images", help="ChessReD image root")
     ap.add_argument("--positions",
                     help="positions.json from build_dataset.py merge, instead of ChessReD")
     ap.add_argument("--source", help="with --positions: only this source, e.g. fenit")
+    ap.add_argument("--group", help="with --positions: only this group, e.g. Fenit board A or B")
     ap.add_argument("--split", default="test", choices=["train", "val", "test", "all"])
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--pull", type=float, default=0.30,
@@ -149,32 +248,107 @@ def main():
     ap.add_argument("--two-pass", action="store_true",
                     help="re-run corner model on a board crop for sharper keypoints")
     ap.add_argument("--gt-corners", action="store_true",
-                    help="use annotated ground-truth corners (bottleneck diagnostic)")
+                    help="use the labelled corners instead of the corner model")
+    ap.add_argument("--gt-boxes", action="store_true",
+                    help="use the labelled piece boxes instead of the piece model")
+    ap.add_argument("--one-piece-per-spot", type=float, default=None, metavar="IOU",
+                    help="drop a detected box that overlaps a more confident one of "
+                         "any class by more than IOU (the piece model's own NMS is "
+                         "per class, so one piece can come back as two classes)")
+    ap.add_argument("--grid-corners", action="store_true",
+                    help="replace the corners by the classical grid fit "
+                         "(grid_corners.py) where it accepts its own result; the "
+                         "rotation stays the one nearest the model's or labelled corners")
+    ap.add_argument("--a1-from-pieces", type=float, nargs="?", const=0.0, default=None,
+                    metavar="PRIOR",
+                    help="choose which corner is a1 from the detected pieces "
+                         "(chess_pipeline.orient_by_pieces); PRIOR is how much the "
+                         "corners' own order counts (default 0)")
+    ap.add_argument("--stretch", action="store_true",
+                    help="feed the models the photo stretched to 640x640, as the app "
+                         "does (.scaleFill), instead of letterboxed")
+    ap.add_argument("--device", default=None,
+                    help="where the models run, e.g. cpu, so as not to take GPU "
+                         "memory from a training job (default: ultralytics picks)")
+    ap.add_argument("--dump-list", metavar="FILE",
+                    help="run no model: write the chosen photos and their true "
+                         "placements as JSON, the list app_check (the app's own "
+                         "recognizer, see app_check/) takes")
     args = ap.parse_args()
 
+    if args.dump_list:
+        if args.positions:
+            items = position_items(args)
+        elif args.annotations and args.images:
+            items = chessred_items(args)
+        else:
+            ap.error("give --annotations and --images, or --positions")
+        photos = {}
+        for src, gt, _, _ in items:
+            photos[str(Path(src).resolve())] = placement_of(gt)
+            if args.limit and len(photos) >= args.limit:
+                break
+        Path(args.dump_list).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.dump_list).write_text(json.dumps(photos, indent=0, sort_keys=True))
+        print(f"{len(photos)} photos written to {args.dump_list}")
+        return
+    if args.stretch and args.two_pass:
+        ap.error("--stretch and --two-pass cannot be combined")
+    if not args.gt_corners and not args.corners_model:
+        ap.error("give --corners-model or --gt-corners")
+    if not args.gt_boxes and not args.pieces_model:
+        ap.error("give --pieces-model or --gt-boxes")
     if args.positions:
-        if args.gt_corners:
-            ap.error("--gt-corners needs ChessReD annotations, not --positions")
         items = position_items(args)
     elif args.annotations and args.images:
         items = chessred_items(args)
     else:
         ap.error("give --annotations and --images, or --positions")
 
-    corner_model = YOLO(args.corners_model)
-    piece_model = YOLO(args.pieces_model)
+    if not (args.gt_corners and args.gt_boxes):
+        from ultralytics import YOLO
+    corner_model = None if args.gt_corners else YOLO(args.corners_model)
+    piece_model = None if args.gt_boxes else YOLO(args.pieces_model)
 
     total_squares = correct_squares = 0
-    boards = exact = corner_failures = flip_suspects = 0
+    boards = exact = corner_failures = flip_suspects = unlabelled = 0
+    exact_or_flipped = grid_rejected = grid_alone = 0
     confusion = Counter()
 
-    for src, gt, gt_kpts in items:
+    for src, gt, gt_kpts, gt_boxes in items:
+        # A photo without the label that was asked for cannot take part.
+        if (args.gt_corners and not gt_kpts) or (args.gt_boxes and not gt_boxes):
+            unlabelled += 1
+            continue
+        photo, sx, sy = stretched(src) if args.stretch else (src, 1.0, 1.0)
         # 1. corners
         if args.gt_corners:
             kpts = gt_kpts
         else:
             kpts = detect_corners(
-                corner_model, src, imgsz=args.corner_imgsz, two_pass=args.two_pass)
+                corner_model, photo, imgsz=args.corner_imgsz, two_pass=args.two_pass,
+                device=args.device)
+            if kpts is not None:
+                kpts = [[x * sx, y * sy] for x, y in kpts]
+        # With the grid fit, a board the corner model does not find can still
+        # be read: the fit needs no model. Its corners then come in no
+        # particular order, so a1 is taken from the pieces alone below.
+        model_found = kpts is not None
+        if args.grid_corners:
+            import cv2
+            import numpy as np
+            from grid_corners import find_grid
+            grid, _ = find_grid(cv2.imread(str(src)))
+            if grid is None:
+                grid_rejected += 1
+            elif model_found:
+                grid, old = np.array(grid, float), np.array(kpts, float)
+                turn = min(range(4), key=lambda j: np.linalg.norm(
+                    np.roll(grid, -j, axis=0) - old, axis=1).sum())
+                kpts = np.roll(grid, -turn, axis=0).tolist()
+            else:
+                kpts = np.array(grid, float).tolist()
+                grid_alone += 1
         if kpts is None:
             corner_failures += 1
             boards += 1
@@ -183,14 +357,27 @@ def main():
         H = homography(kpts)
 
         # 2. pieces
-        pr = piece_model(str(src), conf=args.conf, verbose=False)[0]
         detections = []
-        if pr.boxes is not None:
-            for box, cls, conf in zip(
-                    pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(), pr.boxes.conf.tolist()):
-                detections.append(
-                    Detection(PIECE_CLASSES[int(cls)], float(conf), tuple(box)))
+        if args.gt_boxes:
+            detections = gt_boxes
+        else:
+            pr = piece_model(photo if args.stretch else str(src), conf=args.conf,
+                             verbose=False, device=args.device)[0]
+            if pr.boxes is not None:
+                for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
+                                          pr.boxes.conf.tolist()):
+                    x1, y1, x2, y2 = box
+                    detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
+                                                (x1 * sx, y1 * sy, x2 * sx, y2 * sy)))
 
+        if args.one_piece_per_spot is not None and not args.gt_boxes:
+            detections = one_per_spot(detections, args.one_piece_per_spot)
+        if not model_found:
+            # No model opinion on a1 to weigh against the pieces.
+            H = homography(orient_by_pieces(kpts, detections, args.pull, prior=0.0))
+        elif args.a1_from_pieces is not None:
+            H = homography(orient_by_pieces(kpts, detections, args.pull,
+                                            prior=args.a1_from_pieces))
         predicted = assign_squares(H, detections, pull=args.pull)
         pred_letters = {sq: FEN_LETTER[cls] for sq, (cls, _) in predicted.items()}
 
@@ -210,6 +397,9 @@ def main():
                     confusion[(want or "·", got or "·")] += 1
         boards += 1
         exact += board_ok
+        flipped = {(7 - f, 7 - r): v for (f, r), v in pred_letters.items()}
+        exact_or_flipped += board_ok or all(
+            gt.get((f, r)) == flipped.get((f, r)) for f in range(8) for r in range(8))
 
         # Diagnostic: would the 180°-rotated prediction have matched better?
         # A high count here means the corner model confuses a1 with h8
@@ -230,9 +420,19 @@ def main():
         return
 
     print(f"boards evaluated:        {boards}")
+    if unlabelled:
+        print(f"left out, no such label: {unlabelled}")
     print(f"corner detection failed: {corner_failures}")
     print(f"per-square accuracy:     {correct_squares / total_squares:.4%}")
-    print(f"full-board exact match:  {exact / boards:.2%}")
+    low, high = wilson(exact, boards)
+    print(f"full-board exact match:  {exact / boards:.2%}"
+          f"  (95% interval {low:.0%}-{high:.0%} on {boards} boards)")
+    low, high = wilson(exact_or_flipped, boards)
+    print(f"exact, or exact once turned 180 degrees (one tap in the app): "
+          f"{exact_or_flipped / boards:.2%}  ({low:.0%}-{high:.0%})")
+    if args.grid_corners:
+        print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
+        print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
     print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):

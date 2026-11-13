@@ -6,6 +6,8 @@ we train (pieces: detect, 12 classes; corners: pose, 4 keypoints).
     python build_dataset.py fetch chesscog       # ...or just the named sources
     python build_dataset.py merge                # -> datasets/merged/{pieces,corners}
     python build_dataset.py merge --shippable    # leave out NonCommercial data
+    python build_dataset.py merge --out datasets/heldout2 \
+        --sources chessq ylichess chesscog_real samryan chesscv_games   # the test-only set
 
 Sources are declared in sources.yaml. `merge` uses whatever is on disk and
 skips the rest, so it works with a partial download.
@@ -17,6 +19,12 @@ What each source contributes:
   roboflow   boxes only; near-duplicate photos across projects are dropped;
              90% train / 10% val by hash
   native     whatever labels are present, train only
+
+Sources marked `test_only` in sources.yaml (the second held-out test set) are
+never part of a training folder: `merge` leaves them out unless they are
+named, refuses to mix them with other sources, and writes every photo as
+`test` into a folder of their own. Most give a position and no boxes or
+corners; evaluate.py needs no more than the position.
 
 Corner labels need to say WHICH corner is a1. chesscog and Fenit do not, so
 the order is recovered from where the pieces are known to stand (see
@@ -34,10 +42,12 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -46,10 +56,12 @@ from pathlib import Path
 import yaml
 
 from chess_pipeline import (
-    FEN_LETTER, PIECE_CLASSES, board_square, fen_placement_to_board, homography,
+    FEN_LETTER, PIECE_CLASSES, board_square, board_to_fen_placement,
+    fen_placement_to_board, homography,
 )
 from prepare_data import (
-    extract_corners, image_index, link, normalize_category, official_splits,
+    extract_corners, image_index, image_size, link, normalize_category,
+    official_splits,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -73,6 +85,7 @@ class Sample:
     boxes: list = None     # [(class_id, cx, cy, w, h)] normalized, or None
     corners: list = None   # [(x, y)] * 4 normalized, order a1 a8 h8 h1, or None
     placement: str = None  # FEN placement field, when the position is known
+    group: str = None      # a sub-set evaluate.py can pick out, e.g. Fenit's board
 
 
 # --------------------------------------------------------------------------
@@ -163,10 +176,13 @@ def orient_corners_by_position(points, pieces, placement):
     return _pick_rotation(points, len(pieces), hits, 0.6)
 
 
-def image_size(path):
-    from PIL import Image
-    with Image.open(path) as im:
-        return im.size
+def occupied_share(ordered, pieces, placement):
+    """Share of boxes that land on a square the position has a piece on,
+    whatever the piece — a check on the corners that a wrong class label on a
+    box does not disturb."""
+    board = fen_placement_to_board(placement)
+    H = homography(ordered)
+    return sum(board_square(H, _anchor(box)) in board for _, box in pieces) / len(pieces)
 
 
 def dhash(path):
@@ -210,15 +226,19 @@ def load_chessred(name, cfg, root, skipped):
             skipped["missing image or split"] += 1
             continue
         w, h = meta["width"], meta["height"]
-        out = []
+        out, board = [], {}
         for p in boxes[image_id]:
             cls = categories[p["category_id"]]
             if cls in CLASS_ID:
                 x, y, bw, bh = p["bbox"]
                 out.append((CLASS_ID[cls], (x + bw / 2) / w, (y + bh / 2) / h,
                             bw / w, bh / h))
+                pos = p.get("chessboard_position")
+                if pos:
+                    board[(ord(pos[0]) - ord("a"), int(pos[1]) - 1)] = (cls, 1.0)
         yield Sample(name, f"img{image_id:06d}", src, split, out,
-                     [(x / w, y / h) for x, y in corners[image_id]])
+                     [(x / w, y / h) for x, y in corners[image_id]],
+                     board_to_fen_placement(board) if len(board) == len(out) else None)
 
 
 def find_image(root, rel):
@@ -234,7 +254,13 @@ def find_image(root, rel):
 
 def load_chesscog(name, cfg, root, skipped):
     for split in SPLITS:
-        for js in sorted((root / split).glob("*.json")):
+        files = sorted((root / split).glob("*.json"))
+        cap = cfg.get("max_train")
+        if split == "train" and cap and len(files) > cap:
+            # One rendered board should not outweigh every real photo.
+            skipped[f"note: train capped at {cap} of {len(files)} (max_train)"] = len(files) - cap
+            files = sorted(random.Random(0).sample(files, cap))
+        for js in files:
             img = js.with_suffix(".png")
             if not img.exists():
                 skipped["missing image or split"] += 1
@@ -262,9 +288,18 @@ FENIT_NAMES = ["Board", "White-King", "White-Pawn", "Black-Pawn", "Black-King",
 
 
 def placement_from_name(stem):
-    """Fenit names each photo after its position: the eight FEN rows joined by
-    '_', sometimes followed by ' w' or ' b'. Returns the placement, or None."""
-    rows = stem.split()[0].split("_") if stem.strip() else []
+    """Fenit names most photos after their position: the eight FEN rows joined
+    by '_' or '-', sometimes followed by ' w' or ' b'. Returns the placement,
+    or None (some photos are named by timestamp instead)."""
+    rows = re.split(r"[_-]", stem.split()[0]) if stem.strip() else []
+    return valid_placement("/".join(rows))
+
+
+def valid_placement(text):
+    """The FEN placement field at the start of `text` (a full FEN is fine), or
+    None if it is not eight rows of eight squares."""
+    placement = text.split()[0] if text and text.strip() else ""
+    rows = placement.split("/")
     if len(rows) != 8:
         return None
     for row in rows:
@@ -272,7 +307,16 @@ def placement_from_name(stem):
             return None
         if sum(int(c) if c.isdigit() else 1 for c in row) != 8:
             return None
-    return "/".join(rows)
+    return placement
+
+
+def fenit_board(stem):
+    """Fenit photographs two boards (see README). Board B's photos are the ones
+    named by timestamp or with '-' between the FEN rows; the rest are board A."""
+    head = stem.split()[0] if stem.strip() else ""
+    if re.fullmatch(r"\d{8}_\d{6}", head) or len(head.split("-")) == 8:
+        return "B"
+    return "A"
 
 
 def load_fenit(name, cfg, root, skipped):
@@ -282,7 +326,9 @@ def load_fenit(name, cfg, root, skipped):
     it is recovered from the position in the file name.
 
     There is no official split, and photos of one position must stay together,
-    so the split is a hash of the position."""
+    so the split is a hash of the position. With `holdout: B` (or A) in
+    sources.yaml every photo of that board is the test split instead, a board
+    the models never see, and the other board is train/val only."""
     names = FENIT_NAMES
     data_yaml = next(iter(sorted(root.rglob("data.yaml"))), None)
     if data_yaml is not None:
@@ -322,28 +368,58 @@ def load_fenit(name, cfg, root, skipped):
 
         placement = placement_from_name(label.stem)
         corners = None
-        if placement is None:
-            skipped["file name is not a position (boxes kept, no corners)"] += 1
-        elif board_pts is None:
+        if board_pts is None:  # mostly close-ups of a single piece on the floor
             skipped["no board outline labelled (boxes kept)"] += 1
+        elif placement is None:
+            skipped["file name is not a position (boxes kept, no corners)"] += 1
         else:
-            if len(boxes) != len(fen_placement_to_board(placement)):
-                skipped["note: box count differs from the position in the name"] += 1
             ordered = orient_corners_by_position(board_pts, lettered, placement)
             if ordered is None:
                 skipped["corner order ambiguous (boxes kept)"] += 1
+            elif occupied_share(ordered, lettered, placement) < 0.8:
+                # Seen where the board runs out of the frame and the outline
+                # was clicked on the image edge instead of the real corner.
+                skipped["corners do not fit the position (boxes kept)"] += 1
             else:
                 corners = [(x / w, y / h) for x, y in ordered]
 
+        # The name is the more reliable of the two: where it lists more pieces
+        # than there are boxes, a piece on the board was left unlabelled, and
+        # training on that teaches the detector to miss pieces.
+        if placement is not None:
+            pieces = len(fen_placement_to_board(placement))
+            if len(boxes) < pieces:
+                skipped["a piece has no box (boxes dropped, corners kept)"] += 1
+                boxes = None
+            elif len(boxes) > pieces:
+                skipped["note: more boxes than pieces in the name (kept)"] += 1
+
         bucket = int(hashlib.md5((placement or label.stem).encode()).hexdigest(), 16) % 100
-        split = "test" if bucket < test_cut else "val" if bucket < val_cut else "train"
+        board = fenit_board(label.stem)
+        if cfg.get("holdout"):
+            split = ("test" if board == cfg["holdout"]
+                     else "val" if bucket < val_cut - test_cut else "train")
+        else:
+            split = "test" if bucket < test_cut else "val" if bucket < val_cut else "train"
         yield Sample(name, re.sub(r"[^A-Za-z0-9_.-]+", "-", label.stem), img, split,
-                     boxes, corners, placement)
+                     boxes, corners, placement, board)
 
 
 def load_roboflow(name, cfg, root, skipped, seen):
     """root holds one YOLO export per sub-folder. `seen` carries de-dup state
-    across projects, since Universe is full of forks of the same photos."""
+    across projects, since Universe is full of forks of the same photos: a
+    photo is a repeat if it has the same original file name, or the same image
+    hash and the same labels.
+
+    Per-project settings in sources.yaml: `max_images` (default: the source's
+    `max_per_project`) keeps a fixed random sample, so one large project of
+    video frames cannot swamp the rest; `only_splits` reads just those of the
+    export's train/valid/test folders, for exports whose train folder holds
+    augmented copies; `exclude_prefixes` drops files whose names start with
+    one of them, for projects that re-upload other datasets (copies of our own
+    test photos would otherwise end up in training); `license` overrides what
+    the export states."""
+    settings = {p["id"].split("/")[-1]: p for p in cfg.get("projects", [])}
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         data_yaml = next(iter(sorted(project.rglob("data.yaml"))), None)
         if data_yaml is None:
@@ -356,13 +432,32 @@ def load_roboflow(name, cfg, root, skipped, seen):
         is_pose = bool(meta.get("kpt_shape"))
         ignorable = {i for i, n in names.items()
                      if normalize_category(str(n)).lower() in NON_PIECE}
-        license_ = (meta.get("roboflow") or {}).get("license") or read_license(project)
+        mine = settings.get(project.name, {})
+        license_ = (mine.get("license") or (meta.get("roboflow") or {}).get("license")
+                    or read_license(project))
         cfg.setdefault("project_licenses", {})[project.name] = license_
         if cfg.get("only_shippable") and not is_shippable(license_):
             skipped[f"{project.name}: license '{license_}' not shippable"] += 1
             continue
 
-        for label in sorted(data_yaml.parent.rglob("labels/*.txt")):
+        labels = sorted(data_yaml.parent.rglob("labels/*.txt"))
+        if mine.get("only_splits"):
+            labels = [l for l in labels if l.parent.parent.name in mine["only_splits"]]
+        prefixes = tuple(mine.get("exclude_prefixes") or ())
+        if prefixes:
+            copies = [l for l in labels if l.name.startswith(prefixes)]
+            if copies:
+                skipped[f"{project.name}: copy of another dataset"] += len(copies)
+                labels = [l for l in labels if not l.name.startswith(prefixes)]
+        cap = mine.get("max_images", cfg.get("max_per_project"))
+        if cap and len(labels) > cap:
+            random.Random(0).shuffle(labels)  # a fixed order; stop once `cap` are kept
+        else:
+            cap = None
+        kept = 0
+        for label in labels:
+            if cap and kept >= cap:
+                break
             img = next((label.parent.parent / "images" / (label.stem + ext)
                         for ext in IMAGE_EXTS
                         if (label.parent.parent / "images" / (label.stem + ext)).exists()),
@@ -402,18 +497,42 @@ def load_roboflow(name, cfg, root, skipped, seen):
             # copies and forks share <original>.
             original = re.sub(r"\.rf\.[0-9a-zA-Z]+$", "", label.stem)
             original = re.sub(r"_(jpe?g|png)$", "", original, flags=re.I)
-            fingerprint = dhash(img)
-            if fingerprint is None:
+            # Same original name and the same pieces: an augmented copy or a
+            # fork. The name alone is not enough -- exports are full of
+            # unrelated photos called "10" or "IMG_1".
+            name_key = (original, tuple(sorted(box[0] for box in boxes)))
+            image_hash = dhash(img)
+            if image_hash is None:
                 skipped["image cannot be read"] += 1
                 continue
-            keys = {("name", original, len(boxes)), ("hash", fingerprint)}
-            if keys & seen:
+            if name_key in seen["names"] or any(
+                    same_labels(boxes, other) for other in seen["hashes"][image_hash]):
                 skipped["duplicate of another image"] += 1
                 continue
-            seen |= keys
+            seen["names"].add(name_key)
+            seen["hashes"][image_hash].append(boxes)
             bucket = int(hashlib.md5(original.encode()).hexdigest(), 16) % 10
+            kept += 1
             yield Sample(name, f"{project.name}_{label.stem}", img,
                          "val" if bucket == 0 else "train", boxes, None)
+        skipped[f"note: {project.name} gives {kept} of {len(labels)} labelled images"] = kept
+
+
+def same_labels(a, b, tolerance=0.02):
+    """Two box lists that describe the same photo: same classes at the same
+    places. The image hash alone is not enough to call two images duplicates:
+    photos taken from a tripod differ only in a few small pieces and hash
+    alike (it dropped 100 of 289 different photos in one Roboflow project)."""
+    if len(a) != len(b):
+        return False
+    left = list(b)
+    for box in a:  # each box takes the nearest unclaimed box of its class
+        near = [o for o in left if o[0] == box[0]
+                and abs(o[1] - box[1]) < tolerance and abs(o[2] - box[2]) < tolerance]
+        if not near:
+            return False
+        left.remove(min(near, key=lambda o: abs(o[1] - box[1]) + abs(o[2] - box[2])))
+    return True
 
 
 def read_license(project):
@@ -447,6 +566,223 @@ def load_native(name, cfg, root, skipped):
 
 
 # --------------------------------------------------------------------------
+# Test-only sources: the second held-out test set. Every Sample is `test`.
+
+def clean_stem(text):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", text)
+
+
+def load_chessq(name, cfg, root, skipped):
+    """ChessQ Test (Hugging Face joelseytre/chessq-test): 50 phone photos of
+    15 kinds of chess set, positions reviewed by hand. metadata.jsonl has one
+    row per photo with the placement (`fen`) and the same thing square by
+    square (`labels`, a8..h1, 0 empty, 1-6 PNBRQK, 7-12 pnbrqk); a row whose
+    two labels disagree is left out. Which way round the board is follows the
+    pieces, not the coordinates printed on some of the boards. The group is
+    the kind of chess set."""
+    letters = ".PNBRQKpnbrqk"
+    for meta in sorted(root.rglob("metadata.jsonl")):
+        for line in meta.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            img = meta.parent / row["file_name"]
+            placement = valid_placement(row.get("fen", ""))
+            if not img.exists() or placement is None:
+                skipped["missing image or position"] += 1
+                continue
+            board = fen_placement_to_board(placement)
+            squares = [board.get((f, r), ".") for r in range(7, -1, -1) for f in range(8)]
+            if squares != [letters[i] for i in row["labels"]]:
+                skipped["the two labels of the photo disagree"] += 1
+                continue
+            yield Sample(name, clean_stem(row["id"]), img, "test", placement=placement,
+                         group=row.get("chess_set_type"))
+
+
+def looks_like_a_game(placement):
+    """Whether the pieces are enough to say which way the board is played: one
+    king a side, no pawn on the first or last rank, at most eight pawns and
+    sixteen pieces a side, and at least six pawns on the board. (Not whether
+    the position is legal: some are shuffled 32-piece set-ups with the pawns
+    on their home ranks.) Nothing a recognizer computes is used here, so
+    which photos count as game positions does not depend on what is being
+    tested. Y-LIChess also photographs piece layouts made to cover the board
+    (two knights; all 32 pieces packed into four ranks), where a1 is only a
+    convention."""
+    board = fen_placement_to_board(placement)
+    letters = list(board.values())
+    white = [x for x in letters if x.isupper()]
+    black = [x for x in letters if x.islower()]
+    if letters.count("K") != 1 or letters.count("k") != 1:
+        return False
+    if any(x in "Pp" and rank in (0, 7) for (_, rank), x in board.items()):
+        return False
+    if len(white) > 16 or len(black) > 16 or white.count("P") > 8 or black.count("p") > 8:
+        return False
+    return white.count("P") + black.count("p") >= 6
+
+
+# Class ids 1-12 in Y-LIChess's annots/, as in its FEN_generator.py.
+YLICHESS_LETTERS = dict(zip(range(1, 13), "bknpqrBKNPQR"))
+
+
+def load_ylichess(name, cfg, root, skipped):
+    """Y-LIChess multi-board dataset: per board `<board>_train/` and
+    `<board>_valid/` (the authors' split; all of it is test here), each with
+    captures/ (the 1920x1080 webcam frame), crops/ (the board region), annots/
+    (YOLO boxes in the crop, classes 1-12) and board_info*.json: the outline
+    of the playing area in the frame (`board_px`: top-left, top-right,
+    bottom-right, bottom-left) and the padding the crop was cut with. A folder
+    with several calibrations names each after the photo numbers it covers.
+
+    Only the boards listed under `boards` in sources.yaml are read: on the
+    other three the boxes are a detector's output, not labels (pieces without
+    a box, kings labelled queen, two boxes on one piece).
+
+    There is no position file. The position is where the boxes stand, as the
+    dataset's own FEN_generator.py derives it: a photo is left out unless
+    every box lands on a square of its own, and on the same square for a
+    range of anchor pulls (a box near a square's edge is not a label to trust).
+
+    Which corner is a1 is not recorded either. The camera and the board do not
+    move; photos numbered up to `white_far_until` have White on the far side
+    (a1 is the top-right corner, which is also what the stickers on the
+    board's frame say), the later ones are set up the other way round. The
+    group is the board, or `<board>-layout` where a1 is that convention only
+    (score those with evaluate.py's "exact once turned 180 degrees"): where
+    the pieces do not say which way the board is played (looks_like_a_game),
+    and the photos listed under `a1_unclear`, where they contradict the
+    numbering."""
+    for board_name, rule in (cfg.get("boards") or {}).items():
+        for folder in sorted(f for f in root.glob(f"{board_name}_*") if f.is_dir()):
+            calibrations = []
+            for info in sorted(folder.glob("board_info*.json")):
+                if "original" in info.stem:
+                    continue
+                m = re.search(r"\((\d+)-(\d+)\)", info.name)
+                calibrations.append(((int(m[1]), int(m[2])) if m else None,
+                                     json.loads(info.read_text())))
+            for img in sorted((folder / "captures").glob("*.jpg")):
+                number = int(re.search(r"\d+", img.stem)[0])
+                fits = [c for span, c in calibrations
+                        if span is None or span[0] <= number <= span[1]]
+                label = folder / "annots" / f"{img.stem}.txt"
+                crop = folder / "crops" / img.name
+                if len(fits) != 1 or not label.exists() or not crop.exists():
+                    skipped["no single calibration, label or crop for the photo"] += 1
+                    continue
+                info = fits[0]
+                w, h = image_size(img)
+                pts = [tuple(p) for p in info["board_px"]]
+                pad = info["padding_px"]
+                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+                x0, y0 = max(min(xs) - pad["left"], 0), max(min(ys) - pad["top"], 0)
+                x1, y1 = min(max(xs) + pad["right"], w), min(max(ys) + pad["bottom"], h)
+                cw, ch = image_size(crop)
+                if (cw, ch) != (x1 - x0, y1 - y0) or [w, h] != list(info["frame_size_px"]):
+                    skipped["crop does not match the calibration"] += 1
+                    continue
+
+                boxes, placed = [], []
+                for line in label.read_text().splitlines():
+                    parts = line.split()
+                    if len(parts) != 5:
+                        continue
+                    piece = LETTER_TO_CLASS[YLICHESS_LETTERS[int(parts[0])]]
+                    cx, cy, bw, bh = (float(v) for v in parts[1:])
+                    cx, cy, bw, bh = x0 + cx * cw, y0 + cy * ch, bw * cw, bh * ch
+                    boxes.append((CLASS_ID[piece], cx / w, cy / h, bw / w, bh / h))
+                    placed.append((piece, (cx, cy + bh / 2)))
+                if not boxes:
+                    skipped["no pieces labelled"] += 1
+                    continue
+
+                tl, tr, br, bl = pts
+                white_far = number <= rule["white_far_until"]
+                corners = [tr, br, bl, tl] if white_far else [bl, tl, tr, br]
+                H = homography(corners)
+                readings = set()
+                for pull in (0.15, 0.30, 0.45):
+                    squares = [board_square(H, anchor, pull) for _, anchor in placed]
+                    if None in squares or len(set(squares)) != len(squares):
+                        readings.add(None)
+                    else:
+                        readings.add(board_to_fen_placement(
+                            {sq: (piece, 1.0) for sq, (piece, _) in zip(squares, placed)}))
+                if len(readings) != 1 or None in readings:
+                    skipped["a box is off the board, shares a square or sits on an edge"] += 1
+                    continue
+                placement = readings.pop()
+                clear = (looks_like_a_game(placement)
+                         and number not in rule.get("a1_unclear", []))
+                yield Sample(name, f"{folder.name}_{img.stem}", img, "test", boxes,
+                             [(x / w, y / h) for x, y in corners], placement,
+                             board_name if clear else f"{board_name}-layout")
+
+
+def load_fen_json(name, cfg, root, skipped):
+    """One <photo>.json beside each photo with {"fen": ...} (chesscog's real
+    photos; its "white_turn" says whose move it is and is not used)."""
+    for label in sorted(root.rglob("*.json")):
+        if "__MACOSX" in label.parts:
+            continue
+        img = next((label.with_suffix(ext) for ext in sorted(IMAGE_EXTS)
+                    if label.with_suffix(ext).exists()), None)
+        try:
+            placement = valid_placement(json.loads(label.read_text()).get("fen", ""))
+        except (ValueError, AttributeError):
+            placement = None
+        if img is None or placement is None:
+            skipped["missing image or position"] += 1
+            continue
+        yield Sample(name, clean_stem("_".join(label.relative_to(root).with_suffix("").parts)),
+                     img, "test", placement=placement)
+
+
+def load_fen_names(name, cfg, root, skipped):
+    """Photos named after their position, the eight FEN rows joined by '-'
+    (samryan18/chess-dataset); a repeat of a position ends in _2, _3, ..."""
+    folder = root / cfg.get("subdir", "")
+    for img in sorted(p for p in folder.rglob("*") if p.suffix.lower() in IMAGE_EXTS):
+        placement = placement_from_name(re.sub(r"_\d+$", "", img.stem))
+        if placement is None:
+            skipped["file name is not a position"] += 1
+            continue
+        yield Sample(name, clean_stem(img.stem), img, "test", placement=placement)
+
+
+def load_pgn_games(name, cfg, root, skipped):
+    """Games replayed on a board and photographed after every move
+    (Rizo-R/chess-cv): games/<game>/orig/<N>.jpg is the board after ply N of
+    pgns/<game>.pgn seen from White's side, games/<game>/rev/<N>.jpg the same
+    from Black's side (the group). Needs python-chess to replay the moves."""
+    try:
+        import chess.pgn
+    except ImportError:
+        sys.exit(f"{name}: replaying the PGN files needs python-chess (pip install chess)")
+    for pgn in sorted((root / "pgns").glob("*.pgn")):
+        with open(pgn, encoding="utf-8", errors="replace") as handle:
+            game = chess.pgn.read_game(handle)
+        if game is None or game.errors:
+            skipped[f"{pgn.name} cannot be replayed"] += 1
+            continue
+        board, after = game.board(), {}
+        for ply, move in enumerate(game.mainline_moves(), 1):
+            board.push(move)
+            after[ply] = board.board_fen()
+        for side, group in (("orig", "white-side"), ("rev", "black-side")):
+            photos = [p for p in (root / "games" / pgn.stem / side).glob("*")
+                      if p.suffix.lower() in IMAGE_EXTS and p.stem.isdigit()]
+            for img in sorted(photos, key=lambda p: int(p.stem)):
+                if int(img.stem) not in after:
+                    skipped["photo number beyond the game's last move"] += 1
+                    continue
+                yield Sample(name, f"{pgn.stem}_{side}_{int(img.stem):03d}", img, "test",
+                             placement=after[int(img.stem)], group=group)
+
+
+# --------------------------------------------------------------------------
 # Licenses
 
 def is_shippable(license_):
@@ -466,18 +802,59 @@ def source_shippable(cfg):
 # --------------------------------------------------------------------------
 # merge
 
-def write_sample(sample, out, counts, positions):
+def training_image(src, stem, max_side, cache):
+    """The file to put in the dataset: the photo itself, or with max_side a
+    JPEG copy no longer than that on its long side. Phone photos are 9-24 MP
+    and training uses 640 px, so decoding them is wasted time. Copies are kept
+    in `cache` so the next merge does not make them again."""
+    if not max_side:
+        return src
+    w, h = image_size(src)
+    if max(w, h) <= max_side:
+        return src
+    small = cache / f"{stem}.jpg"
+    if not small.exists() or small.stat().st_mtime < src.stat().st_mtime:
+        import cv2
+        # JPEG can decode straight to 1/2 or 1/4 size, which is much faster.
+        reduce = next((r for r in (4, 2) if max(w, h) / r >= max_side), 1)
+        flag = {4: cv2.IMREAD_REDUCED_COLOR_4, 2: cv2.IMREAD_REDUCED_COLOR_2,
+                1: cv2.IMREAD_COLOR}[reduce]
+        img = cv2.imread(str(src), flag)
+        if img is None:
+            return src
+        scale = max_side / max(img.shape[:2])
+        img = cv2.resize(img, (round(img.shape[1] * scale), round(img.shape[0] * scale)),
+                         interpolation=cv2.INTER_AREA)
+        cache.mkdir(parents=True, exist_ok=True)
+        partial = cache / f"{stem}.partial.jpg"
+        cv2.imwrite(str(partial), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        partial.rename(small)
+    return small
+
+
+def write_sample(sample, out, counts, positions, max_side=0, cache=None):
     stem = f"{sample.source}__{sample.stem}"
+    image = training_image(sample.image, stem, max_side, cache)
+    if sample.placement:
+        # A photo whose labels were both unusable is still a photo to score
+        # (often a hard one); it is listed by its own path.
+        task = "pieces" if sample.boxes else "corners" if sample.corners else None
+        merged = out / task / "images" / sample.split / f"{stem}{image.suffix}" if task else sample.image
+        row = {"id": stem,
+               "image": str(merged),
+               # evaluate.py scores the photo as taken, not the training copy
+               "original": str(sample.image),
+               "source": sample.source, "split": sample.split,
+               "placement": sample.placement}
+        if sample.group:
+            row["group"] = sample.group
+        positions.append(row)
     if sample.boxes:
         base = out / "pieces"
         (base / "labels" / sample.split / f"{stem}.txt").write_text("\n".join(
             f"{c} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}" for c, cx, cy, w, h in sample.boxes))
-        merged = base / "images" / sample.split / f"{stem}{sample.image.suffix}"
-        link(sample.image, merged)
+        link(image, base / "images" / sample.split / f"{stem}{image.suffix}")
         counts[(sample.source, "pieces", sample.split)] += 1
-        if sample.placement:
-            positions.append({"image": str(merged), "source": sample.source,
-                              "split": sample.split, "placement": sample.placement})
     if sample.corners:
         xs = [p[0] for p in sample.corners]
         ys = [p[1] for p in sample.corners]
@@ -488,28 +865,113 @@ def write_sample(sample, out, counts, positions):
         base = out / "corners"
         (base / "labels" / sample.split / f"{stem}.txt").write_text(
             f"0 {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} {x2 - x1:.6f} {y2 - y1:.6f} {kpts}")
-        link(sample.image, base / "images" / sample.split / f"{stem}{sample.image.suffix}")
+        link(image, base / "images" / sample.split / f"{stem}{image.suffix}")
         counts[(sample.source, "corners", sample.split)] += 1
 
 
+def readers(out):
+    """Running jobs that read something inside `out`: processes whose command
+    line names it (a training run started with --data <out>/corners/data.yaml,
+    absolute or as datasets/<name>/...), and the run queue.sh has under way,
+    whose command line names only a checkpoint once it has been continued
+    after a restart."""
+    inside = {f"{out}/", f"{out.parent.name}/{out.name}/"}
+    try:
+        inside.add(f"{out.relative_to(HERE)}/")
+    except ValueError:  # out is reached through a link, e.g. from a worktree
+        pass
+    listing = subprocess.run(["ps", "-axo", "pid=,command="],
+                             capture_output=True, text=True).stdout
+    busy = [line.strip() for line in listing.splitlines()
+            if any(path in line for path in inside)
+            and line.split(None, 1)[0] != str(os.getpid())]
+    current = out.parent.parent / "runs" / "queue.current"
+    if current.exists():
+        line = current.read_text().strip()
+        if any(path in line for path in inside):
+            busy.append(f"queue.sh: {line}")
+    return busy
+
+
+LOADERS = {"chessred": load_chessred, "chesscog": load_chesscog,
+           "fenit": load_fenit, "native": load_native,
+           "chessq": load_chessq, "ylichess": load_ylichess,
+           "fen_json": load_fen_json, "fen_names": load_fen_names,
+           "pgn_games": load_pgn_games}
+
+
+def adapter_problems(sources, names):
+    """What would stop a merge of these sources half way: checked before the
+    old folder is removed."""
+    problems = []
+    for name in names:
+        cfg = sources[name]
+        if cfg["kind"] in ("raw", "roboflow") or not (HERE / cfg["dir"]).exists():
+            continue
+        if cfg["kind"] not in LOADERS:
+            problems.append(f"{name}: no adapter for kind '{cfg['kind']}'")
+        elif cfg["kind"] == "pgn_games":
+            try:
+                import chess.pgn  # noqa: F401
+            except ImportError:
+                problems.append(f"{name}: replaying the PGN files needs python-chess "
+                                "(pip install chess)")
+    return problems
+
+
 def merge(args, sources):
-    out = (HERE / args.out).resolve()
+    # Test-only sources never share a folder with data a model is trained on:
+    # the training scripts read every photo and every positions.json row of
+    # the folder they are given.
+    unknown = [n for n in args.sources or [] if n not in sources]
+    if unknown:
+        sys.exit(f"not in sources.yaml: {', '.join(unknown)}")
+    test_only = [n for n in args.sources or [] if sources[n].get("test_only")]
+    testing = bool(test_only)
+    if testing and len(test_only) != len(args.sources):
+        sys.exit("test-only sources (" + ", ".join(test_only) + ") cannot be merged "
+                 "together with training sources; merge them into a folder of their own.")
+    out = (HERE / (args.out or "datasets/merged")).resolve()
+    if testing and (not args.out or out.name.startswith("merged")):
+        # datasets/merged* is where the training scripts look by default.
+        sys.exit("a test-only merge needs a folder of its own that is not called "
+                 "merged*, e.g. --out datasets/heldout2")
     if out.exists() and any(out.iterdir()):
         if not (out / "manifest.json").exists():
             sys.exit(f"{out} exists and was not written by this script; "
                      "pick another --out or remove it yourself.")
+        was_testing = bool(json.loads((out / "manifest.json").read_text()).get("test_only"))
+        if was_testing != testing:
+            sys.exit(f"{out} holds a {'test-only' if was_testing else 'training'} set; "
+                     "pick another --out.")
+    problems = adapter_problems(sources, [
+        n for n, c in sources.items()
+        if (not args.sources or n in args.sources) and (testing or not c.get("test_only"))])
+    if problems:
+        sys.exit("\n".join(problems))
+    if out.exists() and any(out.iterdir()):
+        busy = readers(out)
+        if busy and not args.force:
+            # merge deletes and rebuilds the folder: files would vanish under the job.
+            sys.exit(f"{out} is in use by a running job:\n  " + "\n  ".join(
+                line[:150] for line in busy)
+                + "\nUse another --out, wait for it, or pass --force.")
         shutil.rmtree(out)
     for task in ("pieces", "corners"):
         for kind in ("images", "labels"):
             for split in SPLITS:
                 (out / task / kind / split).mkdir(parents=True, exist_ok=True)
 
-    counts, manifest, seen, positions = Counter(), {}, set(), []
+    counts, manifest, positions = Counter(), {}, []
+    seen = {"names": set(), "hashes": defaultdict(list)}  # roboflow de-dup state
     for name, cfg in sources.items():
         if args.sources and name not in args.sources:
             continue
         kind, root = cfg["kind"], HERE / cfg["dir"]
         if kind == "raw":
+            continue
+        if cfg.get("test_only") and not testing:
+            print(f"- {name}: test only, left out (see sources.yaml)")
             continue
         if kind != "roboflow" and args.shippable and not source_shippable(cfg):
             print(f"- {name}: left out (license {cfg.get('license')})")
@@ -519,8 +981,7 @@ def merge(args, sources):
             continue
         skipped = Counter()
         cfg["only_shippable"] = args.shippable
-        loader = {"chessred": load_chessred, "chesscog": load_chesscog,
-                  "fenit": load_fenit, "native": load_native}.get(kind)
+        loader = LOADERS.get(kind)
         samples = (load_roboflow(name, cfg, root, skipped, seen) if kind == "roboflow"
                    else loader(name, cfg, root, skipped))
         n, stems = 0, set()
@@ -530,10 +991,14 @@ def merge(args, sources):
                 skipped["file name collides with another image"] += 1
                 continue
             stems.add(sample.stem)
-            write_sample(sample, out, counts, positions)
+            if testing and sample.split != "test":
+                sys.exit(f"{name}: test-only, but {sample.stem} is split {sample.split}")
+            write_sample(sample, out, counts, positions, args.max_side,
+                         HERE / "datasets" / "_resized" / str(args.max_side))
             n += 1
         print(f"- {name}: {n} images" + "".join(
-            f"\n    skipped {v}: {k}" for k, v in skipped.items()))
+            f"\n    {k}" if k.startswith("note: ") and " gives " in k
+            else f"\n    skipped {v}: {k}" for k, v in skipped.items()))
         manifest[name] = {
             "license": cfg.get("project_licenses") or cfg.get("license"),
             "images": n,
@@ -549,7 +1014,8 @@ def merge(args, sources):
         f"path: {out / 'corners'}\ntrain: images/train\nval: images/val\ntest: images/test\n"
         "kpt_shape: [4, 3]\nflip_idx: [0, 1, 2, 3]\nnames:\n  0: board\n")
     (out / "manifest.json").write_text(json.dumps(
-        {"shippable_only": args.shippable, "sources": manifest}, indent=2))
+        {"shippable_only": args.shippable, "max_side": args.max_side,
+         "test_only": testing, "sources": manifest}, indent=2))
     (out / "positions.json").write_text(json.dumps(positions))
 
     print("\ntotals:")
@@ -586,6 +1052,15 @@ def download(url, dest, size=None):
         # than the remote one) can never succeed: start this file over once.
         dest.unlink(missing_ok=True)
         subprocess.run(command, check=True)
+    with open(dest, "rb") as handle:
+        head = handle.read(512).lstrip().lower()
+    if head.startswith((b"<!doctype html", b"<html")) and dest.suffix.lower() not in (".html", ".htm"):
+        # Google Drive answers a refusal (quota, virus scan) with a page and
+        # status 200. Left in place, the next run would resume after it and
+        # end up with a file of the right size and a broken start.
+        dest.unlink()
+        sys.exit(f"{dest.name}: the server sent a web page instead of the file "
+                 "(a download limit, usually); nothing was kept. Try again later.")
     if size and dest.stat().st_size != size:
         print(f"note: {dest.name} is {dest.stat().st_size} bytes, sources.yaml says "
               f"{size}; update sources.yaml if the publisher changed the file.")
@@ -595,6 +1070,7 @@ def fetch_files(cfg, root):
     root.mkdir(parents=True, exist_ok=True)
     for item in cfg.get("downloads", []):
         dest = root / item["file"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
         marker = root / f".{item['file']}.extracted"
         files = [item] + item.get("parts", [])
         on_disk = [f for f in files if (root / f["file"]).exists()]
@@ -653,18 +1129,85 @@ def roboflow_api(path, key):
 def fetch_mendeley(cfg, root, dry_run):
     """A Mendeley Data dataset is a flat list of files, fetched one by one."""
     info = http_json(f"https://data.mendeley.com/public-api/datasets/{cfg['mendeley_id']}")
+    fetch_list(root, [(f["content_details"]["download_url"], root / Path(f["filename"]).name,
+                       f.get("size")) for f in info["files"]], dry_run)
+
+
+def fetch_hf(cfg, root, dry_run):
+    """The files of one folder of a Hugging Face dataset, at a fixed commit.
+    Works without a token for a public dataset that is not gated."""
+    repo, revision = cfg["hf_dataset"], cfg.get("hf_revision", "main")
+    folder = cfg.get("hf_path", "").strip("/")
+    listing = http_json(f"https://huggingface.co/api/datasets/{repo}/tree/{revision}/{folder}")
+    fetch_list(root, [(f"https://huggingface.co/datasets/{repo}/resolve/{revision}/"
+                       + urllib.parse.quote(f["path"]), root / f["path"], f.get("size"))
+                      for f in listing if f.get("type") == "file"], dry_run)
+
+
+def fetch_git(cfg, root):
+    """Some folders of a git repository (`git_paths`) and the files at its top
+    level, at the commit `git_rev` (default: the head of the default branch),
+    without its history or its other folders. The clone's .git is removed
+    afterwards: it holds a second copy of every file."""
+    marker = root / ".fetched"
+    if marker.exists():
+        return
+    paths = cfg.get("git_paths", [])
+    present = [p for p in paths if (root / p).exists()]
+    if present:
+        # Moving the fetched folder in would silently keep the old one.
+        sys.exit(f"{root.name}: {', '.join(present)} is already in {root} but was not "
+                 "fetched by this script (no .fetched beside it). Move it away, or "
+                 f"touch {marker} if it is the complete folder.")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    need = 2 * cfg.get("approx_bytes", 0)  # the files and, until it is removed, .git
+    free = shutil.disk_usage(root.parent).free
+    if need > free:
+        sys.exit(f"Not enough disk for {root.name}: need about {human(need)} at peak, "
+                 f"{human(free)} free.")
+    partial = root.parent / f"{root.name}.partial"
+    if partial.exists():
+        shutil.rmtree(partial)  # an interrupted fetch of ours
+
+    def git(*command):
+        subprocess.run(["git", "-C", str(partial), *command], check=True)
+    partial.mkdir(parents=True)
+    git("init", "--quiet")
+    git("remote", "add", "origin", cfg["git"])
+    git("sparse-checkout", "set", *paths)
+    git("fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin",
+        cfg.get("git_rev", "HEAD"))
+    git("checkout", "--quiet", "FETCH_HEAD")
+    empty = [p for p in paths if not (partial / p).is_dir() or not any((partial / p).iterdir())]
+    if empty:
+        shutil.rmtree(partial)
+        sys.exit(f"{root.name}: {', '.join(empty)} is missing or empty in {cfg['git']}; "
+                 "nothing was kept.")
+    shutil.rmtree(partial / ".git")
+    root.mkdir(parents=True, exist_ok=True)
+    for entry in partial.iterdir():
+        if not (root / entry.name).exists():
+            entry.rename(root / entry.name)
+    shutil.rmtree(partial)
+    marker.touch()
+    print(f"{root.name}: fetched {', '.join(paths)} of {cfg['git']}")
+
+
+def fetch_list(root, files, dry_run):
+    """Download (url, destination, size or None) files, several at a time."""
     todo = []
-    for f in info["files"]:
-        dest, size = root / Path(f["filename"]).name, f.get("size")
+    for url, dest, size in files:
         if dest.exists() and (size is None or dest.stat().st_size == size):
             continue
-        todo.append((f["content_details"]["download_url"], dest, size or 0))
+        todo.append((url, dest, size or 0))
     total = sum(size for _, _, size in todo)
-    print(f"{root.name}: {len(todo)} of {len(info['files'])} files to download "
+    print(f"{root.name}: {len(todo)} of {len(files)} files to download "
           f"({human(total)})")
     if dry_run or not todo:
         return
     root.mkdir(parents=True, exist_ok=True)
+    for _, dest, _ in todo:
+        dest.parent.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(root).free
     if total > free:
         sys.exit(f"Not enough disk: need {human(total)}, {human(free)} free.")
@@ -697,8 +1240,25 @@ def fetch_roboflow(cfg, root):
             version = project.get("version")
             if not version:
                 info = roboflow_api(f"{workspace}/{slug}", key)
+                if not info.get("versions"):
+                    # Only a published version can be exported.
+                    print(f"roboflow: {project['id']} has no published version "
+                          f"({info.get('project', {}).get('images', 0)} images in the "
+                          "project); nothing to download. Skipped.")
+                    continue
                 version = max(int(str(v["id"]).rsplit("/", 1)[-1]) for v in info["versions"])
             export = roboflow_api(f"{workspace}/{slug}/{version}/yolov8", key)
+            # The first request for a format nobody has exported yet only
+            # starts the export; the link appears a little later.
+            for _ in range(12):
+                if "export" in export:
+                    break
+                time.sleep(10)
+                export = roboflow_api(f"{workspace}/{slug}/{version}/yolov8", key)
+            if "export" not in export:
+                print(f"roboflow: {project['id']} v{version} is still being prepared "
+                      "by Roboflow; run fetch again in a few minutes.")
+                continue
             dest.mkdir(parents=True, exist_ok=True)
             archive = dest / "export.zip"
             archive.unlink(missing_ok=True)  # size unknown: a leftover may be partial
@@ -719,6 +1279,14 @@ def fetch(args, sources):
         root = HERE / cfg["dir"]
         if cfg.get("mendeley_id"):
             fetch_mendeley(cfg, root, args.dry_run)
+        elif cfg.get("hf_dataset"):
+            fetch_hf(cfg, root, args.dry_run)
+        elif cfg.get("git"):
+            if not args.dry_run:
+                fetch_git(cfg, root)
+            elif not (root / ".fetched").exists():
+                print(f"{name}: would clone {', '.join(cfg.get('git_paths', []))} "
+                      f"of {cfg['git']}")
         elif args.dry_run:
             pending = [i["file"] for i in cfg.get("downloads", [])
                        if not (root / f".{i['file']}.extracted").exists()
@@ -743,6 +1311,7 @@ def list_sources(sources):
             for i in cfg.get("downloads", []))
         print(f"{name:16} {cfg['kind']:9} {human(size) if size else '-':>9}  "
               f"{'on disk' if root.exists() else 'missing':8} "
+              f"{'TEST ONLY  ' if cfg.get('test_only') else ''}"
               f"{'optional  ' if cfg.get('optional') else ''}{cfg.get('license', 'per project')}")
 
 
@@ -755,10 +1324,16 @@ def main():
     f.add_argument("sources", nargs="*")
     f.add_argument("--dry-run", action="store_true", help="show what would be downloaded")
     m = sub.add_parser("merge")
-    m.add_argument("--out", default="datasets/merged")
-    m.add_argument("--sources", nargs="*")
+    m.add_argument("--out", help="default: datasets/merged; required for test-only sources")
+    m.add_argument("--sources", nargs="*",
+                   help="default: every source on disk that is not test-only")
     m.add_argument("--shippable", action="store_true",
                    help="only data a commercially distributed model may be trained on")
+    m.add_argument("--force", action="store_true",
+                   help="rebuild --out even though a running job is reading it")
+    m.add_argument("--max-side", type=int, default=0, metavar="PX",
+                   help="write JPEG copies no longer than PX on the long side instead "
+                        "of links to the full-size photos (e.g. 1280); faster training")
     args = ap.parse_args()
 
     sources = yaml.safe_load(Path(args.config).read_text())["sources"]
