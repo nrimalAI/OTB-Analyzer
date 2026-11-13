@@ -9,7 +9,7 @@
 #       baseline/pieces_yolo11n_chessred2k.pt --one-piece-per-spot 0.7
 #
 # Writes runs/scores/heldout2_<tag>.txt, one evaluate.py report per part.
-# Exits 1 if any part could not be scored.
+# Exits 1 if any part could not be scored or has no photos.
 cd "$(dirname "$0")" || exit 1
 if [ $# -lt 3 ]; then sed -n '2,12p' "$(basename "$0")"; exit 1; fi
 tag=$1; corners=$2; pieces=$3; shift 3
@@ -27,9 +27,14 @@ for part in "chessq" "ylichess --group wood180" "ylichess --group wood180-layout
             "chesscog_real" "samryan" "chesscv_games"; do
   echo "== $part" >> "$out"
   # $part is split on purpose: a source and, for some, its --group.
-  if ! OMP_NUM_THREADS=4 nice -n 10 "$PY" evaluate.py --corners-model "$corners" \
+  report=$(OMP_NUM_THREADS=4 nice -n 10 "$PY" evaluate.py --corners-model "$corners" \
       --pieces-model "$pieces" --positions "$positions" --split test --source $part \
-      --device cpu "$@" >> "$out" 2>&1; then
+      --device cpu "$@" 2>&1)
+  status=$?
+  echo "$report" >> "$out"
+  # evaluate.py exits 0 when the part has no photos (a source that was not on
+  # disk when the folder was merged): that is not a score.
+  if [ $status -ne 0 ] || ! echo "$report" | grep -q "^boards evaluated:"; then
     echo "FAILED: $part (see $out)"; failed=1
   fi
 done

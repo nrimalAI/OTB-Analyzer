@@ -1152,6 +1152,14 @@ def fetch_git(cfg, root):
     marker = root / ".fetched"
     if marker.exists():
         return
+    paths = cfg.get("git_paths", [])
+    present = [p for p in paths if (root / p).exists()]
+    if present:
+        # Moving the fetched folder in would silently keep the old one.
+        sys.exit(f"{root.name}: {', '.join(present)} is already in {root} but was not "
+                 "fetched by this script (no .fetched beside it). Move it away, or "
+                 f"touch {marker} if it is the complete folder.")
+    root.parent.mkdir(parents=True, exist_ok=True)
     need = 2 * cfg.get("approx_bytes", 0)  # the files and, until it is removed, .git
     free = shutil.disk_usage(root.parent).free
     if need > free:
@@ -1160,7 +1168,6 @@ def fetch_git(cfg, root):
     partial = root.parent / f"{root.name}.partial"
     if partial.exists():
         shutil.rmtree(partial)  # an interrupted fetch of ours
-    paths = cfg.get("git_paths", [])
 
     def git(*command):
         subprocess.run(["git", "-C", str(partial), *command], check=True)

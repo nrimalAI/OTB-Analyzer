@@ -476,14 +476,14 @@ training source, every photo is split `test`, and they go into a folder of
 their own, so the scripts that read `datasets/merged*/` never see them.
 
 ```sh
-python build_dataset.py fetch chessq ylichess chesscog_real samryan chesscv_games   # 2.5 GB
+python build_dataset.py fetch chessq ylichess chesscog_real samryan chesscv_games   # 2.5 GB to download
 python build_dataset.py merge --out datasets/heldout2 \
     --sources chessq ylichess chesscog_real samryan chesscv_games
 python preview_labels.py --merged datasets/heldout2 --per-source 12   # look at the labels
 ./score_heldout2.sh <tag> <corners model> <pieces model> [evaluate.py arguments]
 ```
 
-The download is 2.5 GB, 3.3 GB on disk with the archives kept.
+The download is 2.5 GB; with the archives kept it is 3.6 GB on disk.
 `chesscv_games` needs python-chess (`pip install chess`; it is in
 `requirements.txt`). `score_heldout2.sh` runs `evaluate.py` on each part on
 the CPU and writes `runs/scores/heldout2_<tag>.txt`.
@@ -592,10 +592,11 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 54.1% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
 | `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 54.2% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
 
-- **No pair reads one game position fully right on any of the 19 boards**
-  (with exp3's corners one layout photo of 98 comes out right). Counting a
-  board turned 180 degrees as right changes nothing. The target is 85% of
-  boards exact.
+- **None of the four pairs in the table reads one game position fully right
+  on any of the 19 boards** (with exp3's corners one layout photo of 98
+  comes out right; with both app-side steps, below, one ChessQ photo of 50).
+  Counting a board turned 180 degrees as right changes nothing. The target
+  is 85% of boards exact.
 - **The corner model now in `Models/` does not find the board in 294 of the
   1,619 photos**, among them every photo of the Y-LIChess board, and is below
   an empty board on every part. exp3's corners find the board in all 1,619.
@@ -630,6 +631,7 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
   it works alone in 189 of 200 photos) and on `chesscog_real` it gives the
   same squares as exp3's corners. One ChessQ photo of 50 comes out fully
   right. The squares still wrong are the piece model's.
+
 **Looked at and not taken** (2026-11-13; searched: Hugging Face, GitHub,
 OSF, Zenodo, Mendeley Data, 4TU, figshare, Dataverse, papers on board
 recognition):
