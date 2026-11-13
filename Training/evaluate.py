@@ -210,7 +210,7 @@ def position_items(args):
             continue
         if args.group and row.get("group") != args.group:
             continue
-        src = Path(row.get("original") or row["image"])
+        src = Path(row["image"] if args.copies else row.get("original") or row["image"])
         corners, boxes = (merged_labels(row, src) if args.gt_corners or args.gt_boxes
                           else (None, None))
         yield src, fen_placement_to_board(row["placement"]), corners, boxes
@@ -267,6 +267,13 @@ def main():
     ap.add_argument("--stretch", action="store_true",
                     help="feed the models the photo stretched to 640x640, as the app "
                          "does (.scaleFill), instead of letterboxed")
+    ap.add_argument("--copies", action="store_true",
+                    help="with --positions: score the dataset's own copies of the photos "
+                         "(1280 px on the long side, cleanly downscaled) instead of the "
+                         "full-size originals. ultralytics shrinks a 12 MP photo to 640 "
+                         "without smoothing, which a model trained on the copies reads "
+                         "badly and the app does not do (it draws the photo into at most "
+                         "1280 px first): the copies are the fairer test of such a model")
     ap.add_argument("--device", default=None,
                     help="where the models run, e.g. cpu, so as not to take GPU "
                          "memory from a training job (default: ultralytics picks)")

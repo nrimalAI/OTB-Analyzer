@@ -282,6 +282,10 @@ python evaluate.py --pieces-model $P --gt-corners $POS --group B              # 
 python evaluate.py --corners-model $C --gt-boxes  $POS --group B              # corners alone
 ```
 
+For a piece model use `bash score.sh pieces <label> <weights>` instead of the
+`--gt-corners` line above: it adds `--copies --one-piece-per-spot 0.7`, without
+which the numbers are far too low (see "Piece scores" below).
+
 Until a new corner model exists, score piece models with `--gt-corners`; until
 a new piece model exists, corner models with `--gt-boxes`. `corner_error.py`
 runs on the CPU and can be used next to a training job; `evaluate.py` uses the
@@ -294,9 +298,9 @@ GPU and slows it a little.
 | `corners_s_exp1` | yolo11s-pose, 640, 40 epochs, default tolerance | Finished. `last.pt` / `best.pt`, median corner error in squares: ChessReD test 0.32 / 0.34 (baseline 0.31), Fenit A 0.29 / 0.34, **board B 0.92 / 0.99**, board not found in 11 / 9 of 93, order right in 41 / 43. With labelled boxes: ChessReD test 78.4% / 75.8% exact, board B 2.1% / 3.2% exact (63-65% per-square, below an empty board) |
 | `corners_s_exp3` | continues exp1 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_synth` (3,000 synthetic boards added); cut by a power failure after 5 epochs and continued | Finished (`best.pt` = `last.pt`). Median corner error: ChessReD test **0.22** (exp1 0.32), Fenit A 0.24, **board B 0.84** (order right 26 of 93). With labelled boxes: ChessReD test **95.8% exact** (exp1 78.4%), board B 3.2%, 23.7% with the best rotation. With the baseline piece model: ChessReD test 99.35% / **84.0% exact** (baseline pair 97.9% / 73.5%), board B 66.4% / 0% (baseline 58.0% / 0%) |
 | `corners_s_exp4` | continues exp3 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_rf` (4,946 Roboflow photos with derived corners added) | Finished. `last.pt` (better than `best.pt`): ChessReD test **0.19**, 97.1% exact with labelled boxes, but 4 of 306 turned 180 degrees (exp3: 2); Fenit A 0.15; **board B 0.91**, order right 29 of 93, 8.6% exact with labelled boxes. More boards with corners did not help on B: see "why learned corners fail" below. Through the app's code with the baseline pieces: ChessReD test 91.2% exact |
-| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | Killed at epoch 19 (exit 137; the machine was deep in swap), continued from epoch 18 with batch 12 on 2026-11-13. At epoch 18, labelled corners: board B 79.2% / 0%, Fenit A 94.8% / 14%, ChessReD test 98.8% / **63.1%** (baseline 84.2% / 0%, 92.2% / 1.5%, 99.66% / 87.6%): worse than the baseline on ChessReD |
-| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | running on 2026-11-13; what is running now is in the notes |
-| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | queued |
+| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | Killed at epoch 19 (exit 137; the machine was deep in swap); to be continued from epoch 18 with batch 12. At epoch 18 (`score.sh`, see "Piece scores" below): board B 91.3% / 1%, Fenit A 99.4% / 74%, ChessReD test 99.85% / 94.1% |
+| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | Finished 2026-11-13. `last.pt` (`best.pt` is a little worse): board B 90.4% / 1%, Fenit A 99.6% / 86% (mostly photos it trained on), ChessReD test 99.90% / **96.1%** (baseline 94.4%) |
+| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | running since 13:36 on 2026-11-13 |
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | queued |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
@@ -415,18 +419,41 @@ was in `Models/`, and why it was taken out again.
   whole-pixel start changes nothing measurable (5 of 306 and 10 of 286).
   `grid_corners.py` was left as it is; scripts and numbers in
   `runs/grid_stab/`.
-- **The piece model is what stops board B.** With the labelled corners, no
-  piece model reads one board B photo fully right. Scored square by square
-  (`pieces_s_rf` at epoch 18, 640 input): which squares are occupied 98.2%
-  (all right on 50% of boards); with the piece type 91.8% (3%); with the
-  colour too 85.9% (0%). By type: 27% of the pawns are read as knights,
-  bishops or rooks, bishops are 69% right, queens 61%, kings 73%, knights
-  96%. The misread pieces are mostly seen from straight above (a pawn is a
-  disc) and glossy black; board B's "white" pieces are brown and often come
-  out black. More pixels are not the answer: at 1280, or cropped to the
-  board, the same model is no better (3-8% of boards right without colour)
-  and the baseline is worse. What is missing is piece sets and viewpoints
-  the training data does not have: the next lever is rendered data.
+- **Piece scores: how to measure them** (`score.sh pieces`, found the hard
+  way on 2026-11-13). Two things made every new piece model look far worse
+  than it is. (1) One box per piece: the model's own NMS is per class, so a
+  pawn that also scores as a bishop comes back twice and the second box
+  lands on a neighbouring square; the exported model's NMS runs across
+  classes, and `--one-piece-per-spot 0.7` does the same in `evaluate.py`.
+  (2) The downscale: ultralytics shrinks a 12 MP photo to 640 without
+  smoothing. The baseline was trained on such photos; the new models are
+  trained on the 1280-px copies and read the aliased originals badly
+  (`pieces_s_norf` on ChessReD test: 62% of boards exact on the originals,
+  96% on the copies). The app draws a photo into at most 1280 px before the
+  models see it, so `--copies` is the closer test. With both, labelled
+  corners, per-square / boards exact:
+
+  | | Fenit board B (98) | Fenit A (270, mostly trained on) | ChessReD test (306) |
+  |---|---|---|---|
+  | baseline (yolo11n, ChessReD only) | 90.2% / 1% | 95.1% / 6% | 99.88% / 94.4% |
+  | `pieces_s_norf` `last.pt` | 90.4% / 1% | 99.6% / 86% | 99.90% / 96.1% |
+  | `pieces_s_rf` at epoch 18 | 91.3% / 1% | 99.4% / 74% | 99.85% / 94.1% |
+
+  Earlier scores of piece models in this file and in `runs/scores/originals`
+  and `runs/scores/per_class_nms` were made without one or both and are too
+  low; the final word on a model is its export through `app_check`.
+- **The piece model is what stops board B.** With the labelled corners, one
+  board B photo of 98 is read fully right by any of the three. Square by
+  square (`pieces_s_norf`, copies): which squares are occupied 98.4% (all
+  right on 61% of boards); with the piece type 91.7% (7%); with the colour
+  too 90.4% (1%). So it is the type: a third of the pawns are read as
+  bishops, knights, rooks or queens (568 of 868 right), bishops are 60%
+  right, queens 83%, kings 73%, rooks 82%, knights 96%. The misread pieces
+  are mostly seen from straight above (a pawn is a disc) and glossy black.
+  The colour (brown "white" pieces) costs little. More pixels are not the
+  answer: at 1280, or cropped to the board, the same model is worse. Roboflow
+  photos (`pieces_s_rf`) add a point. What is missing is piece sets and
+  viewpoints the training data does not have: hence the rendered data.
 
 - The corner model is the bottleneck, and only three boards have corner
   labels to train on (ChessReD, the chesscog render, Fenit A). Roboflow adds
