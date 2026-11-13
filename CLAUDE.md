@@ -72,7 +72,8 @@ The owner is abroad from 2026-11-13 with only the MacBook. They want the Mac min
 
 - Spend no money: no cloud GPUs, no paid APIs or datasets.
 - No secrets in the repo or the notes. Do not change system settings that need the owner's password.
-- Do not change code under `App/` or `Packages/`; if a model needs the app to change, write it under **For the other side** in the notes and keep the old interface until the MacBook side has done it.
+- **App code (owner, 2026-11-13, boarding a flight with the MacBook off: "do everything on the mac mini").** Mac mini sessions may now change code under `Packages/ChessVision`, and under `App/` where a change needs it. This replaces the earlier rule that left all app code to the MacBook. It was given for the two steps measured in `Training/README.md`: board corners from the classical grid fit, and a1 from the detected pieces. `Training/chess_pipeline.py` stays the reference the Swift code must match; add tests for what you add; keep the fixed decisions above (iOS 17, no network, no third-party dependencies).
+- `swift test` must still pass before anything is merged, and the Mac mini cannot run it while Xcode's licence is unaccepted (that needs the owner's password). Find a way that needs no password and costs nothing: the Command Line Tools through `DEVELOPER_DIR`, or a GitHub Actions macOS job (the repo is public). Failing that, leave the pull request open and ask the MacBook through the notes; it tests when the owner is next online.
 - Keep at least 20 GB of disk free. Never delete a downloaded source dataset to make room without recording why.
 - A model trained on ChessReD is for personal builds only; say in each pull request which sources the model was trained on.
 
