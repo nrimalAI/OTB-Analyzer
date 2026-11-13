@@ -300,7 +300,9 @@ GPU and slows it a little.
 | `corners_s_exp4` | continues exp3 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_rf` (4,946 Roboflow photos with derived corners added) | Finished. `last.pt` (better than `best.pt`): ChessReD test **0.19**, 97.1% exact with labelled boxes, but 4 of 306 turned 180 degrees (exp3: 2); Fenit A 0.15; **board B 0.91**, order right 29 of 93, 8.6% exact with labelled boxes. More boards with corners did not help on B: see "why learned corners fail" below. Through the app's code with the baseline pieces: ChessReD test 91.2% exact |
 | `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | Killed at epoch 19 (exit 137; the machine was deep in swap); to be continued from epoch 18 with batch 12. At epoch 18 (`score.sh`, see "Piece scores" below): board B 91.3% / 1%, Fenit A 99.4% / 74%, ChessReD test 99.85% / 94.1% |
 | `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | Finished 2026-11-13. `last.pt` (`best.pt` is a little worse): board B 90.4% / 1%, Fenit A 99.6% / 86% (mostly photos it trained on), ChessReD test 99.90% / **96.1%** (baseline 94.4%) |
-| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | running since 13:36 on 2026-11-13 |
+| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | Finished 2026-11-13 16:45. `last.pt`: board B 91.5% / 1%, Fenit A 99.8% / 90%, ChessReD test 99.93% / **96.7%**. On board B the piece type is much better (pawns right 88%, 65% before) and the side worse; with `--sides-from-colour` board B is 95.0% / **17 of 98 exact**, ChessReD unchanged |
+| `pieces_s_render2` | continues render1's `last.pt`, 12 epochs, `merged_all` (every piece source incl. Roboflow + 8,000 renders, 15,438 photos) | running since 16:45 on 2026-11-13 |
+| `pieces_s_crop1` | continues render1's `last.pt`, 12 epochs, `merged_all_crop` (`crop_boards.py`: the 7,370 photos of `merged_all` with a corner label, cut down to the board) | queued; score with `--crop-board` |
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | queued |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
@@ -442,6 +444,31 @@ was in `Models/`, and why it was taken out again.
   Earlier scores of piece models in this file and in `runs/scores/originals`
   and `runs/scores/per_class_nms` were made without one or both and are too
   low; the final word on a model is its export through `app_check`.
+- **Board B, 2026-11-13 evening: 15 of 100 boards exact end to end** (17
+  counting a board turned 180 degrees; 88.5% of squares), from 0. In Python
+  on the copies: `main`'s corner model, `--grid-corners --a1-from-pieces 6`,
+  `pieces_s_render1`, `--one-piece-per-spot 0.7 --sides-from-colour`
+  (`runs/scores/endtoend_render1_last_B.txt`). Two things did it:
+  - Rendered data (`render_boards.py`) teaches the piece type on a set the
+    model has not seen: on board B pawns are read right 88% of the time (65%
+    before), bishops 90% (60%), rooks 92% (82%).
+  - `chess_pipeline.sides_from_colour`: with rendered data the model calls
+    board B's brown "white" pieces black. Whether brown is White depends on
+    the set (it is Black in a boxwood and rosewood set), so the step splits
+    the pieces of one photo in two colour groups and calls the lighter one
+    White, and overrides the model only where they disagree on more than 15%
+    of the pieces (so it is used on no ChessReD test board). The colour
+    weight and the 15% were chosen with board B in view.
+  What is still wrong on board B (`pieces_s_render1`, 1,597 pieces): 104
+  pawns (34 read as knights, 34 as rooks, 18 as bishops, 16 missed), 47 of
+  196 kings read as queens, 14 queens as kings, 11 rooks as queens: nearly
+  all glossy black pieces seen from above. Tried or queued for that:
+  - "Exactly one king a side" from every class score of each box (scratch
+    prototype, not in the repo): board B 17 -> 21 of 98, ChessReD unchanged.
+  - The piece model looking at the board only (`board_crop`, `crop_boards.py`,
+    `--crop-board`): `pieces_s_crop1` is queued. A model not trained on
+    crops gains nothing from them (16 of 98).
+  - More renders and all real sources: `pieces_s_render2`, running.
 - **The piece model is what stops board B.** With the labelled corners, one
   board B photo of 98 is read fully right by any of the three. Square by
   square (`pieces_s_norf`, copies): which squares are occupied 98.4% (all
