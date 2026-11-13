@@ -54,16 +54,27 @@ func upright(_ url: URL) -> CGImage? {
     lazy(url).map(decoded)
 }
 
-/// The image with its pixels decoded once, into memory. An image straight
-/// from a JPEG file is decoded anew whenever it is drawn, and not always to
-/// the same bytes: after it has been drawn scaled (the letterbox), a
-/// full-size draw (the grid fit) can come back a grey level off here and
-/// there, differently from run to run, and the grid fit follows its pixels
-/// (two of 200 Y-LIChess photos went from "no board" to a board and back
-/// between identical runs). The app hands the recognizer a bitmap it has
-/// drawn itself (`normalizedUprightCGImage`), so this is also the nearer to
-/// what the app does. The pixels stay the ones stored in the file: drawn 1:1
-/// in the image's own colour space.
+/// The image with its pixels decoded once, into memory.
+///
+/// An image straight from a JPEG file is decoded anew whenever it is drawn,
+/// and how it is drawn decides which pixels come out: scaled (the letterbox),
+/// cropped (the grid fit's second pass, the colours of the pieces) or whole,
+/// CoreGraphics returns bytes that differ from one full decode in 10-30% of
+/// places, by up to 40 levels in a few (measured for pull request #9). And a
+/// whole read after a scaled draw is not even the same from run to run: two
+/// of 200 Y-LIChess photos went from "no board" to a board and back between
+/// identical runs, because the grid fit follows its pixels.
+///
+/// With the copy every stage reads the same pixels, those of one full
+/// decode (the nearest to `cv2.imread`), in every run. That is what the app
+/// does for a photo it redraws upright (`normalizedUprightCGImage`); it is
+/// not what the package's own tests do, nor the app for a photo that is
+/// already upright and no larger than 3072 px: those still pass the image
+/// undecoded. So app_check measures the decoded path only.
+///
+/// Drawn 1:1 in the image's own colour space where that is an RGB one (sRGB
+/// otherwise, as `GrayImage.rgba` reads it). Transparency is drawn on black.
+/// If no bitmap can be made the image comes back as it was.
 func decoded(_ image: CGImage) -> CGImage {
     let spaces = [
         image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil },

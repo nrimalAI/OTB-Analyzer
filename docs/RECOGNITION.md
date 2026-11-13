@@ -77,8 +77,9 @@ same script (`.github/workflows/swift-test.yml`) and fails if the models are
 missing or the end-to-end tests did not run.
 
 `EndToEndFixtureTests` reads four ChessReD test photos with the models in
-`Models/`, twice: as the app does, and with the grid fit switched off. The
-second run is the corner model's own test. With the fit on, a corner model
+`Models/`, three times: as the app does, with the grid fit switched off, and
+with the colour step switched on. The second run is the corner model's own
+test. With the fit on, a corner model
 that found no board at all would go unnoticed, because the fit reads these
 photos by itself.
 
@@ -132,22 +133,33 @@ photos by itself.
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
   in a* and 0.33 in b* (all 2^24 colours), which moved two pieces of 23,523
   between the groups before the reference changed to the formula (f93479c).
-  On a photo the colours still differ by what the two JPEG decoders differ:
-  0.01 at the median, 0.7 at most, on the medians of 23,523 patches.
+  On a photo the colours still differ by what the two JPEG decoders differ
+  (ImageIO's full decode against OpenCV's): nothing at the median, 0.2 at
+  the 95th percentile, 0.8 at most, on the medians of 23,510 patches
+  (`app_check --colours` decoding each photo once).
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
-  lists) and prints what `evaluate.py` prints. It needs no Xcode. It decodes
-  each photo once into memory before recognising it, as the app does when it
-  redraws a photo upright (`normalizedUprightCGImage`). Without that its
-  scores were not repeatable: an image straight from a JPEG file is decoded
-  again each time it is drawn, and after it has been drawn scaled (the
-  letterbox) a full-size draw (the grid fit) can come back a grey level off
-  here and there, differently from run to run. Two of 200 Y-LIChess photos
-  went from "no board" to a board and back between identical runs
-  (2026-11-13). The grid fit itself gives the same answer for the same
-  pixels every time. The app passes such an undecoded image only for a photo
-  that is already upright and no larger than 3072 px; each step is then
-  still right for the pixels it gets, they are just not the same pixels.
+  lists) and prints what `evaluate.py` prints. It needs no Xcode.
+- **`app_check` decodes each photo once into memory before recognising it**
+  (`decoded` in its `main.swift`), and so measures that path only. An image
+  straight from a JPEG file is decoded again each time it is drawn, and how
+  it is drawn decides which pixels come out. Against one full decode, the
+  letterboxed square differs in about 20% of its bytes (by up to 25 levels
+  in a few), a cropped read (the grid fit's second pass, the pieces'
+  colours) in 10-20% (up to 13), and a whole read made after a scaled draw
+  in up to 28% (up to 42), that last one differently from run to run
+  (measured by the reviewer of pull request #9 on Y-LIChess and fixture
+  photos). The run-to-run part made scores unrepeatable: two of 200
+  Y-LIChess photos went from "no board" to a board and back between
+  identical runs. The grid fit itself gives the same answer for the same
+  pixels every time. With the copy every stage reads the pixels of one full
+  decode, the nearest to what `cv2.imread` gives the Python. The app does
+  the same for every photo it redraws upright (`normalizedUprightCGImage`:
+  anything turned or larger than 3072 px, so nearly every camera photo).
+  Not on that path yet: the package's own tests, the app's self-test, and
+  the app for a photo that is already upright and small; they pass the
+  image undecoded. Making the copy inside the recognizer would put all of
+  them on one path; that is the next change.
   `--a1-prior P|off`, `--grid-fit on|off` and `--sides-from-colour on|off`
   switch the steps.
 - For any list of photos, Python against Swift:
@@ -185,14 +197,14 @@ the other side); see `GridWindow.choose`.
 ## What the two steps are worth
 
 **These tables were measured before `app_check` decoded each photo once**
-(see above), and the pixels it now reads are not exactly the ones it read
-then. With the models in `Models/` and both steps, the three sets come out
+(see above): the models and the grid fit then read other pixels of the same
+photos, so the old and the new numbers are two paths, not one path with
+noise. With the models in `Models/` and both steps, the three sets come out
 now as: ChessReD test 279 of 306 boards exact (was 280), 99.52% of squares;
 Fenit board B 84.6% of squares (was 82.3%), no board in 4 photos (was 6), 0
 boards exact (1 counting a turn); Fenit A 91.4% of squares, 16 boards exact
-(was 15), 19 counting a turn. So read differences of a board or two, or of
-two points on board B, as within what the decoding of a JPEG changes. The
-tables are being re-measured.
+(was 15), 19 counting a turn. Compare a model with another only through the
+same binary. The tables are being re-measured.
 
 Through `app_check` (the app's own code, Vision doing the resize) on the Mac
 mini, 2026-11-13. "Off" is `--a1-prior off --grid-fit off`, "both" is the
@@ -276,21 +288,30 @@ rendered boards, exported for this measurement only, with the corner model in
   and chess-cv unchanged; boards exact unchanged everywhere. So the step is
   off by default until the reference has a rule that holds on boards it was
   not tuned on (the training session reworks it on the training sources).
-  Through `app_check` (decoding each photo once) the app shows the same,
-  squares right without -> with the step: `pieces_s_render1` on the 200
-  Y-LIChess photos 78.0% -> 65.5%, ChessQ 69.7% -> 68.5%, chesscog 92.7% ->
-  92.7%; the model in `Models/` on Y-LIChess 70.1% -> 71.8% (and its one
-  exact board lost), ChessQ 64.6% -> 64.8%, chesscog 73.3% -> 73.3%.
+  Through `app_check` (decoding each photo once), squares right without ->
+  with the step: with `pieces_s_render1`, the model the step was made for,
+  the app shows the same loss, 78.0% -> 65.5% on the 200 Y-LIChess photos,
+  ChessQ 69.7% -> 68.5%, chesscog 92.7% -> 92.7%. With the model in
+  `Models/` it gains squares there (Y-LIChess 70.1% -> 71.8%, ChessQ 64.6%
+  -> 64.8%, chesscog unchanged) and loses that model's one exact board. So
+  it is off because it fails with the piece model that is to replace the
+  one in `Models/`, and is worth little with the one that is there.
 - The rule has no smallest distance between the two groups, and with six
   pieces or fewer one disagreement is already over 15%. The four Fenit A
   photos are such positions (2, 4, 6 and 9 pieces found): on one, two black
   pieces are split into a "white" and a black one. Asking for two
   disagreeing pieces was tried in the Python and is no better (board B has
   many sparse endgames where the one brown king is what needs correcting).
-- On the same boxes the Swift and the Python agree on the side of every
-  piece: 23,523 pieces on the 692 photos of the three sets, found by the
-  model in `Models/` (11,749) and by `pieces_s_render1` (11,774), the step
-  changing a side on the same photos in both (38, 4, 0 and 61, 1, 0).
+- On the same boxes the Swift and the Python give every piece the same
+  final class: 23,510 pieces on the 692 photos of the three sets, found by
+  the model in `Models/` (11,737) and by `pieces_s_render1` (11,773), the
+  step changing a side on the same photos in both (36, 3, 0 and 61, 1, 0).
+  By colour alone they differ on 2 of the 23,510, on two Fenit A photos with
+  `pieces_s_render1`'s boxes where the step does not act: pieces between the
+  groups, moved by the JPEG decoders. (Measured with `app_check --colours`
+  decoding each photo once, against the reference's Lab formula. With the
+  old binary, whose patches were cropped reads of the undecoded photo, it
+  was 23,523 of 23,523.)
 - Cost when on: 0.07 s a photo with 32 pieces in a release build, about 1 s
   in a debug build; like the grid fit it reads the photo's pixels once more
   (the rectangle that holds all the pieces).

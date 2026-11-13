@@ -20,8 +20,8 @@ import Vision
 /// fit (`GridCorners`) where it accepts its own result, and which corner is
 /// a1 is checked against the pieces (`BoardOrientation`). A third, White and
 /// Black from the colours of the pieces where the piece model's own answer
-/// does not fit them (`PieceSides`), is there but switched off: its rule
-/// lost more than it gained on boards nobody tuned it on.
+/// does not fit them (`PieceSides`), is there but switched off: on boards
+/// nobody tuned its rule on, it fails with the piece model it was made for.
 ///
 /// Both models see the photo letterboxed into a square (`Letterbox`), as in
 /// training, never stretched. The square is passed to Vision with
@@ -35,7 +35,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     private let pull: Double
     private let a1Prior: Double?
     private let gridFit: Bool
-    private let sidesFromColour: Bool
+    /// Internal for testing: the app's default must stay off.
+    let sidesFromColour: Bool
 
     /// - Parameters:
     ///   - a1Prior: which corner is a1 is checked against the pieces
@@ -48,9 +49,11 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///   - sidesFromColour: decide White and Black from the colours of the
     ///     pieces in the photo where they contradict the piece model for
     ///     more than a share of the pieces (`PieceSides`). Off unless asked
-    ///     for: on the second held-out test set the rule as it is makes
-    ///     unseen boards worse (`docs/RECOGNITION.md`); it is kept for the
-    ///     reference's next version of the rule.
+    ///     for: on the second held-out test set the rule as it is loses 12
+    ///     points of squares on one source with the retrained piece model
+    ///     it was made for, and gains nothing lasting with the model in
+    ///     `Models/` (`docs/RECOGNITION.md`). It is kept for the reference's
+    ///     next version of the rule.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
