@@ -39,7 +39,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     own choice counts. `nil` keeps the corner model's a1 as it is.
     ///   - gridFit: take the corners from the classical grid fit
     ///     (`GridCorners`) where it accepts its own result, and from the
-    ///     corner model where it does not.
+    ///     corner model where it does not. With it, a board the corner model
+    ///     does not find can still be read.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -98,16 +99,29 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             throw RecognitionError.boardNotFound
         }
 
-        var corners = try detectCorners(in: square, letterbox: letterbox)
-        guard Homography(corners: corners) != nil else {
+        // Corners: the model's, the grid fit's, or both (see `corners(model:in:gridFit:)`).
+        var modelCorners: [CGPoint]?
+        do {
+            let found = try detectCorners(in: square, letterbox: letterbox)
+            if Homography(corners: found) != nil {
+                modelCorners = found
+            }
+        } catch RecognitionError.boardNotFound {
+            // The grid fit may still find the board.
+        }
+        guard let located = Self.corners(model: modelCorners, in: image, gridFit: gridFit) else {
             throw RecognitionError.boardNotFound
         }
-        if gridFit {
-            corners = Self.cornersWithGridFit(modelCorners: corners, in: image)
-        }
+        var corners = located.corners
 
         let detections = try detectPieces(in: square, letterbox: letterbox)
-        if let a1Prior {
+        // Which corner is a1. Without the corner model there is no opinion to
+        // weigh against the pieces: they decide alone (prior 0), whatever
+        // `a1Prior` says, as in `evaluate.py`.
+        if !located.fromModel {
+            corners = BoardOrientation.orient(
+                corners: corners, detections: detections, pull: pull, prior: 0)
+        } else if let a1Prior {
             corners = BoardOrientation.orient(
                 corners: corners, detections: detections, pull: pull, prior: a1Prior)
         }
@@ -126,14 +140,33 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     // MARK: - Grid fit
 
-    /// The corner model says where the board is and which corner it takes
-    /// for a1; the grid fit, where it accepts its own result, says where the
-    /// corners are exactly. It does not know a1, so its corners are turned to
-    /// the rotation nearest the model's. Where it rejects itself the model's
-    /// corners stay. As `evaluate.py --grid-corners`. Internal for testing.
-    static func cornersWithGridFit(modelCorners: [CGPoint], in image: CGImage) -> [CGPoint] {
-        guard let fit = GridCorners.find(in: image) else { return modelCorners }
-        return GridCorners.turned(fit.corners, nearestTo: modelCorners)
+    /// The board's corners from what the corner model and the grid fit say,
+    /// as `evaluate.py --grid-corners` combines them. Internal for testing.
+    ///
+    /// - The model found the board and the fit accepts its own result: the
+    ///   fit's corners (it says where they are exactly), turned to the
+    ///   rotation nearest the model's (it has an opinion on which is a1; the
+    ///   fit has none).
+    /// - The model found the board and the fit rejects itself, or is switched
+    ///   off: the model's corners.
+    /// - The model found no board and the fit accepts: the fit's corners, in
+    ///   no particular rotation (`fromModel` false: a1 must come from the
+    ///   pieces alone).
+    /// - Neither: nil, no board.
+    static func corners(
+        model: [CGPoint]?, in image: CGImage, gridFit: Bool
+    ) -> (corners: [CGPoint], fromModel: Bool)? {
+        let fit = gridFit ? GridCorners.find(in: image) : nil
+        switch (model, fit) {
+        case let (model?, fit?):
+            return (GridCorners.turned(fit.corners, nearestTo: model), true)
+        case let (model?, nil):
+            return (model, true)
+        case let (nil, fit?):
+            return (fit.corners, false)
+        case (nil, nil):
+            return nil
+        }
     }
 
     // MARK: - Corner model

@@ -208,16 +208,33 @@ struct GridCornersTests {
         // A corner model that is half a square out and starts at another corner.
         let model = [truth[2], truth[3], truth[0], truth[1]].map { CGPoint(x: $0.x + 25, y: $0.y - 20) }
 
-        let onBoard = CoreMLBoardRecognizer.cornersWithGridFit(
-            modelCorners: model, in: try Self.image(board.file))
-        for (mine, drawn) in zip(onBoard, [truth[2], truth[3], truth[0], truth[1]]) {
-            // the fit's corners (within a twentieth of a 56-pixel square), in the model's order
+        let boardImage = try Self.image(board.file)
+        let clutter = try Self.image(try #require(recorded.boards["clutter"]).file)
+
+        // Both found the board: the fit's corners, in the model's order.
+        let both = try #require(CoreMLBoardRecognizer.corners(model: model, in: boardImage, gridFit: true))
+        #expect(both.fromModel)
+        for (mine, drawn) in zip(both.corners, [truth[2], truth[3], truth[0], truth[1]]) {
+            // (within a twentieth of a 56-pixel square)
             #expect(hypot(mine.x - drawn.x, mine.y - drawn.y) < 3)
         }
 
-        let clutter = try #require(recorded.boards["clutter"])
-        #expect(CoreMLBoardRecognizer.cornersWithGridFit(
-            modelCorners: model, in: try Self.image(clutter.file)) == model)
+        // The fit rejects itself, or is switched off: the model's corners.
+        let modelOnly = try #require(CoreMLBoardRecognizer.corners(model: model, in: clutter, gridFit: true))
+        #expect(modelOnly.corners == model && modelOnly.fromModel)
+        let switchedOff = try #require(
+            CoreMLBoardRecognizer.corners(model: model, in: boardImage, gridFit: false))
+        #expect(switchedOff.corners == model && switchedOff.fromModel)
+
+        // The model found no board: the fit's corners as they come, and the
+        // caller is told that a1 is unknown.
+        let fitOnly = try #require(CoreMLBoardRecognizer.corners(model: nil, in: boardImage, gridFit: true))
+        #expect(!fitOnly.fromModel)
+        #expect(fitOnly.corners == GridCorners.find(in: boardImage)?.corners)
+
+        // Neither: no board.
+        #expect(CoreMLBoardRecognizer.corners(model: nil, in: clutter, gridFit: true) == nil)
+        #expect(CoreMLBoardRecognizer.corners(model: nil, in: boardImage, gridFit: false) == nil)
     }
 
     @Test func testTurnsTheFitToTheModelsCorners() {
