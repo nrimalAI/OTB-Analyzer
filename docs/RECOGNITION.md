@@ -184,6 +184,16 @@ the other side); see `GridWindow.choose`.
 
 ## What the two steps are worth
 
+**These tables were measured before `app_check` decoded each photo once**
+(see above), and the pixels it now reads are not exactly the ones it read
+then. With the models in `Models/` and both steps, the three sets come out
+now as: ChessReD test 279 of 306 boards exact (was 280), 99.52% of squares;
+Fenit board B 84.6% of squares (was 82.3%), no board in 4 photos (was 6), 0
+boards exact (1 counting a turn); Fenit A 91.4% of squares, 16 boards exact
+(was 15), 19 counting a turn. So read differences of a board or two, or of
+two points on board B, as within what the decoding of a JPEG changes. The
+tables are being re-measured.
+
 Through `app_check` (the app's own code, Vision doing the resize) on the Mac
 mini, 2026-11-13. "Off" is `--a1-prior off --grid-fit off`, "both" is the
 app's default (grid fit on, prior 6). Boards exact, and in brackets boards
@@ -231,7 +241,8 @@ What this says:
 ## What the colour step is worth
 
 Through `app_check` on the Mac mini, 2026-11-13, grid fit on and prior 6,
-`--sides-from-colour off` against `on`. Boards exact (in brackets: once
+`--sides-from-colour off` against `on` (the table: before `app_check`
+decoded each photo once, like the tables above). Boards exact (in brackets: once
 turned by 180 degrees) and squares right. **The step is off in the app**
 (`CoreMLBoardRecognizer(sidesFromColour:)` defaults to false): what follows
 is why it was written and why it is off.
@@ -265,9 +276,11 @@ rendered boards, exported for this measurement only, with the corner model in
   and chess-cv unchanged; boards exact unchanged everywhere. So the step is
   off by default until the reference has a rule that holds on boards it was
   not tuned on (the training session reworks it on the training sources).
-  Through `app_check` the app shows the same: `pieces_s_render1` on the 200
-  Y-LIChess photos 77.8% -> 65.5% of squares with the step on, ChessQ 69.7%
-  -> 68.5% (one run each, before `app_check` decoded each photo once).
+  Through `app_check` (decoding each photo once) the app shows the same,
+  squares right without -> with the step: `pieces_s_render1` on the 200
+  Y-LIChess photos 78.0% -> 65.5%, ChessQ 69.7% -> 68.5%, chesscog 92.7% ->
+  92.7%; the model in `Models/` on Y-LIChess 70.1% -> 71.8% (and its one
+  exact board lost), ChessQ 64.6% -> 64.8%, chesscog 73.3% -> 73.3%.
 - The rule has no smallest distance between the two groups, and with six
   pieces or fewer one disagreement is already over 15%. The four Fenit A
   photos are such positions (2, 4, 6 and 9 pieces found): on one, two black
