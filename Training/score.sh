@@ -10,7 +10,9 @@
 # Run it detached for a long one:  nohup bash score.sh ... > /dev/null 2>&1 &
 cd "$(dirname "$0")" || exit 1
 kind="$1"; label="$2"; weights="$3"
-[ -n "$weights" ] || { echo "usage: bash score.sh pieces|corners <label> <weights.pt>"; exit 2; }
+if [ -z "$weights" ] || { [ "$kind" != pieces ] && [ "$kind" != corners ]; }; then
+  echo "usage: bash score.sh pieces|corners <label> <weights.pt>"; exit 2
+fi
 POS="--positions datasets/merged/positions.json --source fenit"
 CR="--annotations datasets/chessred2k/annotations.json --images datasets/chessred2k/images"
 mkdir -p runs/scores

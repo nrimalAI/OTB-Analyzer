@@ -68,29 +68,28 @@ class A1Order(torch.nn.Module):
 def export(weights, out_dir, base_name, **overrides):
     for suffix, quant in VARIANTS.items():
         model = YOLO(weights)
-        if base_name == "BoardCorners" and is_canonical(model.names):
-            # ultralytics converts whatever module it is handed here.
+        canonical = base_name == "BoardCorners" and is_canonical(model.names)
+        if canonical:
+            # ultralytics converts whatever module it is handed here. The
+            # package then has one class again, and says so: ultralytics
+            # reads the number of classes of a pose model from its names, and
+            # evaluate.py must not turn the corners a second time.
             from ultralytics.utils.export import coreml
             convert = coreml.torch2coreml
-            coreml.torch2coreml = lambda model, **kw: convert(model=A1Order(model), **kw)
-            try:
-                path = model.export(format="coreml", imgsz=640,
-                                    **{**MODEL_ARGS[base_name], **overrides}, **quant)
-            finally:
+            coreml.torch2coreml = lambda model, **kw: convert(
+                model=A1Order(model),
+                **{**kw, "metadata": {**(kw.get("metadata") or {}), "names": {0: "board"}}})
+        try:
+            path = model.export(format="coreml", imgsz=640,
+                                **{**MODEL_ARGS[base_name], **overrides}, **quant)
+        finally:
+            if canonical:
                 coreml.torch2coreml = convert
-            dest = out_dir / f"{base_name}-{suffix}.mlpackage"
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.move(path, dest)
-            print(f"exported {dest} (corners turned to a1 order inside the model)")
-            continue
-        path = model.export(format="coreml", imgsz=640,
-                            **{**MODEL_ARGS[base_name], **overrides}, **quant)
         dest = out_dir / f"{base_name}-{suffix}.mlpackage"
         if dest.exists():
             shutil.rmtree(dest)
         shutil.move(path, dest)
-        print(f"exported {dest}")
+        print(f"exported {dest}" + (" (corners turned to a1 order inside the model)" if canonical else ""))
 
 
 def main():

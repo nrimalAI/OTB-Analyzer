@@ -42,7 +42,18 @@ The second row never reached `main`: exp3's corners turn three endgame photos
 of ChessReD game G033 by 180 degrees (one is the package's fixture
 `test_004005.jpg`), which `main`'s corner model gets right, so the tests fail
 with it once the corners are precise (grid fit). The third row is what is in
-`Models/` until a corner model passes that fixture; exp3's weights stay here
-for comparison.
+`Models/` until a corner model passes that fixture. With the app's defaults
+(grid fit on, a1 prior 6) it reads 280 of 306 ChessReD test boards exactly and
+82.3% of board B's squares, board not found in 6 of 100. exp3's weights are
+not kept here, since it never reached `main`: they are
+`runs/pose/corners_s_exp3/weights/last.pt` on the Mac mini, and
+`Training/baseline/corners_yolo11s_exp3.pt` in this branch's history up to
+the commit that removed it.
+
+The first and third rows count the same corner model's misses on board B
+differently (66 and 35 of 100) because they were measured differently: the
+first by ultralytics running the exported package, the third by the app's
+own code (`app_check`), which is the number that describes the app. Why
+ultralytics finds fewer boards with the same package was not looked into.
 
 All rows include ChessReD (CC BY-NC-SA 4.0): personal builds only.

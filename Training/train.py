@@ -73,11 +73,26 @@ def main():
         import yaml
         if not args.model:
             ap.error("resume needs --model <run>/weights/last.pt")
-        saved = torch.load(args.model, map_location="cpu", weights_only=False).get("train_args", {})
+        import canonical_corners
+        ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
+        saved = ckpt.get("train_args", {})
         data_file = Path(str(saved.get("data", "")))
-        if data_file.is_file() and (yaml.safe_load(data_file.read_text()) or {}).get("canonical_corners"):
-            import canonical_corners
+        marked = data_file.is_file() and bool(
+            (yaml.safe_load(data_file.read_text()) or {}).get("canonical_corners"))
+        # The dataset file sits outside the run's folder and another run can
+        # overwrite it, so the checkpoint's own classes are asked as well.
+        net = ckpt.get("ema") or ckpt.get("model")
+        by_names = canonical_corners.is_canonical(getattr(net, "names", None) or {})
+        if marked != by_names:
+            ap.error(f"{args.model} has {'canonical' if by_names else 'ordinary'} corner classes "
+                     f"but {data_file} says {'canonical' if marked else 'ordinary'}: "
+                     "put the run's dataset file back before continuing it")
+        if marked:
             canonical_corners.patch()
+        given = [f for f in ("data", "epochs", "patience", "device", "imgsz", "kpt_sigma")
+                 if getattr(args, f) is not None] + (["canonical_corners"] if args.canonical_corners else [])
+        if given:
+            print(f"resume keeps the run's own settings; ignored here: {', '.join(given)}")
         extra = {"batch": args.batch} if args.batch else {}
         YOLO(args.model).train(resume=True, **extra)
         return

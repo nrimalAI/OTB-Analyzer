@@ -128,6 +128,8 @@ sources:
   # Rendered in Blender by render_boards.py: a new piece set, board, floor,
   # light and camera for every image, from a low side view to straight above,
   # with exact boxes and corners. Ours, so a model trained on it may ship.
+  # (The positions on the boards are taken from the merged train split, games
+  # of ChessReD among them: positions are facts about games, not the photos.)
   render:
     kind: native
     dir: datasets/render

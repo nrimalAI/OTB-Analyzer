@@ -295,7 +295,9 @@ GPU and slows it a little.
 | `corners_s_exp3` | continues exp1 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_synth` (3,000 synthetic boards added); cut by a power failure after 5 epochs and continued | Finished (`best.pt` = `last.pt`). Median corner error: ChessReD test **0.22** (exp1 0.32), Fenit A 0.24, **board B 0.84** (order right 26 of 93). With labelled boxes: ChessReD test **95.8% exact** (exp1 78.4%), board B 3.2%, 23.7% with the best rotation. With the baseline piece model: ChessReD test 99.35% / **84.0% exact** (baseline pair 97.9% / 73.5%), board B 66.4% / 0% (baseline 58.0% / 0%) |
 | `corners_s_exp4` | continues exp3 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_rf` (4,946 Roboflow photos with derived corners added) | Finished. `last.pt` (better than `best.pt`): ChessReD test **0.19**, 97.1% exact with labelled boxes, but 4 of 306 turned 180 degrees (exp3: 2); Fenit A 0.15; **board B 0.91**, order right 29 of 93, 8.6% exact with labelled boxes. More boards with corners did not help on B: see "why learned corners fail" below. Through the app's code with the baseline pieces: ChessReD test 91.2% exact |
 | `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | Killed at epoch 19 (exit 137; the machine was deep in swap), continued from epoch 18 with batch 12 on 2026-11-13. At epoch 18, labelled corners: board B 79.2% / 0%, Fenit A 94.8% / 14%, ChessReD test 98.8% / **63.1%** (baseline 84.2% / 0%, 92.2% / 1.5%, 99.66% / 87.6%): worse than the baseline on ChessReD |
-| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | ends about 12:15 on 2026-11-13 |
+| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | running on 2026-11-13; what is running now is in the notes |
+| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | queued |
+| `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | queued |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
 **In `Models/` now (2026-11-13, midday):** `main`'s corner model again, and
@@ -303,10 +305,26 @@ the baseline piece weights exported with NMS across classes. exp3's corners
 were taken back out: with the app-side steps (a1 from the pieces, grid-fit
 corners) they still turn three endgame photos of ChessReD game G033 by 180
 degrees, one of them a fixture of the package's tests, and `main`'s corner
-model does not. A new corner model goes in when it passes that fixture and
-beats these scores (through `app_check`, a1 prior 6, ChessReD test boards
-exact: 238 of 306 without the grid fit; the app-side session measured 267 with
-it and `main`'s piece export). What exp3 scored, for the record:
+model does not.
+
+**What a new corner model has to beat** (through `app_check` with the app's
+defaults, i.e. grid fit on and a1 prior 6; table in `docs/RECOGNITION.md`):
+ChessReD test 280 of 306 boards exact (91.5%), none turned; Fenit board B
+82.3% of squares, board not found in 6 of 100; Fenit A 91.4% of squares. And
+it has to pass both fixture tests of `./Scripts/swift-test.sh`: the four
+fixtures with the app's pipeline, and with the grid fit off, where a wrong a1
+or a board that is not found shows (with the grid fit off the pair in
+`Models/` reads 238 of 306).
+
+**The piece export with NMS across classes against `main`'s** (same weights;
+both with `main`'s corner model and the app's defaults, photo by photo,
+`runs/app_check/pair_*.txt`): ChessReD test 280 against 267 boards exact, 13
+boards gained and none lost (sign test p = 0.0002), no photo with fewer
+squares right; Fenit board B 82.3% against 78.5% of squares, more squares
+right on 73 photos and fewer on 1, 0 boards exact with either; Fenit A 91.4%
+against 89.1% of squares, 15 against 4 of 286 boards exact.
+
+What exp3 scored while it was in `Models/`, for the record:
 
 **In `Models/` from 2026-11-13 early to midday** (weights and history in `baseline/README.md`):
 exp3's corners (FP16, 19 MB; INT8 is 9.5 MB and scores 86.9% where FP16
@@ -316,7 +334,7 @@ Scored through the `.mlpackage`s, letterboxed, per-square / boards exact:
 | | ChessReD test (306) | Fenit board B (100) |
 |---|---|---|
 | Before | 97.86% / 74.2% (interval 69-79%) | 24.2% / 0%, board not found in 66 (58.0% / 0% with the `.pt` files) |
-| Now | 99.47% / **87.6%** (83-91%) | 67.7% / 0%, board always found |
+| With exp3 | 99.47% / **87.6%** (83-91%) | 67.7% / 0%, board always found |
 
 On board B no board is fully right with either, and both are below what an
 empty prediction scores there (73%). The gain is that the board is found: a
@@ -339,15 +357,37 @@ app_check/.build/release/app_check --models ../Models --list runs/app_check/ches
 ```
 
 ChessReD test through it, boards exact of 306: `main`'s models 229 (74.8%);
-exp3 corners + baseline pieces (pull request #4) 272 (88.9%); exp4 corners
+exp3 corners + baseline pieces (what pull request #4 first held) 272 (88.9%); exp4 corners
 279 (91.2%). exp3 and exp4 turn the last photos of game G033 by 90 or 180
 degrees (G033_IMG099 to 102, 5-6 pieces left; `test_004005.jpg` in the
 package's fixtures is G033_IMG101), and exp4 also G000_IMG102
 (`test_000102.jpg`); `main`'s corner model gets all of them right. In those
 positions the pieces point the wrong way (a white queen and pawn on ranks 7
 and 8), so the new models seem to take a1 from the pieces where the old one
-took it from the ChessReD board. That is why `swift test` fails on pull
-request #4.
+took it from the ChessReD board. That is why `swift test` failed while exp3
+was in `Models/`, and why it was taken out again.
+
+**Tools added on 2026-11-13** (each file's header says more):
+
+- `train.py corners ... --canonical-corners` and `canonical_corners.py`: corner
+  labels in an order the picture fixes, a1 as a class (see the first point
+  below). `export_coreml.py` puts the corners back in a1 order inside the
+  exported model; `evaluate.py` and `corner_error.py` read either kind.
+- `train.py resume --model <run>/weights/last.pt`: continue a cut-off run.
+  `queue.sh` resumes through it; a bare ultralytics resume would train a
+  `--canonical-corners` run on the labels as they are on disk.
+- `render_boards.py` (runs in Blender 5.x, `brew install --cask blender`):
+  rendered positions with exact boxes, corners and position, a new piece set,
+  board, floor, light and camera per image. `datasets/render` holds 4,000
+  (`--seed 1`); source `render` in `sources.yaml`; merged into
+  `datasets/merged_render` (pieces) and `datasets/merged_rf_render` (corners).
+  In those 4,000 the sides of thick boards carry a warped copy of the board
+  pattern (fixed in the script since; the labels are right).
+- `score.sh pieces|corners <label> <weights>`: the standard scores on the CPU,
+  into `runs/scores/`.
+- `evaluate.py --device cpu`, `--dump-list` (the photo lists `app_check` takes),
+  and with `--grid-corners` a board the corner model does not find is read by
+  the grid fit alone, a1 from the pieces.
 
 **What has been learned, and what to try next.**
 
@@ -357,10 +397,24 @@ request #4.
   h1): where the model cannot tell which corner is a1 it predicts the average
   over the rotations it cannot tell apart, which is the middle of the edges
   or of the board. The location is learned together with a guess it cannot
-  make. To try: label the corners in an order fixed by the image (start at
-  the corner with the smallest x + y, go clockwise) and learn "which of them
-  is a1" as a class; the export puts them back in (a1, a8, h8, h1) order so
-  the app sees the same `[1,17,8400]` tensor.
+  make. `--canonical-corners` (fde6818) separates the two: the corners are
+  labelled in an order fixed by the image (from the corner with the smallest
+  x + y, in the labels' direction) and "which of them is a1" is a class; the
+  export puts them back in (a1, a8, h8, h1) order so the app sees the same
+  `[1,17,8400]` tensor. Not yet shown to work: `corners_s_canon1` is the
+  first run. Known weak spot: a board seen as a diamond, where two corners
+  tie for the start, can be averaged over two orders again.
+- **The grid fit's accept decision is touchy, and a simple cure did not
+  help.** One grey level of noise on 3.5% of the pixels (what two JPEG
+  decoders differ by) changes accept/reject on 10 of 306 ChessReD test photos
+  and 9 of 286 Fenit A photos; the corners never differ by more than 0.1
+  square when both are accepted. The cause found in the review of pull
+  request #7: candidates that are not x-corners do not settle under
+  `cornerSubPix`. Dropping the unsettled ones costs accepted photos on
+  ChessReD (93% -> 89%) and is no more stable; putting them back at their
+  whole-pixel start changes nothing measurable (5 of 306 and 10 of 286).
+  `grid_corners.py` was left as it is; scripts and numbers in
+  `runs/grid_stab/`.
 - **The piece model is what stops board B.** With the labelled corners, no
   piece model reads one board B photo fully right. Scored square by square
   (`pieces_s_rf` at epoch 18, 640 input): which squares are occupied 98.2%
@@ -454,9 +508,7 @@ request #4.
   between 0.05 and 0.25; a longer first stage; yolo11m (about 2.5x slower).
 
 **Things that are not in the repo.** The Roboflow API key (only needed to
-fetch more Roboflow projects: `export ROBOFLOW_API_KEY=...`). Roboflow
-Universe's website refuses pages from this network until about 05:50 UTC on
-2026-11-13 (a search used up its quota); the API is unaffected.
+fetch more Roboflow projects: `export ROBOFLOW_API_KEY=...`).
 
 ## Second held-out test set (2026-11): `datasets/heldout2`
 

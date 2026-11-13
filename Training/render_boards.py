@@ -17,6 +17,8 @@ Every image gets:
   corners/labels/<stem>.txt  the playing area's corners (a1, a8, h8, h1), when
                              all four are inside the picture
   positions.jsonl            stem, FEN placement, camera, for scoring and debugging
+                             (a render cut off and done again leaves two rows
+                             for its stem: the later one counts)
 in the `native` layout build_dataset.py merges (source `render` in
 sources.yaml). Boxes cover the whole piece, also where another piece hides
 part of it, as in the hand-labelled datasets.
@@ -320,13 +322,10 @@ def mottled(name, a, b, roughness, rng, kind):
         if kind == "wood":
             tex.inputs["Distortion"].default_value = rng.uniform(1, 6)
             tex.inputs["Detail"].default_value = 3
-        ramp = nodes.new("ShaderNodeMixRGB") if hasattr(bpy.types, "ShaderNodeMixRGB") else None
         mix = nodes.new("ShaderNodeMix")
         mix.data_type = "RGBA"
         mix.inputs["A"].default_value = (*a, 1)
         mix.inputs["B"].default_value = (*b, 1)
-        if ramp is not None:
-            nodes.remove(ramp)
         links.new(tex.outputs["Fac"] if "Fac" in tex.outputs else tex.outputs[0], mix.inputs["Factor"])
         colour = mix.outputs["Result"]
     links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
@@ -381,7 +380,7 @@ def board_texture(rng, border, px=64):
     image = bpy.data.images.new("board", side, side)
     image.pixels.foreach_set(img.ravel())   # row 0 is the bottom row: rank 1
     image.pack()
-    return image, light, dark
+    return image, light, dark, b / px
 
 
 def build_scene(rng, placement):
@@ -392,7 +391,9 @@ def build_scene(rng, placement):
     # Board: the playing area is [0, 8] x [0, 8], a1's corner at the origin,
     # files along +x, ranks along +y, top surface at z = 0.
     border = rng.choice([0.0, rng.uniform(0.05, 0.3), rng.uniform(0.3, 0.9), rng.uniform(0.3, 0.9)])
-    image, light, dark = board_texture(rng, border)
+    # The margin as drawn, a whole number of texture pixels: the plane must
+    # be exactly that large for the grid to sit on the labelled corners.
+    image, light, dark, border = board_texture(rng, border)
     thick = rng.choice([0.01, rng.uniform(0.05, 0.25), rng.uniform(0.25, 0.6)])
     lo, hi = -border, 8 + border
     mesh = bpy.data.meshes.new("board")
@@ -405,7 +406,9 @@ def build_scene(rng, placement):
     for poly in mesh.polygons:
         for loop in poly.loop_indices:
             v = mesh.loops[loop].vertex_index
-            uv.data[loop].uv = corner_uv.get(v, (0.01, 0.01))  # the sides take the margin colour
+            # Only the top face (the first) shows the board; the sides and the
+            # underside take the margin colour from a corner of the texture.
+            uv.data[loop].uv = corner_uv[v] if poly.index == 0 else (0.01, 0.01)
     board = bpy.data.objects.new("board", mesh)
     mesh.materials.append(material("board", (1, 1, 1), rng.choice([rng.uniform(0.05, 0.3), rng.uniform(0.3, 0.9)]),
                                    rng, coat=rng.choice([0.0, 0.0, rng.uniform(0.2, 1.0)]), texture=image))
@@ -640,8 +643,6 @@ def main():
         scene.render.filepath = str(image_path)
         bpy.ops.render.render(write_still=True)
 
-        (out / "pieces" / "labels" / f"{stem}.txt").write_text(
-            "".join(f"{c} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for c, x, y, w, h in boxes))
         inside = all(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 for x, y in corners)
         if inside:
             xs, ys = [c[0] for c in corners], [c[1] for c in corners]
@@ -655,6 +656,9 @@ def main():
         with open(out / "positions.jsonl", "a") as f:
             f.write(json.dumps(dict(stem=stem, placement=placement, corners=corners,
                                     corners_inside=inside, size=size, **view)) + "\n")
+        # Last, because this file is what marks an image as done (see the skip above).
+        (out / "pieces" / "labels" / f"{stem}.txt").write_text(
+            "".join(f"{c} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for c, x, y, w, h in boxes))
         if args.preview:
             (out / "preview").mkdir(exist_ok=True)
             (out / "preview" / f"{stem}.json").write_text(json.dumps(dict(

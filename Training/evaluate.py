@@ -283,8 +283,12 @@ def main():
             items = chessred_items(args)
         else:
             ap.error("give --annotations and --images, or --positions")
-        photos = {str(Path(src).resolve()): placement_of(gt)
-                  for src, gt, _, _ in items}
+        photos = {}
+        for src, gt, _, _ in items:
+            photos[str(Path(src).resolve())] = placement_of(gt)
+            if args.limit and len(photos) >= args.limit:
+                break
+        Path(args.dump_list).parent.mkdir(parents=True, exist_ok=True)
         Path(args.dump_list).write_text(json.dumps(photos, indent=0, sort_keys=True))
         print(f"{len(photos)} photos written to {args.dump_list}")
         return
