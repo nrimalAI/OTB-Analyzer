@@ -290,6 +290,19 @@ GPU and slows it a little.
 | `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | queued |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued last; exp3 already shows what a tighter tolerance does |
 
+**In `Models/` since 2026-11-13** (weights and history in `baseline/README.md`):
+exp3's corners (FP16, 19 MB; INT8 is 9.5 MB and scores 86.9% where FP16
+scores 87.6%) and the baseline piece weights exported with NMS across classes.
+Scored through the `.mlpackage`s, letterboxed, per-square / boards exact:
+
+| | ChessReD test (306) | Fenit board B (100) |
+|---|---|---|
+| Before | 97.86% / 74.2% (interval 69-79%) | 24.2% / 0%, board not found in 66 (58.0% / 0% with the `.pt` files) |
+| Now | 99.47% / **87.6%** (83-91%) | 67.7% / 0%, board always found |
+
+On board B no board is fully right yet with either: the gain there is in
+squares, and what is missing is described below.
+
 **What has been learned, and what to try next.**
 
 - The corner model is the bottleneck, and only three boards have corner
