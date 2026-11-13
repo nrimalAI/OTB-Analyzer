@@ -1,0 +1,105 @@
+== chessq
+boards evaluated:        50
+corner detection failed: 8
+per-square accuracy:     66.8438%
+full-board exact match:  2.00%  (95% interval 0%-10% on 50 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 2.00%  (0%-10%)
+grid fit gave no result (model corners kept, if any): 15
+grid fit used alone, the model found no board (a1 from the pieces): 10
+180-degree flip suspects: 1
+
+top confusions (truth -> predicted):
+  p -> ·: 84
+  P -> ·: 78
+  r -> ·: 23
+  · -> r: 21
+  k -> ·: 20
+  · -> P: 20
+  R -> ·: 19
+  n -> ·: 17
+  K -> ·: 16
+  b -> ·: 16
+  · -> p: 16
+  B -> ·: 15
+  N -> ·: 14
+  q -> ·: 13
+  P -> B: 11
+== ylichess --group wood180
+boards evaluated:        102
+corner detection failed: 7
+per-square accuracy:     57.1385%
+full-board exact match:  0.00%  (95% interval 0%-4% on 102 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-4%)
+grid fit gave no result (model corners kept, if any): 7
+grid fit used alone, the model found no board (a1 from the pieces): 95
+180-degree flip suspects: 1
+
+top confusions (truth -> predicted):
+  p -> ·: 374
+  P -> ·: 205
+  · -> P: 137
+  r -> ·: 132
+  p -> P: 131
+  P -> B: 109
+  b -> ·: 104
+  n -> ·: 103
+  · -> B: 94
+  q -> ·: 66
+  k -> ·: 59
+  P -> N: 58
+  R -> ·: 56
+  · -> p: 51
+  B -> ·: 43
+== ylichess --group wood180-layout
+boards evaluated:        98
+corner detection failed: 4
+per-square accuracy:     83.0676%
+full-board exact match:  1.02%  (95% interval 0%-6% on 98 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 1.02%  (0%-6%)
+grid fit gave no result (model corners kept, if any): 4
+grid fit used alone, the model found no board (a1 from the pieces): 94
+180-degree flip suspects: 2
+
+top confusions (truth -> predicted):
+  p -> ·: 78
+  P -> ·: 71
+  · -> P: 56
+  · -> p: 56
+  · -> B: 51
+  k -> ·: 39
+  r -> ·: 38
+  n -> ·: 35
+  b -> ·: 33
+  · -> K: 33
+  · -> N: 31
+  K -> ·: 31
+  N -> ·: 25
+  B -> ·: 25
+  R -> ·: 24
+== chesscog_real
+boards evaluated:        29
+corner detection failed: 0
+per-square accuracy:     78.3405%
+full-board exact match:  0.00%  (95% interval 0%-12% on 29 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-12%)
+grid fit gave no result (model corners kept, if any): 0
+grid fit used alone, the model found no board (a1 from the pieces): 0
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  p -> ·: 71
+  P -> B: 58
+  p -> r: 32
+  r -> ·: 26
+  R -> ·: 25
+  P -> ·: 23
+  P -> N: 22
+  p -> b: 17
+  p -> n: 17
+  Q -> K: 13
+  P -> R: 11
+  b -> n: 11
+  k -> ·: 8
+  n -> ·: 7
+  n -> q: 7
+== done

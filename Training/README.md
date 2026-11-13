@@ -570,41 +570,66 @@ training photo: against the 16,358 images of `merged_v2`, `merged_rf` and
 `merged_synth`, the closest 32x32 thumbnail has a correlation of 0.82 (a copy
 gives 0.98 or more).
 
-**Scores, 2026-11-13** (`runs/scores/heldout2_*.txt`). Per-square / boards
-exact; "empty" is what predicting an empty board scores per square, so a
-figure below it is worse than nothing. Scored with the `.pt` weights on the
-CPU, letterboxed. "Now" is what is in `Models/` since 2026-11-13: exp3's
-corners and the baseline piece weights with `--one-piece-per-spot 0.7`, which
-stands in for the export's NMS across classes.
+**Scores, 2026-11-13.** Per-square / boards exact; "empty" is what
+predicting an empty board scores per square, so a figure below it is worse
+than nothing. Scored with the `.pt` weights on the CPU, letterboxed
+(`score_heldout2.sh`); the reports are kept in `scores/heldout2_2026-11-13/`.
 
-| Part | Photos | Empty | Baseline (`baseline/*_yolo11n_chessred2k.pt`) | Now (`corners_yolo11s_exp3.pt` + baseline pieces) | Now + `--a1-from-pieces 6` |
-|---|---|---|---|---|---|
-| `chessq` | 50 | 68.9% | 37.4% / 0%, board not found in 18 | 74.5% / 0% | 74.5% / 0% |
-| `ylichess`, `wood180` | 104 | 58.1% | 0% / 0%, board not found in 104 | 70.1% / 0% | 65.3% / 0% |
-| `ylichess`, `wood180-layout` | 96 | 89.8% | 0% / 0%, board not found in 96 | 88.0% / 1.0% | 86.8% / 1.0% |
-| `chesscog_real` | 29 | 52.9% | 49.4% / 0% | 78.3% / 0% | 78.3% / 0% |
-| `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
-| `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
+- **Baseline**: `baseline/corners_yolo11n_chessred2k.pt` and
+  `baseline/pieces_yolo11n_chessred2k.pt` as they are.
+- **In `Models/` now** (since b546e6a): the same two weights, the piece model
+  exported with NMS across classes (`--one-piece-per-spot 0.7` stands in for it).
+- **exp3**: `baseline/corners_yolo11s_exp3.pt` with the same pieces: the pair
+  that was in `Models/` for a few hours on 2026-11-13 and came out again
+  because it turns the G033 endgames.
 
-- **Neither pair reads one game position fully right on any of the 19
-  boards** (one layout photo of 96 comes out right). Counting a board turned
-  180 degrees as right changes nothing. The target is 85% of boards exact.
-- The new corner model finds the board in all 1,619 photos; the baseline
-  misses it in 294, among them every photo of the Y-LIChess board.
+| Part | Photos | Empty | Baseline | In `Models/` now | exp3 corners | exp3 + `--a1-from-pieces 6` |
+|---|---|---|---|---|---|---|
+| `chessq` | 50 | 68.9% | 37.4% / 0%, board not found in 18 | 38.0% / 0%, board not found in 18 | 74.5% / 0% | 74.5% / 0% |
+| `ylichess`, `wood180` | 102 | 57.5% | 0% / 0%, board not found in 102 | 0% / 0%, board not found in 102 | 69.9% / 0% | 65.1% / 0% |
+| `ylichess`, `wood180-layout` | 98 | 89.7% | 0% / 0%, board not found in 98 | 0% / 0%, board not found in 98 | 87.8% / 1% | 86.6% / 1% |
+| `chesscog_real` | 29 | 52.9% | 49.4% / 0% | 50.1% / 0% | 78.3% / 0% | 78.3% / 0% |
+| `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 54.1% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
+| `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 54.2% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
+
+- **No pair reads one game position fully right on any of the 19 boards**
+  (with exp3's corners one layout photo of 98 comes out right). Counting a
+  board turned 180 degrees as right changes nothing. The target is 85% of
+  boards exact.
+- **The corner model now in `Models/` does not find the board in 294 of the
+  1,619 photos**, among them every photo of the Y-LIChess board, and is below
+  an empty board on every part. exp3's corners find the board in all 1,619.
+  NMS across classes is worth up to about one point per square.
 - **Which model fails**, on the one source that has boxes and corners
-  (`ylichess`, `wood180`, 104 game positions): exp3's corners with the
-  labelled boxes give 99.2% / **95.2% exact** (interval 89-98%; 97.1% counting
-  a board turned 180 degrees: the two pawn-race endgames come out turned), so
-  on this board the corner model is precise and nearly always has a1 right;
-  the piece model with the labelled corners gives 70.5% / 0%. The piece model is what fails, as on
-  board B. On the layouts the corners with labelled boxes give 32% exact,
-  44% counting a turn: a1 cannot be told there.
+  (`ylichess`; `ylichess_parts.txt` among the reports). On the 102 game
+  positions exp3's corners with the labelled boxes give 99.6% / **97.1%
+  exact** (interval 92-99%): on this board that corner model is precise and
+  has a1 right. The piece model with the labelled corners gives 70.1% / 0%.
+  The piece model is what fails, as on board B. On the 98 layouts the
+  corners with labelled boxes give 32% exact, 45% counting a turn: a1 cannot
+  be told there.
 - `--a1-from-pieces 6` (what the app does since pull request #5) does not
-  help here and costs 5 points per square on `wood180`: with pieces misread,
-  it turns boards the corner model had the right way round. This is a
-  measurement, not a reason to pick another prior on these photos.
-- `samryan` (straight down) and the layouts score below an empty board.
+  help exp3 on any part and costs 5 points per square on `wood180`: with
+  pieces misread, it turns boards the corner model had the right way round.
+  This is a measurement, not a reason to pick another prior on these photos.
+- `samryan` (straight down) and the layouts score below an empty board with
+  every pair.
+- **Both app-side steps on the pair in `Models/` now** (`--grid-corners
+  --a1-from-pieces 6`, in Python; the four smaller parts, `now_steps.txt`).
+  The grid fit's thresholds and the prior were chosen on board B, Fenit A
+  and ChessReD, so this is their first score on boards they have not seen:
 
+  | Part | Photos | Without the steps | With both | Board not found | Fit gave no result |
+  |---|---|---|---|---|---|
+  | `chessq` | 50 | 38.0% / 0% | 66.8% / 2% | 18 -> 8 | 15 |
+  | `ylichess`, `wood180` | 102 | 0% / 0% | 57.1% / 0% | 102 -> 7 | 7 |
+  | `ylichess`, `wood180-layout` | 98 | 0% / 0% | 83.1% / 1% | 98 -> 4 | 4 |
+  | `chesscog_real` | 29 | 50.1% / 0% | 78.3% / 0% | 0 | 0 |
+
+  The fit finds most boards the corner model misses (on the Y-LIChess board
+  it works alone in 189 of 200 photos) and on `chesscog_real` it gives the
+  same squares as exp3's corners. One ChessQ photo of 50 comes out fully
+  right. The squares still wrong are the piece model's.
 **Looked at and not taken** (2026-11-13; searched: Hugging Face, GitHub,
 OSF, Zenodo, Mendeley Data, 4TU, figshare, Dataverse, papers on board
 recognition):
