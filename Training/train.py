@@ -2,6 +2,7 @@
 
     python train.py corners --data datasets/yolo/corners/data.yaml
     python train.py pieces  --data datasets/yolo/pieces/data.yaml
+    python train.py resume  --model runs/pose/<name>/weights/last.pt   # continue a cut-off run
 
 Notes:
 - Corner keypoints are semantic (a1 vs h1 etc.), so horizontal-flip
@@ -16,6 +17,10 @@ Notes:
   loss and for the validation metric. Too tight from a cold start gives no
   gradient at all (0.05 saturates beyond about two squares), so train with
   the default first and then continue from those weights with --kpt-sigma.
+- --canonical-corners: see canonical_corners.py. The labels on disk stay as
+  they are; the order and the class are set while training. Such a run is
+  marked in its dataset file and is continued with `train.py resume`, never
+  with a bare ultralytics resume, which would train on the labels as on disk.
 """
 
 import argparse
@@ -44,8 +49,8 @@ COMMON = dict(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("task", choices=["corners", "pieces"])
-    ap.add_argument("--data", required=True)
+    ap.add_argument("task", choices=["corners", "pieces", "resume"])
+    ap.add_argument("--data", help="dataset file (not needed for resume)")
     ap.add_argument("--model", default=None, help="base checkpoint override")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None,
@@ -57,7 +62,29 @@ def main():
     ap.add_argument("--kpt-sigma", type=float, default=None,
                     help="corners only: keypoint tolerance for the loss and the "
                          "metric (ultralytics' default for 4 keypoints is 0.25)")
+    ap.add_argument("--canonical-corners", action="store_true",
+                    help="corners only: corners in an order the picture fixes and "
+                         "a1 as a class (canonical_corners.py)")
     args = ap.parse_args()
+
+    if args.task == "resume":
+        # Continue a cut-off run from its last.pt with the settings it had.
+        import torch
+        import yaml
+        if not args.model:
+            ap.error("resume needs --model <run>/weights/last.pt")
+        saved = torch.load(args.model, map_location="cpu", weights_only=False).get("train_args", {})
+        data_file = Path(str(saved.get("data", "")))
+        if data_file.is_file() and (yaml.safe_load(data_file.read_text()) or {}).get("canonical_corners"):
+            import canonical_corners
+            canonical_corners.patch()
+        extra = {"batch": args.batch} if args.batch else {}
+        YOLO(args.model).train(resume=True, **extra)
+        return
+    if not args.data:
+        ap.error("--data is required")
+    if args.canonical_corners and args.task != "corners":
+        ap.error("--canonical-corners is for the corners model")
 
     if args.task == "corners":
         base = args.model or "yolo11n-pose.pt"
@@ -82,15 +109,22 @@ def main():
     name = args.name or args.task
 
     data = args.data
-    if args.kpt_sigma:
-        if args.task != "corners":
-            ap.error("--kpt-sigma is for the corners model")
-        # ultralytics reads the tolerance from the dataset file, so train from
-        # a copy of it that carries the setting.
+    if args.kpt_sigma and args.task != "corners":
+        ap.error("--kpt-sigma is for the corners model")
+    if args.kpt_sigma or args.canonical_corners:
+        # ultralytics reads the tolerance and the classes from the dataset
+        # file, so train from a copy of it that carries the settings.
         import yaml
         spec = yaml.safe_load(Path(args.data).read_text())
         spec["path"] = str((Path(args.data).parent / spec.get("path", ".")).resolve())
-        spec["kpt_oks_sigmas"] = [args.kpt_sigma] * spec["kpt_shape"][0]
+        if args.kpt_sigma:
+            spec["kpt_oks_sigmas"] = [args.kpt_sigma] * spec["kpt_shape"][0]
+        if args.canonical_corners:
+            import canonical_corners
+            canonical_corners.patch()
+            spec["names"] = dict(canonical_corners.CLASS_NAMES)
+            spec["nc"] = 4
+            spec["canonical_corners"] = True
         project.mkdir(parents=True, exist_ok=True)
         data = str(project / f"{name}_data.yaml")
         Path(data).write_text(yaml.safe_dump(spec, sort_keys=False))

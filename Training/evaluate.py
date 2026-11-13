@@ -33,6 +33,7 @@ from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, fen_placement_to_board, homography, orient_by_pieces,
 )
+from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
 
 
@@ -82,7 +83,9 @@ def detect_corners(model, src, imgsz=640, two_pass=False, device=None):
         if r.keypoints is None or len(r.keypoints) == 0:
             return None
         best = int(r.boxes.conf.argmax()) if r.boxes is not None and len(r.boxes) else 0
-        return r.keypoints.xy[best].tolist()
+        cls = r.boxes.cls[best] if r.boxes is not None and len(r.boxes) else 0
+        # A model trained with canonical_corners.py says where a1 is by class.
+        return a1_order(r.keypoints.xy[best].tolist(), cls, r.names)
 
     first = run(src if not isinstance(src, Path) else str(src))
     if first is None or not two_pass:

@@ -125,6 +125,14 @@ sources:
     dir: datasets/synth
     license: CC BY 4.0
 
+  # Rendered in Blender by render_boards.py: a new piece set, board, floor,
+  # light and camera for every image, from a low side view to straight above,
+  # with exact boxes and corners. Ours, so a model trained on it may ship.
+  render:
+    kind: native
+    dir: datasets/render
+    license: own
+
   # Corner labels for Roboflow photos, derived by derive_corners.py with the
   # classical grid detector (grid_corners.py): real boards for the corner
   # model. Corners only. 13 photos are from chess-vision-jmf56 (licence

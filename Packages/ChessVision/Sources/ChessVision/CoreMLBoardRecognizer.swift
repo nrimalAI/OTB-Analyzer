@@ -25,17 +25,23 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     private let pieceModel: VNCoreMLModel
     private let cornerScoreThreshold: Float
     private let pull: Double
+    private let a1Prior: Double?
 
+    /// - Parameter a1Prior: which corner is a1 is checked against the pieces
+    ///   (`BoardOrientation.orient`); this is how much the corner model's own
+    ///   choice counts. `nil` keeps the corner model's a1 as it is.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
         cornerScoreThreshold: Float = 0.25,
-        pull: Double = 0.30  // = SquareAssignment.defaultPull
+        pull: Double = 0.30,  // = SquareAssignment.defaultPull
+        a1Prior: Double? = 6  // = BoardOrientation.appPrior
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
         self.cornerScoreThreshold = cornerScoreThreshold
         self.pull = pull
+        self.a1Prior = a1Prior
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -80,12 +86,19 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             throw RecognitionError.boardNotFound
         }
 
-        let corners = try detectCorners(in: square, letterbox: letterbox)
-        guard let homography = Homography(corners: corners) else {
+        var corners = try detectCorners(in: square, letterbox: letterbox)
+        guard Homography(corners: corners) != nil else {
             throw RecognitionError.boardNotFound
         }
 
         let detections = try detectPieces(in: square, letterbox: letterbox)
+        if let a1Prior {
+            corners = BoardOrientation.orient(
+                corners: corners, detections: detections, pull: pull, prior: a1Prior)
+        }
+        guard let homography = Homography(corners: corners) else {
+            throw RecognitionError.boardNotFound
+        }
         let board = SquareAssignment.assign(
             detections: detections, homography: homography, pull: pull)
 

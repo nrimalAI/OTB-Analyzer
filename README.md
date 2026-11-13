@@ -36,7 +36,10 @@ xcodegen generate
 open ChessAnalyzer.xcodeproj
 ```
 
-Package tests: `swift test` inside each `Packages/*` directory.
+Package tests: `swift test` inside each `Packages/*` directory. ChessVision's use
+Swift Testing (Xcode 16 or later); `./Scripts/swift-test.sh` runs them, also on a Mac
+with only the Command Line Tools. How recognition works after the two models, and how
+the Swift is checked against the Python reference: `docs/RECOGNITION.md`.
 
 ## Dependencies
 
