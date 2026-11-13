@@ -70,16 +70,35 @@ def placement_of(board):
     return "/".join(rows)
 
 
+def srgb_to_lab(bgr):
+    """CIE Lab (D65, L* 0-100) of 8-bit sRGB pixels given as an (n, 3) array
+    in OpenCV's B, G, R order, by the formula (OpenCV's own constants). Not
+    cv2.cvtColor: on float input that interpolates a table and is off by up
+    to half a unit, which is enough to move a piece between two groups, and
+    the Swift port computes the formula."""
+    import numpy as np
+    c = bgr.astype(np.float64)[:, ::-1] / 255.0
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.412453, 0.357580, 0.180423],
+                  [0.212671, 0.715160, 0.072169],
+                  [0.019334, 0.119193, 0.950227]])
+    xyz = lin @ m.T / np.array([0.950456, 1.0, 1.088754])
+    f = np.where(xyz > 216 / 24389, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    y = xyz[:, 1]
+    lightness = np.where(y > 216 / 24389, 116 * f[:, 1] - 16, 903.3 * y)
+    return np.stack([lightness, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], axis=1)
+
+
 def piece_colours(src, detections):
     """Median CIE Lab of the middle of each detection's box in the photo
-    (chess_pipeline.colour_patch), or None for an empty patch."""
+    (chess_pipeline.colour_patch; the median of each of L*, a*, b* over the
+    patch's pixels), or None for an empty patch."""
     import cv2
     import numpy as np
     img = cv2.imread(str(src))
     if img is None:
         return [None] * len(detections)
-    lab = cv2.cvtColor(img.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)
-    h, w = lab.shape[:2]
+    h, w = img.shape[:2]
     out = []
     for det in detections:
         patch = colour_patch(det.bbox, w, h)
@@ -87,7 +106,8 @@ def piece_colours(src, detections):
             out.append(None)
             continue
         xa, ya, xb, yb = patch
-        out.append(tuple(float(v) for v in np.median(lab[ya:yb, xa:xb].reshape(-1, 3), axis=0)))
+        lab = srgb_to_lab(img[ya:yb, xa:xb].reshape(-1, 3))
+        out.append(tuple(float(v) for v in np.median(lab, axis=0)))
     return out
 
 

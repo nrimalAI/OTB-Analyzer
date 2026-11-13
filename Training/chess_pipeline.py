@@ -221,42 +221,58 @@ def two_groups(points):
     return group, centres
 
 
-def sides_from_colour(detections, colours, chroma=CHROMA_WEIGHT,
-                      disagreement=SIDE_DISAGREEMENT):
-    """The detections with White and Black decided by the pieces' colours
-    where the model's own answer does not fit them.
-
-    `colours` holds, for each detection, the median (L*, a*, b*) of its
-    colour_patch (CIE Lab, L* 0-100), or None when the patch is empty. The
-    pieces that have a colour are split in two groups by colour (two_groups
-    on (L*, chroma a*, chroma b*)); the lighter group is White. A piece set
-    the model has not seen (brown "white" pieces, say) is still two groups of
-    one colour each, which the model's class scores alone do not use.
-
-    The split can be wrong for a few pieces (a shadow, a glint), so on boards
-    the model reads well it would cost more than it gains. It is therefore
-    used only when it contradicts the model for more than `disagreement` of
-    the pieces: then every piece with a colour takes its group's side. A
-    piece keeps its kind and confidence either way."""
+def colour_sides(colours, chroma=CHROMA_WEIGHT):
+    """The side of each piece by colour alone: "white" or "black" for every
+    piece that has a colour (None for one that has none), or None when the
+    pieces cannot be split in two. `colours` holds the median (L*, a*, b*) of
+    each piece's colour_patch (CIE Lab, L* 0-100), or None for an empty
+    patch. The pieces are split in two groups by two_groups on
+    (L*, chroma a*, chroma b*); the lighter group is White."""
     idx = [k for k, c in enumerate(colours) if c is not None]
     if len(idx) < 2:
-        return list(detections)
+        return None
     split = two_groups([(colours[k][0], chroma * colours[k][1], chroma * colours[k][2])
                         for k in idx])
     if split is None:
-        return list(detections)
+        return None
     group, centres = split
     if len(set(group)) < 2:
-        return list(detections)
+        return None
     white = 0 if centres[0][0] >= centres[1][0] else 1
-    side = ["white" if g == white else "black" for g in group]
-    differ = sum(1 for k, s_ in zip(idx, side) if not detections[k].cls.startswith(s_))
+    sides = [None] * len(colours)
+    for k, g in zip(idx, group):
+        sides[k] = "white" if g == white else "black"
+    return sides
+
+
+def sides_from_colour(detections, colours, chroma=CHROMA_WEIGHT,
+                      disagreement=SIDE_DISAGREEMENT):
+    """The detections with White and Black decided by the pieces' colours
+    (colour_sides) where the model's own answer does not fit them.
+
+    A piece set the model has not seen (brown "white" pieces, say) is still
+    two groups of one colour each, which the model's class scores alone do
+    not use. But the split can be wrong for a piece or two (a shadow, a
+    glint), so on boards the model reads well it would cost more than it
+    gains. It is therefore used only when it contradicts the model for more
+    than `disagreement` of the pieces that have a colour: then every such
+    piece takes its group's side. A piece keeps its kind and confidence
+    either way.
+
+    On a board with six pieces or fewer one piece alone is over 15%. Asking
+    for two was tried (2026-11-13) and is no better: board B has many sparse
+    endgames where the one brown king is exactly what needs correcting."""
+    sides = colour_sides(colours, chroma)
+    if sides is None:
+        return list(detections)
+    idx = [k for k, s_ in enumerate(sides) if s_ is not None]
+    differ = sum(1 for k in idx if not detections[k].cls.startswith(sides[k]))
     if differ <= disagreement * len(idx):
         return list(detections)
     out = list(detections)
-    for k, s_ in zip(idx, side):
+    for k in idx:
         det = detections[k]
-        out[k] = Detection(s_ + "_" + det.cls.split("_", 1)[1], det.confidence, det.bbox)
+        out[k] = Detection(sides[k] + "_" + det.cls.split("_", 1)[1], det.confidence, det.bbox)
     return out
 
 
