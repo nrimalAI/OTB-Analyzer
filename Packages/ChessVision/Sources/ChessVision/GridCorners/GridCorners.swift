@@ -166,7 +166,7 @@ public enum GridCorners {
                 var (second, secondInfo) = detect(image, priorBox: box)
                 let secondConf = second != nil ? confidence(secondInfo, withPrior: true) : 0
                 secondInfo.pass = 2
-                if secondConf > 0 || conf == 0 {
+                if secondPassWins(first: conf, second: secondConf) {
                     corners = second
                     info = secondInfo
                     conf = secondConf
@@ -174,6 +174,13 @@ public enum GridCorners {
             }
         }
         return (corners, conf, info)
+    }
+
+    /// Which pass counts: the second whenever it is accepted, and also when
+    /// neither is (its diagnostics are then the ones reported). A first pass
+    /// that was accepted stands only if the second was not.
+    static func secondPassWins(first: Double, second: Double) -> Bool {
+        second > 0 || first == 0
     }
 
     /// `_detect`: one pass over the photo or over the prior box.

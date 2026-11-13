@@ -172,29 +172,66 @@ extension GrayImage {
         return taps
     }
 
-    /// The same for a shrink by exactly two, where OpenCV takes a shortcut
-    /// that rounds halves up: (a + b + c + d + 2) >> 2.
-    private static func halvedGray(
-        rgba: [UInt8], width: Int, height: Int, toWidth dw: Int, toHeight dh: Int
+    /// The same for a shrink by a whole number `n`, where OpenCV takes a
+    /// shortcut (`ResizeAreaFast`): each output pixel is the sum of its n×n
+    /// block times the float 1/n² (for n = 2: (sum + 2) >> 2, halves up). A
+    /// block cut off by the picture's edge (an odd side rounded up) is the
+    /// sum of what is there divided by the count.
+    private static func wholeShrunkGray(
+        rgba: [UInt8], width: Int, height: Int, toWidth dw: Int, toHeight dh: Int, by n: Int
     ) -> GrayImage {
         var out = GrayImage(width: dw, height: dh)
+        let scale = Float(1) / Float(n * n)
+        @inline(__always) func byte(_ value: Float) -> UInt8 {
+            UInt8(min(max(value.rounded(.toNearestOrEven), 0), 255))
+        }
         rgba.withUnsafeBufferPointer { src in
             out.pixels.withUnsafeMutableBufferPointer { out in
                 var dy = 0
                 while dy < dh {
-                    // (an odd side leaves a last row or column of single pixels)
-                    let y0 = dy * 2, y1 = min(dy * 2 + 1, height - 1)
+                    let y0 = dy * n
+                    let rows = min(n, height - y0)
                     var dx = 0
                     while dx < dw {
-                        let x0 = dx * 2, x1 = min(dx * 2 + 1, width - 1)
-                        let a = src.baseAddress! + (y0 * width + x0) * 4
-                        let b = src.baseAddress! + (y0 * width + x1) * 4
-                        let c = src.baseAddress! + (y1 * width + x0) * 4
-                        let d = src.baseAddress! + (y1 * width + x1) * 4
-                        let red = (Int(a[0]) + Int(b[0]) + Int(c[0]) + Int(d[0]) + 2) >> 2
-                        let green = (Int(a[1]) + Int(b[1]) + Int(c[1]) + Int(d[1]) + 2) >> 2
-                        let blue = (Int(a[2]) + Int(b[2]) + Int(c[2]) + Int(d[2]) + 2) >> 2
-                        out[dy * dw + dx] = Float(grey(UInt8(red), UInt8(green), UInt8(blue)))
+                        let x0 = dx * n
+                        let columns = min(n, width - x0)
+                        if rows <= 0 || columns <= 0 {
+                            out[dy * dw + dx] = 0
+                            dx &+= 1
+                            continue
+                        }
+                        var red = 0, green = 0, blue = 0
+                        var y = 0
+                        while y < rows {
+                            var p = src.baseAddress! + ((y0 + y) * width + x0) * 4
+                            var x = 0
+                            while x < columns {
+                                red &+= Int(p[0])
+                                green &+= Int(p[1])
+                                blue &+= Int(p[2])
+                                p += 4
+                                x &+= 1
+                            }
+                            y &+= 1
+                        }
+                        let r: UInt8, g: UInt8, b: UInt8
+                        if rows == n && columns == n {
+                            if n == 2 {
+                                r = UInt8((red + 2) >> 2)
+                                g = UInt8((green + 2) >> 2)
+                                b = UInt8((blue + 2) >> 2)
+                            } else {
+                                r = byte(Float(red) * scale)
+                                g = byte(Float(green) * scale)
+                                b = byte(Float(blue) * scale)
+                            }
+                        } else {
+                            let count = Float(rows * columns)
+                            r = byte(Float(red) / count)
+                            g = byte(Float(green) / count)
+                            b = byte(Float(blue) / count)
+                        }
+                        out[dy * dw + dx] = Float(grey(r, g, b))
                         dx &+= 1
                     }
                     dy &+= 1
@@ -209,8 +246,11 @@ extension GrayImage {
     private static func areaResizedGray(
         rgba: [UInt8], width: Int, height: Int, toWidth dw: Int, toHeight dh: Int, scale: Double
     ) -> GrayImage {
-        if scale == 2 {
-            return halvedGray(rgba: rgba, width: width, height: height, toWidth: dw, toHeight: dh)
+        // OpenCV takes a shortcut when the shrink is by a whole number.
+        let whole = Int(scale.rounded(.toNearestOrEven))
+        if whole >= 2, abs(scale - Double(whole)) < Double.ulpOfOne {
+            return wholeShrunkGray(
+                rgba: rgba, width: width, height: height, toWidth: dw, toHeight: dh, by: whole)
         }
         let xTaps = areaTable(source: width, destination: dw, scale: scale)
         let yTaps = areaTable(source: height, destination: dh, scale: scale)

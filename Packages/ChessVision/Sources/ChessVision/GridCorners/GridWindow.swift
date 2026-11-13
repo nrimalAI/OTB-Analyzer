@@ -279,7 +279,9 @@ enum GridWindow {
                       margin: margin, contrast: judged.contrast)
     }
 
-    private static func pythonIndex(_ index: Int, _ count: Int) -> Int? {
+    /// An index as NumPy takes it: below 0 it counts from the end; nil where
+    /// NumPy raises IndexError.
+    static func pythonIndex(_ index: Int, _ count: Int) -> Int? {
         if index >= 0 { return index < count ? index : nil }
         return index >= -count ? index + count : nil
     }

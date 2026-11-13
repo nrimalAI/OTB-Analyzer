@@ -39,6 +39,26 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
+/// The photo the way a viewer shows it: turned as its EXIF orientation tag
+/// says, which is what the app's camera pipeline hands the recognizer and
+/// what `cv2.imread` returns in the Python. Photos without a tag (all of the
+/// current test sets) are loaded as they are.
+func upright(_ url: URL) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+    guard orientation != 1,
+          let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+          let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
+    else { return CGImageSourceCreateImageAtIndex(source, 0, nil) }
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+}
+
 var modelsPath: String?
 var listPath: String?
 var redraw: Int?
@@ -89,15 +109,13 @@ if let gridPath, let listPath {
         let url = path.hasPrefix("/")
             ? URL(fileURLWithPath: path)
             : listURL.deletingLastPathComponent().appending(path: path)
-        guard
-            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { fail("could not load \(path)") }
+        guard let image = upright(url) else { fail("could not load \(path)") }
         let found = GridCorners.diagnose(image)
         out[path] = [
             "raw": found.rawCorners.map { $0.map { [Double($0.x), Double($0.y)] } } ?? NSNull(),
             "confidence": found.confidence, "stage": found.stage, "pass": found.pass,
-            "values": found.values,
+            // (JSON has no NaN, and JSONSerialization raises on one)
+            "values": found.values.filter { $0.value.isFinite },
         ] as [String: Any]
         if verbose {
             print("\(url.lastPathComponent): \(found.stage) pass \(found.pass) confidence \(found.confidence)")
@@ -189,8 +207,7 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
         ? URL(fileURLWithPath: path)
         : listURL.deletingLastPathComponent().appending(path: path)
     guard
-        let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-        var image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+        var image = upright(url),
         let expected = FENBuilder.pieces(fromPlacement: placement)
     else { fail("could not load \(path) or its placement") }
     if portrait {

@@ -13,9 +13,9 @@ to Packages/ChessVision/Tests/ChessVisionTests/Fixtures/orientation_cases.json
 and replayed by BoardOrientationTests.
 
 grid-cases: what grid_corners.py and the OpenCV calls it is built on make of
-small inputs, for GridCornersTests: three drawn boards (written next to the
-JSON as grid_board_*.png), the four fixture photos, and a patch of image for
-the filters. Written to Fixtures/grid_cases.json.
+small inputs, for GridCornersTests: six drawn pictures (written next to the
+JSON as grid_board_*.png), the four fixture photos, sets of x-corners for the
+lattice fit, and a patch of image for the filters. Written to Fixtures/grid_cases.json.
 
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
@@ -143,23 +143,25 @@ def orientation_cases(count, seed):
     return cases, counts
 
 
-def drawn_board(seed, pieces, board=True, size=(800, 600)):
+def drawn_board(seed, pieces, board=True, size=(800, 600), cells=8, offset=(0, 0), strays=False):
     """A chessboard drawn in perspective on a table, with a frame and, if
-    asked, discs for pieces. Returns (BGR image, the grid's outer corners)."""
+    asked, discs for pieces. `cells`: squares a side (10 is not a chessboard).
+    `offset`: moves the board, e.g. partly out of the picture. `strays`: other
+    chequered things on the table. Returns (BGR image, the grid's corners)."""
     import cv2
     rng = np.random.default_rng(seed)
-    px, frame = 64, 22
-    side = 8 * px + 2 * frame
+    px, frame = 64 * 8 // cells, 22
+    side = cells * px + 2 * frame
     flat = np.zeros((side, side, 3), np.uint8)
     flat[:] = (40, 70, 110)                                   # the frame
     light, dark = (208, 236, 235), (86, 149, 119)
-    for i in range(8):
-        for j in range(8):
+    for i in range(cells):
+        for j in range(cells):
             flat[frame + j * px:frame + (j + 1) * px, frame + i * px:frame + (i + 1) * px] = \
                 light if (i + j) % 2 == 0 else dark
     if pieces:
-        for i in range(8):
-            for j in range(8):
+        for i in range(cells):
+            for j in range(cells):
                 if rng.random() < 0.35:
                     centre = (frame + i * px + px // 2, frame + j * px + px // 2)
                     colour = (245, 245, 240) if rng.random() < 0.5 else (35, 35, 40)
@@ -171,12 +173,20 @@ def drawn_board(seed, pieces, board=True, size=(800, 600)):
     angle = rng.uniform(-0.6, 0.6)
     turn = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
     quad = quad @ turn.T + np.array([w / 2 + rng.uniform(-30, 30), h / 2 + rng.uniform(-20, 20)])
+    quad = quad + np.array(offset)
     src = np.array([[0, 0], [side, 0], [side, side], [0, side]], np.float32)
     M = cv2.getPerspectiveTransform(src, quad.astype(np.float32))
     table = np.zeros((h, w, 3), np.uint8)
     table[:] = (150, 160, 165)
     table = (table * np.linspace(0.85, 1.1, w)[None, :, None]).clip(0, 255).astype(np.uint8)
     img = table
+    if strays:
+        # a chequered strip and a small chequered mat beside the board
+        for x0, y0, n, m, c in ((20, 30, 9, 2, 26), (610, 430, 4, 4, 34)):
+            for i in range(n):
+                for j in range(m):
+                    cv2.rectangle(img, (x0 + i * c, y0 + j * c), (x0 + (i + 1) * c - 1, y0 + (j + 1) * c - 1),
+                                  (230, 230, 230) if (i + j) % 2 else (40, 40, 40), -1)
     if board:
         img = cv2.warpPerspective(flat, M, (w, h), dst=table.copy(), flags=cv2.INTER_AREA,
                                   borderMode=cv2.BORDER_TRANSPARENT)
@@ -208,14 +218,19 @@ def grid_cases():
 
     # 1. drawn boards: the same pixels for Python and Swift (PNG is lossless)
     boards = {}
-    for name, seed, pieces, board in (("plain", 1, False, True), ("pieces", 2, True, True),
-                                      ("clutter", 3, False, False)):
-        img, corners = drawn_board(seed, pieces, board)
+    for name, seed, pieces, board, more in (
+            ("plain", 1, False, True, {}), ("pieces", 2, True, True, {}),
+            ("clutter", 3, False, False, {}),
+            ("cut", 4, True, True, dict(offset=(175, 0))),      # part of the board outside the picture
+            ("ten", 5, False, True, dict(cells=10)),            # ten squares a side: no chessboard
+            ("busy", 6, True, True, dict(strays=True))):        # other chequered things beside it
+        img, corners = drawn_board(seed, pieces, board, **more)
         file = f"grid_board_{name}.png"
         cv2.imwrite(str(FIXTURES / file), img)
         img = cv2.imread(str(FIXTURES / file))
-        boards[name] = dict(file=file, truth=corners if board else None, fit=fit(img))
-        if board:
+        is_chessboard = board and more.get("cells", 8) == 8
+        boards[name] = dict(file=file, truth=corners if is_chessboard else None, fit=fit(img))
+        if is_chessboard:
             xs, ys = [c[0] for c in corners], [c[1] for c in corners]
             box = [min(xs), min(ys), max(xs), max(ys)]
             boards[name]["box"] = box
@@ -223,8 +238,43 @@ def grid_cases():
     out["boards"] = boards
 
     # 2. the fixture photos (JPEG: the two decoders differ by a grey level here and there)
-    out["photos"] = {name: fit(cv2.imread(str(FIXTURES / name)))
-                     for name in sorted(json.loads((FIXTURES / "expected.json").read_text()))}
+    photos = sorted(json.loads((FIXTURES / "expected.json").read_text()))
+    out["photos"] = {name: fit(cv2.imread(str(FIXTURES / name))) for name in photos}
+
+    # 2b. the lattice fit on its own: x-corners in, homography and nodes out.
+    # The x-corners of the photos (as Python finds them), and made-up sets with
+    # points that are not x-corners: square centres (pieces), edge midpoints,
+    # strays.
+    def lattice(points):
+        points = np.asarray(points, np.float32)
+        found = g.fit_lattice(points)
+        if found is None:
+            return dict(points=points.tolist(), fit=None)
+        H, ok, r = found
+        return dict(points=points.tolist(),
+                    fit=dict(h=(H / H[2, 2]).ravel().tolist(), inlier=ok.astype(int).tolist(),
+                             node=r.tolist()))
+
+    sets = {}
+    for name in photos:
+        gray, _, _ = g._prepare(cv2.imread(str(FIXTURES / name)), None)
+        sets[name] = lattice(g.x_corners(gray))
+    rng = np.random.default_rng(11)
+    to_image = np.array([[52.0, 9, 310], [-6, 47, 220], [0.004, 0.011, 1]])
+
+    def seen(ij):
+        p = np.c_[np.asarray(ij, float), np.ones(len(ij))] @ to_image.T
+        return p[:, :2] / p[:, 2:3] + rng.normal(0, 0.15, (len(ij), 2))
+
+    corners = [(i, j) for i in range(7) for j in range(7)]
+    centres = [(i + 0.5, j + 0.5) for i in range(6) for j in range(6)]
+    sets["centres"] = lattice(np.r_[seen(corners), seen(centres)])
+    sets["a few centres"] = lattice(np.r_[seen(corners), seen(centres[::5])])
+    sets["midpoints"] = lattice(np.r_[seen(corners), seen([(i + 0.5, j) for i in range(6) for j in (0, 3, 6)])])
+    sets["strays"] = lattice(np.r_[seen(corners), rng.uniform(50, 900, (25, 2))])
+    sets["two rows"] = lattice(seen([(i, j) for i in range(7) for j in range(2)]))
+    sets["too few"] = lattice(seen(corners[:8]))
+    out["lattices"] = sets
 
     # 3. the image operations, on a patch of the first drawn board
     img = cv2.imread(str(FIXTURES / "grid_board_pieces.png"))
@@ -272,14 +322,20 @@ def grid_cases():
         scale=scale, origin=[int(origin[0]), int(origin[1])],
         step_x=37, step_y=41, samples=boxed[::41, ::37].astype(int).ravel().tolist())
 
-    # (a shrink by exactly two takes a shortcut in OpenCV that rounds differently)
-    yy, xx = np.mgrid[0:1300, 0:2000]
-    formula = np.stack([(xx + yy * 13) % 256, (xx * 5 + yy * 11) % 256, (xx * 7 + yy * 3) % 256],
-                       axis=2).astype(np.uint8)
-    halved, scale, _ = g._prepare(formula, None)
-    out["resize_by_two"] = dict(
-        width=int(halved.shape[1]), height=int(halved.shape[0]), scale=scale,
-        step_x=37, step_y=41, samples=halved[::41, ::37].astype(int).ravel().tolist())
+    # (a shrink by a whole number takes a shortcut in OpenCV that rounds
+    # differently, and an odd side leaves a last row of cut-off blocks)
+    out["resize_whole"] = []
+    for w, h in ((2000, 1300), (2000, 1503), (1001, 3000), (6000, 1205)):
+        yy, xx = np.mgrid[0:h, 0:w]
+        formula = np.stack([(xx + yy * 13) % 256, (xx * 5 + yy * 11) % 256, (xx * 7 + yy * 3) % 256],
+                           axis=2).astype(np.uint8)
+        small, scale, _ = g._prepare(formula, None)
+        last_row = small[-1, ::7].astype(int).tolist()
+        last_column = small[::7, -1].astype(int).tolist()
+        out["resize_whole"].append(dict(
+            source=[w, h], width=int(small.shape[1]), height=int(small.shape[0]), scale=scale,
+            step_x=37, step_y=41, samples=small[::41, ::37].astype(int).ravel().tolist(),
+            last_row=last_row, last_column=last_column))
 
     # 5. homographies from points
     rng = np.random.default_rng(7)
@@ -304,6 +360,10 @@ def grid_cases():
               + (f"; in its box {b['fit_in_box']['confidence']:.3f}" if "fit_in_box" in b else ""))
     for name, p in out["photos"].items():
         print(f"{name}: confidence {p['confidence']:.3f}")
+    for name, case in sets.items():
+        found = case["fit"]
+        print(f"lattice {name}: {len(case['points'])} points, "
+              + ("none" if found is None else f"{sum(found['inlier'])} inliers"))
     print(f"written to {path} ({path.stat().st_size // 1024} kB)")
 
 

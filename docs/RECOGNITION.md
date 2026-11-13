@@ -77,11 +77,25 @@ missing or the end-to-end tests did not run.
   drawn boards and of the four fixture photos, and what the OpenCV and NumPy
   calls it is built on make of small inputs (the shrink to the working size,
   the blurs, the saddle response, the dilation, the warp, the sub-pixel
-  refinement, the homography fits, percentiles). `GridCornersTests` replays
-  them. On the drawn boards, where both sides get the same pixels, the Swift
-  corners are the Python's (0.0000 squares apart). On JPEG photos the two
-  differ by up to a few hundredths of a square, because ImageIO and OpenCV's
-  JPEG decoders differ by one grey level on 3-4% of pixels.
+  refinement, the homography fits, percentiles), six drawn pictures and ten
+  sets of x-corners for the lattice fit. `GridCornersTests` replays them. On
+  the five drawn pictures with a board (bare, with pieces, partly outside the
+  picture, with other chequered things beside it, and a 10×10 board that the
+  validity checks refuse), where both sides get the same pixels, the Swift
+  gives the Python's corners to a thousandth of a square, the same confidence
+  and the same counts at every stage; the lattice fit gives the same nodes
+  and homography on all ten sets; the shrink to the working size is OpenCV's
+  pixel for pixel.
+- Two things keep the two from being identical on every picture, and neither
+  can be ported away. On JPEG photos, ImageIO and OpenCV's JPEG decoders
+  differ by one grey level on 3-4% of pixels. And on any picture, points that
+  are not x-corners (corners of clutter, piece outlines) do not settle in the
+  sub-pixel step (`cornerSubPix`): after its 30 rounds they are still moving,
+  and where they stop hangs on the last bit of the arithmetic, which OpenCV's
+  compiled code and Swift do not share. Such a stray is then kept, moved or
+  dropped differently, and one stray x-corner can change which lattice wins.
+  The picture with no board among the drawn ones shows it: Python counts 23
+  x-corners, Swift 25, and both find no grid.
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
   lists) and prints what `evaluate.py` prints. It needs no Xcode.
@@ -103,14 +117,17 @@ On the three test sets (2026-11-13), against the labelled corners:
 
 Where both accept, their corners are a median 0.004-0.011 squares apart. They
 disagree on whether to accept about one photo in twenty, in both directions
-(34 of 692: 17 accepted by Python only, 17 by Swift only): the fit's decision
-is that sensitive to the one-grey-level differences between the JPEG decoders.
-Given the same x-corners the Swift lattice fit is identical to the Python's,
-so this is the method, not the port. One Python quirk is kept on purpose so
-that the two match: `choose_window` indexes a NumPy array with lattice
-coordinates that can fall outside it (an IndexError that rejects the photo,
-or, for small negative indices, a wrap to the other side); see
-`GridWindow.choose`.
+(34 of 692: 17 accepted by Python only, 17 by Swift only), for the two
+reasons above. The fit is that sensitive by itself: Python against Python
+with one grey level added to 3.5% of pixels flips the answer on 2 of 100
+board B photos and changes the number of x-corners on 72 (measured by the
+reviewer of pull request #7). Given the same x-corners the Swift lattice fit
+is identical to the Python's, so this is the method, not the port; dropping
+x-corners that did not converge is something to try in the Python first. One
+Python quirk is kept on purpose so that the two match: `choose_window`
+indexes a NumPy array with lattice coordinates that can fall outside it (an
+IndexError that rejects the photo, or, for small negative indices, a wrap to
+the other side); see `GridWindow.choose`.
 
 ## What the two steps are worth
 
