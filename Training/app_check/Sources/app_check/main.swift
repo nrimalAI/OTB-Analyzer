@@ -113,6 +113,9 @@ while !arguments.isEmpty {
     default: fail("unknown argument \(flag)")
     }
 }
+if coloursPath != nil && (gridPath != nil || redraw != nil || portrait) {
+    fail("--colours reads the photos as they are: it goes with neither --grid, --redraw nor --portrait")
+}
 if let gridPath, let listPath {
     let listURL = URL(fileURLWithPath: listPath)
     guard

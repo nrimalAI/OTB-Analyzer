@@ -97,8 +97,9 @@ struct PieceSidesTests {
     // MARK: - Against Python
 
     /// OpenCV does not compute Lab for float pixels, it interpolates in a
-    /// table: off by up to 0.2 in L* and 0.4 in a*, b* (measured on 400,000
-    /// colours), 0.08 on average. `PieceSides.lab` is the formula.
+    /// table: off by up to 0.19 in L*, 0.47 in a* and 0.33 in b* (measured
+    /// over all 2^24 colours; the worst is RGB (0, 36, 12)), 0.08 on average.
+    /// `PieceSides.lab` is the formula.
     @Test func testLabIsOpenCVsToWithinItsTable() throws {
         let colours = try Self.recorded.get().lab
         #expect(colours.count >= 200)
@@ -108,7 +109,7 @@ struct PieceSidesTests {
             let off = Self.distance(ours, colour.lab)
             worst = max(worst, off)
             sum += off
-            #expect(off < 0.45, "\(colour.rgb): \(ours) for \(colour.lab)")
+            #expect(off < 0.5, "\(colour.rgb): \(ours) for \(colour.lab)")
         }
         let mean = sum / Double(colours.count)
         print("lab: difference from OpenCV, largest \(worst), mean \(mean)")
@@ -197,6 +198,25 @@ struct PieceSidesTests {
         #expect(changed >= 20 && kept >= 20, "\(changed) changed, \(kept) kept")
     }
 
+    /// Every recorded case again with the step switched round: the same
+    /// sides must come out of `sidesByColour` wherever the Python changed
+    /// one, so that the two functions cannot drift apart.
+    @Test func testSidesByColourIsWhatTheStepApplies() throws {
+        for (index, recorded) in try Self.recorded.get().sides.enumerated() {
+            let detections = try recorded.detections.map(Self.detection)
+            let colours = recorded.colours.map(Self.lab)
+            let byColour = PieceSides.sidesByColour(colours)
+            guard recorded.sides != recorded.detections.map(\.cls) else { continue }
+            let sides = try #require(byColour, "detections \(index)")
+            for (piece, (side, final)) in zip(sides, recorded.sides).enumerated() {
+                let model = detections[piece].color
+                #expect((side ?? model) == (final.hasPrefix("white") ? .white : .black),
+                        "detections \(index), piece \(piece)")
+                #expect((side == nil) == (colours[piece] == nil), "detections \(index), piece \(piece)")
+            }
+        }
+    }
+
     /// The drawn picture: brown and black pieces that a model calls all
     /// black. The colours are read from the PNG, so this is the whole step.
     @Test func testReadsTheSidesOffTheDrawnPicture() throws {
@@ -272,6 +292,33 @@ struct PieceSidesTests {
             == said(wrong: 4).map(\.color))
     }
 
+    /// The share is of the pieces that have a colour (the values are the
+    /// Python's: `swift_reference.py colour-cases` asserts them).
+    @Test func testTheShareIsOfThePiecesThatHaveAColour() {
+        // 20 pieces with a colour, the model wrong about 4 of them, and 7
+        // more without a colour: 4 of 20 is over 15%, 4 of 27 would not be.
+        let truth = (0..<20).map { $0 % 2 == 0 ? Piece.Color.white : .black }
+        let said = truth.enumerated().map { index, side in
+            index < 4 ? (side == .white ? Piece.Color.black : .white) : side
+        } + [Piece.Color](repeating: .white, count: 7)
+        let colours: [PieceSides.Lab?] = truth.map { $0 == .white ? Self.cream : Self.ebony }
+            + [PieceSides.Lab?](repeating: nil, count: 7)
+        #expect(PieceSides.fromColour(Self.pieces(said), colours: colours).map(\.color)
+            == truth + [Piece.Color](repeating: .white, count: 7))
+    }
+
+    /// Two groups equally light: White is the group of the first of the two
+    /// points farthest apart, whichever colour that is (as in Python).
+    @Test func testEquallyLightGroups() {
+        let grey = PieceSides.Lab(l: 45, a: 0, b: 0)
+        let brown = PieceSides.Lab(l: 45, a: 14, b: 28)
+        let allBlack = Self.pieces([.black, .black, .black, .black])
+        #expect(PieceSides.fromColour(allBlack, colours: [grey, brown, grey, brown]).map(\.color)
+            == [.white, .black, .white, .black])
+        #expect(PieceSides.fromColour(allBlack, colours: [brown, grey, brown, grey]).map(\.color)
+            == [.white, .black, .white, .black])
+    }
+
     @Test func testNothingToSplit() {
         let allBlack = Self.pieces([.black, .black, .black])
         // No colours, one colour, or the same colour for all: the model's sides stand.
@@ -314,7 +361,7 @@ struct PieceSidesTests {
         #expect(PieceSides.twoGroups([PieceSides.Point(1, 2, 3), PieceSides.Point(1, 2, 3)]) == nil)
     }
 
-    /// An image the pixels of which cannot be had gives no colours, not a crash.
+    /// A box beside the photo has no colour, and its piece keeps its side.
     @Test func testBoxesBesideThePhotoHaveNoColour() throws {
         let image = try Self.image("colour_pieces.png")
         let outside = PieceDetection(
@@ -323,5 +370,59 @@ struct PieceSidesTests {
         #expect(PieceSides.colours(of: [outside], in: image) == [nil])
         #expect(PieceSides.colours(of: [], in: image).isEmpty)
         #expect(PieceSides.fromColour([outside], in: image).map(\.color) == [.black])
+    }
+
+    // MARK: - In the recognizer
+
+    /// A board seen from above, 800 x 800, grey, with eight cream discs on
+    /// rank 2 and eight dark ones on rank 7, and the boxes round them.
+    private static func drawnPawns() throws -> (image: CGImage, boxes: [CGRect]) {
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(CGContext(
+            data: nil, width: 800, height: 800, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 800, height: 800))
+        var boxes: [CGRect] = []
+        for (rank, colour) in [(2, (0.93, 0.87, 0.72)), (7, (0.12, 0.11, 0.12))] {
+            context.setFillColor(red: colour.0, green: colour.1, blue: colour.2, alpha: 1)
+            for file in 0..<8 {
+                // (image coordinates, y down; the context's y points up)
+                let box = CGRect(
+                    x: Double(file) * 100 + 20, y: 800 - Double(rank) * 100 + 20, width: 60, height: 60)
+                context.fillEllipse(in: CGRect(x: box.minX, y: 800 - box.maxY, width: 60, height: 60))
+                boxes.append(box)
+            }
+        }
+        return (try #require(context.makeImage()), boxes)
+    }
+
+    /// The step is part of what the recognizer does after the models, and it
+    /// comes before a1 is read from the pieces: a piece model that calls
+    /// every pawn black gives a1 nothing to go on, the colours do.
+    @Test func testTheRecognizerTakesTheSidesFirstAndA1FromThem() throws {
+        let (image, boxes) = try Self.drawnPawns()
+        let found = boxes.map {
+            PieceDetection(piece: .pawn, color: .black, confidence: 0.9, boundingBox: $0)
+        }
+        let rightWayUp = [
+            CGPoint(x: 0, y: 800), CGPoint(x: 0, y: 0), CGPoint(x: 800, y: 0), CGPoint(x: 800, y: 800),
+        ]
+        let upsideDown = Array(rightWayUp[2...] + rightWayUp[..<2])
+        func place(sidesFromColour: Bool) throws -> (corners: [CGPoint], placement: String) {
+            let placed = try #require(CoreMLBoardRecognizer.place(
+                found, corners: upsideDown, cornersFromModel: false, in: image,
+                sidesFromColour: sidesFromColour, a1Prior: 6, pull: SquareAssignment.defaultPull))
+            return (placed.corners, FENBuilder.placement(placed.pieces.mapValues(\.piece)))
+        }
+
+        let with = try place(sidesFromColour: true)
+        #expect(with.corners == rightWayUp)
+        #expect(with.placement == "8/pppppppp/8/8/8/8/PPPPPPPP/8")
+        // Without the step every pawn stays black, which says nothing about
+        // a1 (the four rotations tie), and the corners stay as given.
+        let without = try place(sidesFromColour: false)
+        #expect(without.corners == upsideDown)
+        #expect(without.placement == "8/pppppppp/8/8/8/8/pppppppp/8")
     }
 }

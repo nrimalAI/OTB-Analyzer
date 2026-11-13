@@ -120,29 +120,44 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         guard let located = Self.corners(model: modelCorners, in: image, gridFit: gridFit) else {
             throw RecognitionError.boardNotFound
         }
-        var corners = located.corners
+        let detections = try detectPieces(in: square, letterbox: letterbox)
+        guard let placed = Self.place(
+            detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
+            sidesFromColour: sidesFromColour, a1Prior: a1Prior, pull: pull)
+        else { throw RecognitionError.boardNotFound }
 
-        // The order is `evaluate.py`'s: the sides first, since which corner is
-        // a1 is then read from them.
-        var detections = try detectPieces(in: square, letterbox: letterbox)
+        return RecognitionResult(
+            pieces: placed.pieces,
+            corners: placed.corners,
+            orientationGuess: Self.orientationGuess(corners: placed.corners)
+        )
+    }
+
+    /// What follows the two models, in `evaluate.py`'s order: the sides from
+    /// the colours first, since which corner is a1 is then read from them,
+    /// then the squares. Returns the corners as finally turned and the board;
+    /// nil when the corners are not a board. Internal for testing.
+    static func place(
+        _ found: [PieceDetection],
+        corners located: [CGPoint],
+        cornersFromModel: Bool,
+        in image: CGImage,
+        sidesFromColour: Bool,
+        a1Prior: Double?,
+        pull: Double
+    ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
+        var corners = located
+        var detections = found
         if sidesFromColour {
             detections = PieceSides.fromColour(detections, in: image)
         }
-        if let prior = Self.orientationPrior(fromModel: located.fromModel, configured: a1Prior) {
+        if let prior = orientationPrior(fromModel: cornersFromModel, configured: a1Prior) {
             corners = BoardOrientation.orient(
                 corners: corners, detections: detections, pull: pull, prior: prior)
         }
-        guard let homography = Homography(corners: corners) else {
-            throw RecognitionError.boardNotFound
-        }
-        let board = SquareAssignment.assign(
-            detections: detections, homography: homography, pull: pull)
-
-        return RecognitionResult(
-            pieces: board,
-            corners: corners,
-            orientationGuess: Self.orientationGuess(corners: corners)
-        )
+        guard let homography = Homography(corners: corners) else { return nil }
+        return (corners, SquareAssignment.assign(
+            detections: detections, homography: homography, pull: pull))
     }
 
     /// What the piece model finds in a photo and what the colour step

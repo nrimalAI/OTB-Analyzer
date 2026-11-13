@@ -419,6 +419,19 @@ def drawn_pieces(seed, size=(480, 400)):
     return img, pieces
 
 
+def sides_by_colour(detections, colours):
+    """The side of each piece by its colour alone ("white", "black", or None
+    for a piece without a colour or when the pieces do not split in two),
+    from the reference itself and not from a copy of its rule:
+    sides_from_colour made to act always (no share of disagreement is small
+    enough), once with every piece called white and once with every piece
+    called black. Where the two answers differ, nothing was decided."""
+    def run(side):
+        called = [Detection(side + "_pawn", d.confidence, d.bbox) for d in detections]
+        return [d.cls.split("_")[0] for d in sides_from_colour(called, colours, disagreement=-1.0)]
+    return [a if a == b else None for a, b in zip(run("white"), run("black"))]
+
+
 def colour_cases(seed):
     import cv2
     from evaluate import piece_colours
@@ -491,15 +504,16 @@ def colour_cases(seed):
             centre = light if truth[k] == "white" else dark
             cols.append(None if rng.random() < missing
                         else tuple(c + rng.gauss(0, s) for c, s in zip(centre, (6, 1.5, 3))))
+        return record(detections, cols, bool(wrong_ones))
+
+    def record(detections, cols, contradicted=True):
         result = sides_from_colour(detections, cols)
-        with_colour = [k for k in range(n) if cols[k] is not None]
-        split = two_groups([(cols[k][0], 4 * cols[k][1], 4 * cols[k][2]) for k in with_colour]) \
-            if len(with_colour) >= 2 else None
-        if split is None or len(set(split[0])) < 2:
+        changed = any(a.cls != b.cls for a, b in zip(detections, result))
+        if all(side is None for side in sides_by_colour(detections, cols)):
             tally["no split"] += 1
-        elif any(a.cls != b.cls for a, b in zip(detections, result)):
+        elif changed:
             tally["changed"] += 1
-        elif wrong_ones:
+        elif contradicted:
             tally["kept, contradicted a little"] += 1
         else:
             tally["kept, agreed"] += 1
@@ -507,6 +521,7 @@ def colour_cases(seed):
             detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
             colours=[None if c is None else list(c) for c in cols],
             sides=[d.cls for d in result]))
+        return changed
 
     for _ in range(70):
         n = rng.choice([0, 1, 2, 3, 6, 12, 20, 20, 32])
@@ -514,7 +529,25 @@ def colour_cases(seed):
              gap=rng.choice([3.0, 15.0, 30.0, 45.0]), missing=rng.choice([0.0, 0.0, 0.1, 0.6]))
     # On the line: 3 of 20 is 15%, which is not more than 15%; 4 of 20 is.
     for wrong in (3, 4, 3, 4):
-        case(20, wrong=wrong, gap=45.0, missing=0.0)
+        assert case(20, wrong=wrong, gap=45.0, missing=0.0) == (wrong == 4)
+
+    def pieces(said, cols):
+        return [Detection(f"{side}_pawn", 0.9 - 0.01 * k, (100.0 * k, 50.0, 100.0 * k + 60, 170.0))
+                for k, side in enumerate(said)], cols
+    cream, ebony = (80.0, 2.0, 20.0), (20.0, 1.0, 2.0)
+    # The share is of the pieces that have a colour: 20 with a colour, the
+    # model wrong about 4 of them, and 7 more without. 4 of 20 is over 15%
+    # (4 of 27 would not be), and the 7 keep the model's side.
+    truth = ["white", "black"] * 10
+    said = ["black", "white"] * 2 + truth[4:] + ["white"] * 7
+    assert record(*pieces(said, [cream if t == "white" else ebony for t in truth] + [None] * 7))
+    assert [c.split("_")[0] for c in sides[-1]["sides"]] == truth + ["white"] * 7
+    # Two groups equally light, told apart by colour alone: the group of the
+    # first of the two points farthest apart is White.
+    grey, brown = (45.0, 0.0, 0.0), (45.0, 14.0, 28.0)
+    for cols in ([grey, brown, grey, brown], [brown, grey, brown, grey]):
+        assert record(*pieces(["black"] * 4, cols))
+        assert [c.split("_")[0] for c in sides[-1]["sides"]] == ["white", "black", "white", "black"]
     out["sides"] = sides
 
     # 5. A drawn picture: brown and black pieces, and a model that calls
@@ -629,19 +662,11 @@ def compare_colours(swift_path, list_path):
         detections = [Detection(d["cls"], d["confidence"], tuple(d["box"])) for d in found]
         cols = piece_colours(src, detections)
         final = [d.cls for d in sides_from_colour(detections, cols)]
-        # the side by colour alone, as sides_from_colour works it out
-        idx = [k for k, c in enumerate(cols) if c is not None]
-        by_colour = [None] * len(detections)
-        split = two_groups([(cols[k][0], 4.0 * cols[k][1], 4.0 * cols[k][2]) for k in idx])
-        if split is not None and len(set(split[0])) == 2:
-            white = 0 if split[1][0][0] >= split[1][1][0] else 1
-            for k, g in zip(idx, split[0]):
-                by_colour[k] = "white" if g == white else "black"
+        by_colour = sides_by_colour(detections, cols)
         photos += 1
         pieces += len(detections)
         sides_here = finals_here = 0
-        split_differs += (split is None or len(set(split[0])) < 2) != all(d["colour_side"] is None for d in found) \
-            if idx else 0
+        split_differs += all(side is None for side in by_colour) != all(d["colour_side"] is None for d in found)
         for d, c, side, cls in zip(found, cols, by_colour, final):
             if (c is None) != (d["colour"] is None):
                 no_colour_differs += 1

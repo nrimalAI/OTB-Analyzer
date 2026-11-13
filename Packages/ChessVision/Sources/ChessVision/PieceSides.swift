@@ -58,7 +58,8 @@ enum PieceSides {
     /// The split can be wrong for a few pieces (a shadow, a glint), so on
     /// boards the model reads well it would cost more than it gains. It is
     /// used only when it contradicts the model for more than `disagreement`
-    /// of the pieces: then every piece with a colour takes its group's side.
+    /// of the pieces that have a colour: then each of those takes its group's
+    /// side, and a piece without a colour keeps the model's.
     /// A piece keeps its kind, confidence and box either way.
     static func fromColour(
         _ detections: [PieceDetection],
@@ -258,9 +259,10 @@ enum PieceSides {
     ///
     /// This is the formula itself. OpenCV does not compute it for float
     /// pixels: it interpolates in a 33 x 33 x 33 table, which is off by up to
-    /// 0.2 in L* and 0.4 in a* and b* (L* 0.09 too low on average). The
-    /// reference's numbers are therefore these to within that, which is less
-    /// than the two JPEG decoders differ on a photo (`docs/RECOGNITION.md`).
+    /// 0.2 in L*, 0.5 in a* and 0.35 in b* over all colours (L* 0.09 too low
+    /// on average). The reference's numbers are therefore these to within
+    /// that, which is about as much as the two JPEG decoders differ on a
+    /// photo (`docs/RECOGNITION.md`).
     static func lab(red: UInt8, green: UInt8, blue: UInt8) -> Lab {
         let r = linear[Int(red)], g = linear[Int(green)], b = linear[Int(blue)]
         let x = (0.412453 * r + 0.357580 * g + 0.180423 * b) / 0.950456
