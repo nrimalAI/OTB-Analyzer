@@ -295,7 +295,17 @@ GPU and slows it a little.
 | `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | ends about 12:15 on 2026-11-13 |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
-**In `Models/` since 2026-11-13** (weights and history in `baseline/README.md`):
+**In `Models/` now (2026-11-13, midday):** `main`'s corner model again, and
+the baseline piece weights exported with NMS across classes. exp3's corners
+were taken back out: with the app-side steps (a1 from the pieces, grid-fit
+corners) they still turn three endgame photos of ChessReD game G033 by 180
+degrees, one of them a fixture of the package's tests, and `main`'s corner
+model does not. A new corner model goes in when it passes that fixture and
+beats these scores (through `app_check`, a1 prior 6, ChessReD test boards
+exact: 238 of 306 without the grid fit; the app-side session measured 267 with
+it and `main`'s piece export). What exp3 scored, for the record:
+
+**In `Models/` from 2026-11-13 early to midday** (weights and history in `baseline/README.md`):
 exp3's corners (FP16, 19 MB; INT8 is 9.5 MB and scores 86.9% where FP16
 scores 87.6%) and the baseline piece weights exported with NMS across classes.
 Scored through the `.mlpackage`s, letterboxed, per-square / boards exact:
