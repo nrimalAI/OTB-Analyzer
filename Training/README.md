@@ -290,9 +290,10 @@ GPU and slows it a little.
 |---|---|---|
 | `corners_s_exp1` | yolo11s-pose, 640, 40 epochs, default tolerance | Finished. `last.pt` / `best.pt`, median corner error in squares: ChessReD test 0.32 / 0.34 (baseline 0.31), Fenit A 0.29 / 0.34, **board B 0.92 / 0.99**, board not found in 11 / 9 of 93, order right in 41 / 43. With labelled boxes: ChessReD test 78.4% / 75.8% exact, board B 2.1% / 3.2% exact (63-65% per-square, below an empty board) |
 | `corners_s_exp3` | continues exp1 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_synth` (3,000 synthetic boards added); cut by a power failure after 5 epochs and continued | Finished (`best.pt` = `last.pt`). Median corner error: ChessReD test **0.22** (exp1 0.32), Fenit A 0.24, **board B 0.84** (order right 26 of 93). With labelled boxes: ChessReD test **95.8% exact** (exp1 78.4%), board B 3.2%, 23.7% with the best rotation. With the baseline piece model: ChessReD test 99.35% / **84.0% exact** (baseline pair 97.9% / 73.5%), board B 66.4% / 0% (baseline 58.0% / 0%) |
-| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | running since 21:34 on 2026-11-12 |
-| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | queued |
-| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | queued last; exp3 already shows what a tighter tolerance does |
+| `corners_s_exp4` | continues exp3 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_rf` (4,946 Roboflow photos with derived corners added) | Finished. `last.pt` (better than `best.pt`): ChessReD test **0.19**, 97.1% exact with labelled boxes, but 4 of 306 turned 180 degrees (exp3: 2); Fenit A 0.15; **board B 0.91**, order right 29 of 93, 8.6% exact with labelled boxes. More boards with corners did not help on B: see "why learned corners fail" below. Through the app's code with the baseline pieces: ChessReD test 91.2% exact |
+| `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | Killed at epoch 19 (exit 137; the machine was deep in swap), continued from epoch 18 with batch 12 on 2026-11-13. At epoch 18, labelled corners: board B 79.2% / 0%, Fenit A 94.8% / 14%, ChessReD test 98.8% / **63.1%** (baseline 84.2% / 0%, 92.2% / 1.5%, 99.66% / 87.6%): worse than the baseline on ChessReD |
+| `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | ends about 12:45 on 2026-11-13 |
+| `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
 **In `Models/` since 2026-11-13** (weights and history in `baseline/README.md`):
 exp3's corners (FP16, 19 MB; INT8 is 9.5 MB and scores 86.9% where FP16
@@ -311,7 +312,54 @@ where the old exported model does find it, it scores about 71%, no worse than
 the new one's 67.7% over all 100. So the new corner model reads known boards
 much better and unknown boards no better; what is missing is described below.
 
+**The app's own code, without Xcode.** `app_check/` is a small Swift
+program that runs `Packages/ChessVision` (Vision does the resize, as on the
+phone) over a list of photos and prints squares right and boards exact. It
+builds with the Command Line Tools alone and gives the same result as the
+package's fixture test, photo for photo:
+
+```sh
+python evaluate.py --dump-list runs/app_check/chessred_test.json --split test \
+    --annotations datasets/chessred2k/annotations.json --images datasets/chessred2k/images
+(cd app_check && swift build -c release)
+app_check/.build/release/app_check --models ../Models --list runs/app_check/chessred_test.json
+```
+
+ChessReD test through it, boards exact of 306: `main`'s models 229 (74.8%);
+exp3 corners + baseline pieces (pull request #4) 272 (88.9%); exp4 corners
+279 (91.2%). exp3 and exp4 turn the last photos of game G033 by 90 or 180
+degrees (G033_IMG099 to 102, 5-6 pieces left; `test_004005.jpg` in the
+package's fixtures is G033_IMG101), and exp4 also G000_IMG102
+(`test_000102.jpg`); `main`'s corner model gets all of them right. In those
+positions the pieces point the wrong way (a white queen and pawn on ranks 7
+and 8), so the new models seem to take a1 from the pieces where the old one
+took it from the ChessReD board. That is why `swift test` fails on pull
+request #4.
+
 **What has been learned, and what to try next.**
+
+- **Why learned corners fail on a new board.** Drawn on the photos, exp4's
+  corners on board B are often a quadrilateral turned 45 degrees inside the
+  board, or a small patch in its middle. The four keypoints are (a1, a8, h8,
+  h1): where the model cannot tell which corner is a1 it predicts the average
+  over the rotations it cannot tell apart, which is the middle of the edges
+  or of the board. The location is learned together with a guess it cannot
+  make. To try: label the corners in an order fixed by the image (start at
+  the corner with the smallest x + y, go clockwise) and learn "which of them
+  is a1" as a class; the export puts them back in (a1, a8, h8, h1) order so
+  the app sees the same `[1,17,8400]` tensor.
+- **The piece model is what stops board B.** With the labelled corners, no
+  piece model reads one board B photo fully right. Scored square by square
+  (`pieces_s_rf` at epoch 18, 640 input): which squares are occupied 98.2%
+  (all right on 50% of boards); with the piece type 91.8% (3%); with the
+  colour too 85.9% (0%). By type: 27% of the pawns are read as knights,
+  bishops or rooks, bishops are 69% right, queens 61%, kings 73%, knights
+  96%. The misread pieces are mostly seen from straight above (a pawn is a
+  disc) and glossy black; board B's "white" pieces are brown and often come
+  out black. More pixels are not the answer: at 1280, or cropped to the
+  board, the same model is no better (3-8% of boards right without colour)
+  and the baseline is worse. What is missing is piece sets and viewpoints
+  the training data does not have: the next lever is rendered data.
 
 - The corner model is the bottleneck, and only three boards have corner
   labels to train on (ChessReD, the chesscog render, Fenit A). Roboflow adds
