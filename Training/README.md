@@ -592,6 +592,29 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 54.1% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
 | `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 54.2% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
 
+**Through the app's own code, 2026-11-13** (`app_check`, the exported models
+in `Models/` at b546e6a: `main`'s corner model and the piece export with NMS
+across classes; measured by the app-side session, nothing chosen on it).
+"Steps" are the two app-side steps, corners from the grid fit (used alone
+when the model finds no board) and a1 from the pieces with prior 6. Squares
+right, photos with no board found, boards exact:
+
+| Part | Photos | Steps off | Both steps |
+|---|---|---|---|
+| `chessq` | 50 | 28.3%, 26, 0 | 64.6%, 10, 1 |
+| `ylichess` | 200 | 0.0%, 200, 0 | 69.7%, 7, 1 (`wood180` 55.3%, `wood180-layout` 84.7%) |
+| `chesscog_real` | 29 | 32.9%, 10, 0 | 73.3%, 0, 0 |
+| `samryan` | 500 | 53.6%, 80, 0 | 70.3%, 19, 0 |
+| `chesscv_games` | 840 | 53.5%, 32, 0 | 80.5%, 12, 0 |
+| all | 1,619 | 45.8%, 348, 0 | 75.4%, 48, 2 |
+
+With `main`'s corner model the board is not found at all on a fifth of these
+photos (all of Y-LIChess) and the fit alone recovers most of them. Boards
+exact stay at 2 of 1,619: that is the piece model. To redo: a photo ->
+placement JSON per source from `datasets/heldout2/positions.json`, then
+`app_check --models ../Models --list L --a1-prior 6 --grid-fit on` and
+`--a1-prior off --grid-fit off`.
+
 - **None of the four pairs in the table reads one game position fully right
   on any of the 19 boards** (with exp3's corners one layout photo of 98
   comes out right; with both app-side steps, below, one ChessQ photo of 50).
