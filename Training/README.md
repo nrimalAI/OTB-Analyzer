@@ -452,7 +452,7 @@ Universe's website refuses pages from this network until about 05:50 UTC on
 
 Fenit's board B is 100 photos of one board, and settings have been chosen on
 it (the grid fit's thresholds, the a1 prior). This is a second test set that
-nothing has been trained or tuned on: 1,617 real photos of 19 boards and
+nothing has been trained or tuned on: 1,619 real photos of 19 boards and
 piece sets that are in no training source (not ChessReD's, not Fenit's, none
 of the Roboflow projects), each with its full position, from five public
 sources that need no account or key.
@@ -480,7 +480,7 @@ the CPU and writes `runs/scores/heldout2_<tag>.txt`.
 | Source | Photos | Boards | Camera | Position from | Licence |
 |---|---|---|---|---|---|
 | `chessq` ([ChessQ Test](https://huggingface.co/datasets/joelseytre/chessq-test)) | 50 | 15 kinds of set, at most 5 photos each | phones, oblique, 768x1024 to 3072x4080 | `metadata.jsonl`, reviewed by hand by its author | CC BY-NC 4.0 |
-| `ylichess` ([Y-LIChess](https://github.com/GibranBenitez/Y-LIChess), light-wood board) | 198: 102 game positions, 96 layouts | 1 folding wooden board | fixed webcam, high oblique, 1920x1080 | derived from its piece boxes and board outline; also gives boxes and corners | CC BY 4.0 |
+| `ylichess` ([Y-LIChess](https://github.com/GibranBenitez/Y-LIChess), light-wood board) | 200: 104 game positions, 96 layouts | 1 folding wooden board | fixed webcam, high oblique, 1920x1080 | derived from its piece boxes and board outline; also gives boxes and corners | CC BY 4.0 |
 | `chesscog_real` ([chesscog](https://github.com/georg-wolflein/chesscog) transfer set) | 29 | 1 black-bordered wooden board | iPhone, low, from a player's seat, 1200x900 | one JSON per photo | none stated |
 | `samryan` ([samryan18/chess-dataset](https://github.com/samryan18/chess-dataset)) | 500 (476 positions) | 1 green vinyl mat on the floor | straight down, 6000x4000 | the file name | MIT |
 | `chesscv_games` ([Rizo-R/chess-cv](https://github.com/Rizo-R/chess-cv)) | 840 (405 positions) | 1 folding brown and cream board | phone in the hand, oblique, 2048x1536 | 8 games replayed; photo N is the game after ply N | none stated |
@@ -512,14 +512,15 @@ What to know about the labels:
   outline of the playing area; the position is where the boxes stand
   (`load_ylichess`). A photo is left out unless every box lands on a square
   of its own and stays there for anchor pulls from 0.15 to 0.45 (4 of 204
-  left out); 2 more are left out because the pieces contradict the a1 rule.
+  left out: a pawn on the line between two squares).
   Which corner is a1 is not recorded: the camera and board never move, photos
   numbered up to 100 have White on the far side (a1 top right, as the
   stickers on the board's frame say) and the rest are set up the other way
   round. 96 photos are piece layouts made to cover the board (two knights; a
   king and queen; all 32 pieces packed into four ranks), where a1 is only
-  that convention: they are the group `wood180-layout`, the 102 positions
-  that could come from a game are `wood180`. Score layouts by "exact once
+  that convention: they are the group `wood180-layout`, the 104 positions
+  that could come from a game are `wood180` (the split looks at the position
+  alone, never at what a model or `white_side_score` makes of it). Score layouts by "exact once
   turned 180 degrees".
 - **Only one of Y-LIChess's four boards is used.** On the other three
   (`plastic_bw`, `wood_dark`, `mat_green`, 615 photos) the boxes are a

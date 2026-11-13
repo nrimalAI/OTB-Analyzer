@@ -57,7 +57,7 @@ import yaml
 
 from chess_pipeline import (
     FEN_LETTER, PIECE_CLASSES, board_square, board_to_fen_placement,
-    fen_placement_to_board, homography, white_side_score,
+    fen_placement_to_board, homography,
 )
 from prepare_data import (
     extract_corners, image_index, image_size, link, normalize_category,
@@ -601,11 +601,14 @@ def load_chessq(name, cfg, root, skipped):
 
 
 def looks_like_a_game(placement):
-    """Whether the pieces themselves say where White sits: one king a side, no
-    pawn on the first or last rank, at most eight pawns and sixteen pieces a
-    side, and at least six pawns on the board. Y-LIChess also photographs
-    piece layouts made to cover the board (two knights; all 32 pieces packed
-    into four ranks), where a1 is only a convention."""
+    """Whether the position could come from a game with enough pawns left to
+    show which way the board is played: one king a side, no pawn on the first
+    or last rank, at most eight pawns and sixteen pieces a side, and at least
+    six pawns on the board. Nothing a recognizer computes is used here, so
+    which photos count as game positions does not depend on what is being
+    tested. Y-LIChess also photographs piece layouts made to cover the board
+    (two knights; all 32 pieces packed into four ranks), where a1 is only a
+    convention."""
     board = fen_placement_to_board(placement)
     letters = list(board.values())
     white = [x for x in letters if x.isupper()]
@@ -649,7 +652,7 @@ def load_ylichess(name, cfg, root, skipped):
     game position and a1 is that convention only (score those with
     evaluate.py's "exact once turned 180 degrees")."""
     for board_name, rule in (cfg.get("boards") or {}).items():
-        for folder in sorted(root.glob(f"{board_name}_*")):
+        for folder in sorted(f for f in root.glob(f"{board_name}_*") if f.is_dir()):
             calibrations = []
             for info in sorted(folder.glob("board_info*.json")):
                 if "original" in info.stem:
@@ -708,16 +711,10 @@ def load_ylichess(name, cfg, root, skipped):
                     skipped["a box is off the board, shares a square or sits on an edge"] += 1
                     continue
                 placement = readings.pop()
-                game = looks_like_a_game(placement)
-                if game and white_side_score(
-                        {sq: (LETTER_TO_CLASS[x], 1.0)
-                         for sq, x in fen_placement_to_board(placement).items()}) <= 0:
-                    # The numbering rule and the pieces disagree about a1.
-                    skipped["a1 by photo number contradicts the pieces"] += 1
-                    continue
                 yield Sample(name, f"{folder.name}_{img.stem}", img, "test", boxes,
                              [(x / w, y / h) for x, y in corners], placement,
-                             board_name if game else f"{board_name}-layout")
+                             board_name if looks_like_a_game(placement)
+                             else f"{board_name}-layout")
 
 
 def load_fen_json(name, cfg, root, skipped):
@@ -904,9 +901,11 @@ def merge(args, sources):
     if testing and len(test_only) != len(args.sources):
         sys.exit("test-only sources (" + ", ".join(test_only) + ") cannot be merged "
                  "together with training sources; merge them into a folder of their own.")
-    if testing and not args.out:
-        sys.exit("a test-only merge needs its own folder, e.g. --out datasets/heldout2")
     out = (HERE / (args.out or "datasets/merged")).resolve()
+    if testing and (not args.out or out.name.startswith("merged")):
+        # datasets/merged* is where the training scripts look by default.
+        sys.exit("a test-only merge needs a folder of its own that is not called "
+                 "merged*, e.g. --out datasets/heldout2")
     if out.exists() and any(out.iterdir()):
         if not (out / "manifest.json").exists():
             sys.exit(f"{out} exists and was not written by this script; "
