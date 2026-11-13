@@ -99,6 +99,15 @@ import Testing
 
             // Per-board floor: recognition quality on known test images should
             // never regress below ~90% per-square.
+            //
+            // test_004005.jpg is a weak guard for which corner is a1. Its
+            // position (7Q/8/1k3p2/4p3/8/p3K3/8/8) points the wrong way: it
+            // scores only +2.5 the right way up (BoardOrientation), less than
+            // the prior of 6 for the corner model's choice. With a corner
+            // model that puts a1 at the wrong end (exp3, 2026-11) it passes
+            // only while imprecise corners lose two of the six pieces; read
+            // in full it would stay turned and fail here. See
+            // docs/RECOGNITION.md.
             #expect(correct >= 58, "\(file) regressed: \(correct)/64")
         }
 

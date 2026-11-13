@@ -9,6 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../Packages/ChessVision"
 
 developer_dir="${DEVELOPER_DIR:-$(xcode-select -p)}"
+developer_dir="${developer_dir%/}"
 flags=()
 if [[ "$developer_dir" == */CommandLineTools ]]; then
     frameworks="$developer_dir/Library/Developer/Frameworks"

@@ -65,6 +65,7 @@ struct BoardOrientationTests {
         // +2.5 the right way up, -2.5 turned by 180 degrees.
         let pieces = try Self.detections("7Q/8/1k3p2/4p3/8/p3K3/8/8")
         let upsideDown = Self.turned(Self.topDown, by: 2)
+        #expect(BoardOrientation.appPrior == 6)
         #expect(BoardOrientation.orient(corners: upsideDown, detections: pieces, prior: 6) == upsideDown)
         #expect(BoardOrientation.orient(corners: upsideDown, detections: pieces, prior: 0) == Self.topDown)
         // Without pieces there is nothing to go on: the corners stay.
@@ -98,7 +99,9 @@ struct BoardOrientationTests {
     }
 
     /// Random boards in perspective, corners given in a random rotation, some
-    /// pieces missed or misread: the rotation, the four scores and the final
+    /// pieces missed, misread or found twice, some boxes beside the board
+    /// (so that pieces are moved to a neighbouring square, dropped, or pulled
+    /// in from the edge): the rotation, the four scores and the final
     /// placement must be the ones `chess_pipeline.py` computed.
     @Test func testMatchesPythonOnRecordedCases() throws {
         let url = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))

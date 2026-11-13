@@ -35,7 +35,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         pieceModel: MLModel,
         cornerScoreThreshold: Float = 0.25,
         pull: Double = 0.30,  // = SquareAssignment.defaultPull
-        a1Prior: Double? = 6  // = BoardOrientation.defaultPrior
+        a1Prior: Double? = 6  // = BoardOrientation.appPrior
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)

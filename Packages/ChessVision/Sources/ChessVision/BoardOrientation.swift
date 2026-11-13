@@ -9,8 +9,9 @@ import CoreGraphics
 enum BoardOrientation {
 
     /// How much the corner model's own choice of a1 counts against the
-    /// pieces. Chosen on the ChessReD test split (`Training/README.md`).
-    static let defaultPrior = 6.0
+    /// pieces in the app (`CoreMLBoardRecognizer`). Chosen on the ChessReD
+    /// test split (`Training/README.md`, `docs/RECOGNITION.md`).
+    static let appPrior = 6.0
 
     /// How much a board looks like one seen with White at ranks 1-2: White's
     /// pieces count for being near rank 1, Black's for being near rank 8,
@@ -38,12 +39,13 @@ enum BoardOrientation {
     /// is a1: of the four rotations, the one whose board has the highest
     /// `whiteSideScore`. `prior` is added to the score of the corners as
     /// given, i.e. how much to trust the corner model's own choice (0: not at
-    /// all). On a tie the earlier rotation wins, the corners as given first.
+    /// all, the default, as in Python). On a tie the earlier rotation wins,
+    /// the corners as given first.
     static func orient(
         corners: [CGPoint],
         detections: [PieceDetection],
         pull: Double = SquareAssignment.defaultPull,
-        prior: Double = defaultPrior
+        prior: Double = 0
     ) -> [CGPoint] {
         guard corners.count == 4 else { return corners }
         var best = corners
