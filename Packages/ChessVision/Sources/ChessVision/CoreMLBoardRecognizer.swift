@@ -15,6 +15,11 @@ import Vision
 ///   `VNRecognizedObjectObservation`s with normalized bounding boxes
 ///   (lower-left origin) and class labels like `"white_pawn"`.
 ///
+/// After the models, two steps that need no learning (`docs/RECOGNITION.md`):
+/// the corners are replaced by the classical grid fit (`GridCorners`) where it
+/// accepts its own result, and which corner is a1 is checked against the
+/// pieces (`BoardOrientation`).
+///
 /// Both models see the photo letterboxed into a square (`Letterbox`), as in
 /// training, never stretched. The square is passed to Vision with
 /// `.scaleFill`, which for a square only resizes; `Letterbox` maps the
@@ -26,22 +31,29 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     private let cornerScoreThreshold: Float
     private let pull: Double
     private let a1Prior: Double?
+    private let gridFit: Bool
 
-    /// - Parameter a1Prior: which corner is a1 is checked against the pieces
-    ///   (`BoardOrientation.orient`); this is how much the corner model's own
-    ///   choice counts. `nil` keeps the corner model's a1 as it is.
+    /// - Parameters:
+    ///   - a1Prior: which corner is a1 is checked against the pieces
+    ///     (`BoardOrientation.orient`); this is how much the corner model's
+    ///     own choice counts. `nil` keeps the corner model's a1 as it is.
+    ///   - gridFit: take the corners from the classical grid fit
+    ///     (`GridCorners`) where it accepts its own result, and from the
+    ///     corner model where it does not.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
         cornerScoreThreshold: Float = 0.25,
         pull: Double = 0.30,  // = SquareAssignment.defaultPull
-        a1Prior: Double? = 6  // = BoardOrientation.appPrior
+        a1Prior: Double? = 6,  // = BoardOrientation.appPrior
+        gridFit: Bool = true
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
         self.cornerScoreThreshold = cornerScoreThreshold
         self.pull = pull
         self.a1Prior = a1Prior
+        self.gridFit = gridFit
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -90,6 +102,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         guard Homography(corners: corners) != nil else {
             throw RecognitionError.boardNotFound
         }
+        if gridFit {
+            corners = Self.cornersWithGridFit(modelCorners: corners, in: image)
+        }
 
         let detections = try detectPieces(in: square, letterbox: letterbox)
         if let a1Prior {
@@ -107,6 +122,18 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             corners: corners,
             orientationGuess: Self.orientationGuess(corners: corners)
         )
+    }
+
+    // MARK: - Grid fit
+
+    /// The corner model says where the board is and which corner it takes
+    /// for a1; the grid fit, where it accepts its own result, says where the
+    /// corners are exactly. It does not know a1, so its corners are turned to
+    /// the rotation nearest the model's. Where it rejects itself the model's
+    /// corners stay. As `evaluate.py --grid-corners`. Internal for testing.
+    static func cornersWithGridFit(modelCorners: [CGPoint], in image: CGImage) -> [CGPoint] {
+        guard let fit = GridCorners.find(in: image) else { return modelCorners }
+        return GridCorners.turned(fit.corners, nearestTo: modelCorners)
     }
 
     // MARK: - Corner model

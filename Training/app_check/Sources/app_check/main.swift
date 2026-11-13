@@ -19,6 +19,11 @@
 //   --a1-prior P    how much the corner model's choice of a1 counts against
 //                   the pieces (BoardOrientation; the app's default is 6), or
 //                   "off" to keep the corner model's a1 as it is.
+//   --grid-fit on|off  corners from the classical grid fit where it accepts
+//                   its own result (the app's default: on).
+//   --grid FILE     run no model: write what the classical grid fit
+//                   (GridCorners, the port of grid_corners.py) makes of each
+//                   photo to FILE, for `swift_reference.py compare`.
 //   --verbose       one line per photo, not only the wrong ones.
 //
 // Needs only the Command Line Tools (no Xcode, no XCTest).
@@ -41,6 +46,9 @@ var portrait = false
 var verbose = false
 var a1Prior: Double? = 6
 var a1PriorGiven = false
+var gridPath: String?
+var gridFit = true
+var gridFitGiven = false
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
     let flag = arguments.removeFirst()
@@ -49,6 +57,12 @@ while !arguments.isEmpty {
     case "--list": listPath = arguments.isEmpty ? nil : arguments.removeFirst()
     case "--redraw": redraw = arguments.isEmpty ? nil : Int(arguments.removeFirst())
     case "--portrait": portrait = true
+    case "--grid-fit":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--grid-fit takes on or off") }
+        gridFit = value == "on"
+        gridFitGiven = true
+    case "--grid": gridPath = arguments.isEmpty ? nil : arguments.removeFirst()
     case "--a1-prior":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         if value == "off" {
@@ -63,8 +77,47 @@ while !arguments.isEmpty {
     default: fail("unknown argument \(flag)")
     }
 }
+if let gridPath, let listPath {
+    let listURL = URL(fileURLWithPath: listPath)
+    guard
+        let data = try? Data(contentsOf: listURL),
+        let list = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { fail("could not read \(listPath) as a JSON object keyed by photo") }
+    var out: [String: Any] = [:]
+    let started = Date()
+    for path in list.keys.sorted() {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : listURL.deletingLastPathComponent().appending(path: path)
+        guard
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { fail("could not load \(path)") }
+        let found = GridCorners.diagnose(image)
+        out[path] = [
+            "raw": found.rawCorners.map { $0.map { [Double($0.x), Double($0.y)] } } ?? NSNull(),
+            "confidence": found.confidence, "stage": found.stage, "pass": found.pass,
+            "values": found.values,
+        ] as [String: Any]
+        if verbose {
+            print("\(url.lastPathComponent): \(found.stage) pass \(found.pass) confidence \(found.confidence)")
+        }
+    }
+    let seconds = Date().timeIntervalSince(started)
+    do {
+        try JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])
+            .write(to: URL(fileURLWithPath: gridPath))
+    } catch {
+        fail("could not write \(gridPath): \(error)")
+    }
+    let accepted = out.values.filter { (($0 as? [String: Any])?["confidence"] as? Double ?? 0) > 0 }.count
+    print(String(
+        format: "%d photos through the grid fit, %d accepted, %.2f s per photo; written to %@",
+        out.count, accepted, seconds / Double(max(out.count, 1)), gridPath))
+    exit(0)
+}
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--verbose]")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--verbose]")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -113,9 +166,8 @@ do {
     let pieces = try MLModel(
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
-    recognizer = a1PriorGiven
-        ? try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior)
-        : try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces)
+    recognizer = try CoreMLBoardRecognizer(
+        cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -182,7 +234,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
