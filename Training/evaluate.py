@@ -31,8 +31,8 @@ from pathlib import Path
 
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
-    assign_squares, colour_patch, fen_placement_to_board, homography, orient_by_pieces,
-    sides_from_colour,
+    assign_squares, board_crop, colour_patch, fen_placement_to_board, homography,
+    orient_by_pieces, sides_from_colour,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -277,6 +277,10 @@ def main():
                     help="drop a detected box that overlaps a more confident one of "
                          "any class by more than IOU (the piece model's own NMS is "
                          "per class, so one piece can come back as two classes)")
+    ap.add_argument("--crop-board", action="store_true",
+                    help="give the piece model only the part of the photo round the "
+                         "board (chess_pipeline.board_crop), for a piece model trained "
+                         "on such crops (crop_boards.py)")
     ap.add_argument("--sides-from-colour", action="store_true",
                     help="decide White and Black from the colours of the detected "
                          "pieces where the model's answer does not fit them "
@@ -327,6 +331,8 @@ def main():
         return
     if args.stretch and args.two_pass:
         ap.error("--stretch and --two-pass cannot be combined")
+    if args.stretch and args.crop_board:
+        ap.error("--stretch and --crop-board cannot be combined")
     if not args.gt_corners and not args.corners_model:
         ap.error("give --corners-model or --gt-corners")
     if not args.gt_boxes and not args.pieces_model:
@@ -394,14 +400,23 @@ def main():
         if args.gt_boxes:
             detections = gt_boxes
         else:
-            pr = piece_model(photo if args.stretch else str(src), conf=args.conf,
+            piece_input, dx, dy = (photo if args.stretch else str(src)), 0.0, 0.0
+            if args.crop_board:
+                # The piece model sees only the board (chess_pipeline.board_crop).
+                import cv2
+                whole = cv2.imread(str(src))
+                rect = board_crop(kpts, whole.shape[1], whole.shape[0])
+                if rect is not None:
+                    piece_input, dx, dy = whole[rect[1]:rect[3], rect[0]:rect[2]], rect[0], rect[1]
+            pr = piece_model(piece_input, conf=args.conf,
                              verbose=False, device=args.device)[0]
             if pr.boxes is not None:
                 for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
                                           pr.boxes.conf.tolist()):
                     x1, y1, x2, y2 = box
                     detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
-                                                (x1 * sx, y1 * sy, x2 * sx, y2 * sy)))
+                                                (x1 * sx + dx, y1 * sy + dy,
+                                                 x2 * sx + dx, y2 * sy + dy)))
 
         if args.one_piece_per_spot is not None and not args.gt_boxes:
             detections = one_per_spot(detections, args.one_piece_per_spot)

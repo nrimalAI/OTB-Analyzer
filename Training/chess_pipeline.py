@@ -141,6 +141,31 @@ def assign_detections(H, detections, pull=0.30):
 
 
 # --------------------------------------------------------------------------
+# The part of the photo the piece model looks at
+
+# Margins around the board's corners, as fractions of the width and height of
+# the box round the four corners (left and right, top, bottom). Pieces stand
+# up from the board, so the far side needs room for the back rank's heads.
+BOARD_CROP_MARGINS = (0.12, 0.35, 0.08)
+
+
+def board_crop(corners, width, height, margins=BOARD_CROP_MARGINS):
+    """Pixel rectangle (x0, y0, x1, y1), end exclusive, round the board with
+    room for the pieces, clipped to the photo. The piece model then sees the
+    board at 640 px instead of the whole photo, so a piece is larger by the
+    share of the photo that is not board; None if nothing is left."""
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
+    w, h = max(xs) - min(xs), max(ys) - min(ys)
+    side, top, bottom = margins
+    x0 = max(int(min(xs) - side * w), 0)
+    x1 = min(int(max(xs) + side * w) + 1, width)
+    y0 = max(int(min(ys) - top * h), 0)
+    y1 = min(int(max(ys) + bottom * h) + 1, height)
+    return (x0, y0, x1, y1) if x1 - x0 >= 8 and y1 - y0 >= 8 else None
+
+
+# --------------------------------------------------------------------------
 # Which side a piece belongs to, from the colours of the pieces in the photo
 
 # Where in a piece's box its colour is measured: the middle, as fractions of
