@@ -46,7 +46,7 @@ drop_line() {
 # The patterns are those of real command lines, so that a shell which merely
 # mentions a run does not hold the queue up.
 training() {
-  pgrep -f "[pP]ython -u train\.py (corners|pieces) |[pP]ython -u -c import sys; from ultralytics" >/dev/null
+  pgrep -f "[pP]ython -u train\.py (corners|pieces|resume) |[pP]ython -u -c import sys; from ultralytics" >/dev/null
 }
 
 # The state of a run, from its last.pt.  resume: a checkpoint to continue
@@ -84,10 +84,11 @@ while true; do
     rc=0
   elif [ "$state" = resume ]; then
     log "continue $name from $dir/weights/last.pt"
-    # The arguments after the checkpoint are not read: they put the run's
-    # name on the command line, so pkill -f "name <run name>" finds it.
-    caffeinate -i ./venv/bin/python -u -c 'import sys; from ultralytics import YOLO; YOLO(sys.argv[1]).train(resume=True)' \
-      "$dir/weights/last.pt" --name "$name" >> "runs/$name.log" 2>&1
+    # Through train.py, which sets up what the run needs beyond its saved
+    # settings (canonical_corners.py). --name is not read there: it puts the
+    # run's name on the command line, so pkill -f "name <run name>" finds it.
+    caffeinate -i ./venv/bin/python -u train.py resume --model "$dir/weights/last.pt" \
+      --name "$name" >> "runs/$name.log" 2>&1
     rc=$?
   elif [ "$cut_off" = 0 ] && [ -d "$dir" ]; then
     # A run of that name already exists (and later lines may use its

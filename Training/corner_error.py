@@ -29,6 +29,7 @@ import numpy as np
 from chess_pipeline import (
     FEN_LETTER, assign_squares, fen_placement_to_board, homography, project,
 )
+from canonical_corners import a1_order
 from evaluate import merged_labels
 
 HERE = Path(__file__).resolve().parent
@@ -74,7 +75,8 @@ def main():
             s["not found"].append(1)
             continue
         best = int(result.boxes.conf.argmax())
-        predicted = np.array(result.keypoints.xy[best].tolist())
+        predicted = np.array(a1_order(result.keypoints.xy[best].tolist(),
+                                      result.boxes.cls[best], result.names))
         # Predicted corners in board coordinates, via the labelled corners.
         to_board = homography(corners)
         on_board = np.array([project(to_board, p) for p in predicted])
