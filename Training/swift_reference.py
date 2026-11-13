@@ -20,7 +20,7 @@ JSON as grid_board_*.png), the four fixture photos, sets of x-corners for the
 lattice fit, and a patch of image for the filters. Written to Fixtures/grid_cases.json.
 
 colour-cases: what chess_pipeline.sides_from_colour and its parts make of
-small inputs, for PieceSidesTests: colours in CIE Lab as OpenCV gives them,
+small inputs, for PieceSidesTests: colours in CIE Lab (evaluate.srgb_to_lab),
 the patch of a box, points split in two groups, detections with their colours
 (the model wrong about the side of none, a few or all of the pieces), and one
 drawn picture of brown and black pieces that a model calls all black (written
@@ -51,7 +51,7 @@ import numpy as np
 from chess_pipeline import (
     Detection, FEN_LETTER, PIECE_CLASSES, assign_detections, assign_squares, board_square,
     board_to_fen_placement, colour_patch, fen_placement_to_board, homography, orient_by_pieces,
-    project, pulled_board_point, sides_from_colour, two_groups, white_side_score,
+    colour_sides, project, pulled_board_point, sides_from_colour, two_groups, white_side_score,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -419,33 +419,19 @@ def drawn_pieces(seed, size=(480, 400)):
     return img, pieces
 
 
-def sides_by_colour(detections, colours):
-    """The side of each piece by its colour alone ("white", "black", or None
-    for a piece without a colour or when the pieces do not split in two),
-    from the reference itself and not from a copy of its rule:
-    sides_from_colour made to act always (no share of disagreement is small
-    enough), once with every piece called white and once with every piece
-    called black. Where the two answers differ, nothing was decided."""
-    def run(side):
-        called = [Detection(side + "_pawn", d.confidence, d.bbox) for d in detections]
-        return [d.cls.split("_")[0] for d in sides_from_colour(called, colours, disagreement=-1.0)]
-    return [a if a == b else None for a, b in zip(run("white"), run("black"))]
-
-
 def colour_cases(seed):
     import cv2
-    from evaluate import piece_colours
+    from evaluate import piece_colours, srgb_to_lab
     cv2.setNumThreads(1)
     rng = random.Random(seed)
     out = {}
 
-    # 1. Colours: sRGB bytes -> CIE Lab as cv2 gives it for float pixels.
+    # 1. Colours: sRGB bytes -> CIE Lab.
     colours = [(0, 0, 0), (255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (1, 1, 1),
                (10, 10, 10), (11, 11, 11), (23, 24, 25), (128, 128, 128)]
     colours += [tuple(rng.randrange(256) for _ in range(3)) for _ in range(150)]
     colours += [tuple(rng.randrange(40) for _ in range(3)) for _ in range(40)]   # dark: the linear parts
-    bgr = np.array([[(b, g, r) for r, g, b in colours]], np.uint8)
-    lab = cv2.cvtColor(bgr.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)[0]
+    lab = srgb_to_lab(np.array([(b, g, r) for r, g, b in colours], np.uint8))
     out["lab"] = [dict(rgb=list(c), lab=[float(v) for v in l]) for c, l in zip(colours, lab)]
 
     # 2. The patch of a box, also for boxes that stick out of the photo or
@@ -509,7 +495,8 @@ def colour_cases(seed):
     def record(detections, cols, contradicted=True):
         result = sides_from_colour(detections, cols)
         changed = any(a.cls != b.cls for a, b in zip(detections, result))
-        if all(side is None for side in sides_by_colour(detections, cols)):
+        by_colour = colour_sides(cols)
+        if by_colour is None:
             tally["no split"] += 1
         elif changed:
             tally["changed"] += 1
@@ -520,6 +507,7 @@ def colour_cases(seed):
         sides.append(dict(
             detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
             colours=[None if c is None else list(c) for c in cols],
+            by_colour=by_colour,
             sides=[d.cls for d in result]))
         return changed
 
@@ -662,11 +650,12 @@ def compare_colours(swift_path, list_path):
         detections = [Detection(d["cls"], d["confidence"], tuple(d["box"])) for d in found]
         cols = piece_colours(src, detections)
         final = [d.cls for d in sides_from_colour(detections, cols)]
-        by_colour = sides_by_colour(detections, cols)
+        split = colour_sides(cols)
+        by_colour = split or [None] * len(detections)
         photos += 1
         pieces += len(detections)
         sides_here = finals_here = 0
-        split_differs += all(side is None for side in by_colour) != all(d["colour_side"] is None for d in found)
+        split_differs += (split is None) != all(d["colour_side"] is None for d in found)
         for d, c, side, cls in zip(found, cols, by_colour, final):
             if (c is None) != (d["colour"] is None):
                 no_colour_differs += 1

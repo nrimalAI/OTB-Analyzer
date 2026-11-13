@@ -53,11 +53,15 @@ import Testing
         return (corners, pieces)
     }
 
-    /// The recognizer as the app builds it, or with the grid fit switched off.
-    private func makeRecognizer(gridFit: Bool = true) throws -> CoreMLBoardRecognizer {
+    /// The recognizer as the app builds it, or with the grid fit switched
+    /// off, or with the colour step (off in the app) switched on.
+    private func makeRecognizer(
+        gridFit: Bool = true, sidesFromColour: Bool = false
+    ) throws -> CoreMLBoardRecognizer {
         let models = try Self.models.get()
         return try CoreMLBoardRecognizer(
-            cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
+            cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit,
+            sidesFromColour: sidesFromColour)
     }
 
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
@@ -73,6 +77,14 @@ import Testing
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testCornerModelAloneReadsTheFixtures() async throws {
         try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")
+    }
+
+    /// The colour step is off in the app. Switched on, it must leave boards
+    /// the piece model reads well as they are.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testSidesFromColourSwitchedOnLeavesTheFixturesRight() async throws {
+        try await expectFixturesRead(
+            by: try makeRecognizer(sidesFromColour: true), label: "fixture, sides from colour")
     }
 
     /// The colour step on the fixtures: every piece the model finds has a

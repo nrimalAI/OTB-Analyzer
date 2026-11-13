@@ -10,9 +10,9 @@ import Foundation
 /// colour, the lighter group is White, and where that contradicts the model
 /// for more than a share of the pieces, the colours decide.
 ///
-/// Port of `colour_patch`, `two_groups` and `sides_from_colour` in
-/// `Training/chess_pipeline.py` and of `piece_colours` in
-/// `Training/evaluate.py`: keep in sync.
+/// Port of `colour_patch`, `two_groups`, `colour_sides` and
+/// `sides_from_colour` in `Training/chess_pipeline.py` and of `srgb_to_lab`
+/// and `piece_colours` in `Training/evaluate.py`: keep in sync.
 enum PieceSides {
 
     /// Where in a piece's box its colour is measured: the middle, as
@@ -89,10 +89,10 @@ enum PieceSides {
         }
     }
 
-    /// The side of each piece by its colour alone: the pieces that have a
-    /// colour split in two groups, the lighter group White. A piece without a
-    /// colour has no side; nil when there is nothing to split (fewer than two
-    /// colours, all the same, or one group left empty).
+    /// `colour_sides`: the side of each piece by its colour alone. The pieces
+    /// that have a colour are split in two groups, the lighter group White. A
+    /// piece without a colour has no side; nil when there is nothing to split
+    /// (fewer than two colours, all the same, or one group left empty).
     static func sidesByColour(_ colours: [Lab?], chroma: Double = chromaWeight) -> [Piece.Color?]? {
         let indices = colours.indices.filter { colours[$0] != nil }
         guard indices.count >= 2 else { return nil }
@@ -253,16 +253,12 @@ enum PieceSides {
         return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
     }
 
-    /// An sRGB colour in CIE Lab, with the constants of OpenCV's
-    /// `COLOR_BGR2Lab` (its sRGB-to-XYZ matrix, D65 white (0.950456, 1,
-    /// 1.088754), threshold 216/24389, slope 7.787).
-    ///
-    /// This is the formula itself. OpenCV does not compute it for float
-    /// pixels: it interpolates in a 33 x 33 x 33 table, which is off by up to
-    /// 0.2 in L*, 0.5 in a* and 0.35 in b* over all colours (L* 0.09 too low
-    /// on average). The reference's numbers are therefore these to within
-    /// that, which is about as much as the two JPEG decoders differ on a
-    /// photo (`docs/RECOGNITION.md`).
+    /// `srgb_to_lab`: an sRGB colour in CIE Lab by the formula, with the
+    /// constants of OpenCV's `COLOR_BGR2Lab` (its sRGB-to-XYZ matrix, D65
+    /// white (0.950456, 1, 1.088754), threshold 216/24389, slope 7.787).
+    /// Not what `cv2.cvtColor` returns for float pixels: that interpolates in
+    /// a table and is off by up to half a unit, which is why the reference
+    /// computes the formula too.
     static func lab(red: UInt8, green: UInt8, blue: UInt8) -> Lab {
         let r = linear[Int(red)], g = linear[Int(green)], b = linear[Int(blue)]
         let x = (0.412453 * r + 0.357580 * g + 0.180423 * b) / 0.950456

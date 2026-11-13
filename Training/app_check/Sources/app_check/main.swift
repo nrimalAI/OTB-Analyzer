@@ -22,8 +22,8 @@
 //   --grid-fit on|off  corners from the classical grid fit where it accepts
 //                   its own result (the app's default: on).
 //   --sides-from-colour on|off  White and Black from the colours of the
-//                   pieces where they contradict the piece model (default on,
-//                   as in the app).
+//                   pieces where they contradict the piece model (default
+//                   off, as in the app).
 //   --colours FILE  score nothing: write, for each photo, what the piece model
 //                   finds, the colour of each piece and the sides the colour
 //                   step gives, for `swift_reference.py colours` to compare
@@ -51,6 +51,39 @@ func fail(_ message: String) -> Never {
 /// what `cv2.imread` returns in the Python. Photos without a tag (all of the
 /// current test sets) are loaded as they are.
 func upright(_ url: URL) -> CGImage? {
+    lazy(url).map(decoded)
+}
+
+/// The image with its pixels decoded once, into memory. An image straight
+/// from a JPEG file is decoded anew whenever it is drawn, and not always to
+/// the same bytes: after it has been drawn scaled (the letterbox), a
+/// full-size draw (the grid fit) can come back a grey level off here and
+/// there, differently from run to run, and the grid fit follows its pixels
+/// (two of 200 Y-LIChess photos went from "no board" to a board and back
+/// between identical runs). The app hands the recognizer a bitmap it has
+/// drawn itself (`normalizedUprightCGImage`), so this is also the nearer to
+/// what the app does. The pixels stay the ones stored in the file: drawn 1:1
+/// in the image's own colour space.
+func decoded(_ image: CGImage) -> CGImage {
+    let spaces = [
+        image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil },
+        CGColorSpace(name: CGColorSpace.sRGB),
+    ]
+    for case let space? in spaces {
+        guard let context = CGContext(
+            data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+            bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { continue }
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        if let copy = context.makeImage() {
+            return copy
+        }
+    }
+    return image
+}
+
+func lazy(_ url: URL) -> CGImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
     let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
     let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
@@ -76,7 +109,7 @@ var a1PriorGiven = false
 var gridPath: String?
 var gridFit = true
 var gridFitGiven = false
-var sidesFromColour = true
+var sidesFromColour = false
 var sidesFromColourGiven = false
 var coloursPath: String?
 var arguments = Array(CommandLine.arguments.dropFirst())

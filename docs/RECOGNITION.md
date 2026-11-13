@@ -20,8 +20,9 @@ and what they were measured to be worth. Training results are in
    both fail is there no board. The fit needs no training, so it works on
    boards no model has seen, where learned corners are a square or so off.
 4. Piece model: boxes with a class and a confidence.
-5. **White and Black from the colours** (`PieceSides`, port of
-   `sides_from_colour` and of `evaluate.piece_colours`): the colour of each
+5. **White and Black from the colours, switched off** (`PieceSides`, port of
+   `sides_from_colour` and of `evaluate.piece_colours`; see "What the colour
+   step is worth" for why it is off): the colour of each
    piece is the median CIE Lab of the middle of its box in the photo; the
    pieces are split in two groups by colour (2-means on L*, 4a*, 4b*) and the
    lighter group is White. A piece model that has not seen a piece set (brown
@@ -40,7 +41,7 @@ and what they were measured to be worth. Training results are in
 7. Each box's bottom centre goes through the corner homography to a square
    (`Homography`, `SquareAssignment`); one piece per square.
 
-Steps 3, 5 and 6 can be switched off
+Steps 3 and 6 can be switched off and step 5 on
 (`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:)`).
 How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
 and it is what `Training/evaluate.py --grid-corners` does.
@@ -115,27 +116,38 @@ photos by itself.
   The picture with no board among the drawn ones shows it: Python counts 23
   x-corners, Swift 25, and both find no grid.
 - `Training/swift_reference.py colour-cases` writes `Fixtures/colour_cases.json`
-  and a drawn picture (`colour_pieces.png`): 200 colours in Lab as OpenCV
-  gives them, 120 boxes with their patches (in, partly in and beside the
-  photo), 60 sets of points split in two (with ties), 74 sets of detections
-  with their colours (the model wrong about the side of none, a few, exactly
-  15%, or all of the pieces), the drawn picture's brown and black pieces that
-  a model calls all black, and the colours of 24 boxes on a fixture photo.
+  and a drawn picture (`colour_pieces.png`): 200 colours in Lab
+  (`evaluate.srgb_to_lab`), 120 boxes with their patches (in, partly in and
+  beside the photo), 60 sets of points split in two (with ties), 77 sets of
+  detections with their colours (the model wrong about the side of none, a
+  few, exactly 15%, or all of the pieces; pieces without a colour; equally
+  light groups), each with the sides by colour alone (`colour_sides`) and the
+  final classes, the drawn picture's brown and black pieces that a model
+  calls all black, and the colours of 24 boxes on a fixture photo.
   `PieceSidesTests` replays them: patches, groups and sides must be the
-  Python's exactly.
-- The colours themselves are the Python's only to within 0.2 in L*, 0.5 in a*
-  and 0.35 in b*, on the same pixels. `PieceSides.lab` is the CIE formula
-  (with OpenCV's matrix and white point); OpenCV does not compute the formula
-  for float pixels, it interpolates in a 33×33×33 table (measured over all
-  2^24 colours; L* comes out 0.09 too low on average). On the median of a
-  patch of a photo that is about as much as the two JPEG decoders add (0.09
-  against 0.04 on average, 0.15 against 0.43 at most, on the 24 patches of a
-  fixture). The two groups are usually tens of units apart, so the table was
-  not copied; a piece that lies between the two groups can fall the other
-  way (2 pieces of 23,523 on the test sets, below).
+  Python's exactly, and the colours to nine decimals where both read the same
+  pixels (the drawn picture).
+- Lab is computed by the formula on both sides, with OpenCV's matrix and
+  white point. `cv2.cvtColor` is not used: for float pixels it interpolates
+  in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
+  in a* and 0.33 in b* (all 2^24 colours), which moved two pieces of 23,523
+  between the groups before the reference changed to the formula (f93479c).
+  On a photo the colours still differ by what the two JPEG decoders differ:
+  0.01 at the median, 0.7 at most, on the medians of 23,523 patches.
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
-  lists) and prints what `evaluate.py` prints. It needs no Xcode.
+  lists) and prints what `evaluate.py` prints. It needs no Xcode. It decodes
+  each photo once into memory before recognising it, as the app does when it
+  redraws a photo upright (`normalizedUprightCGImage`). Without that its
+  scores were not repeatable: an image straight from a JPEG file is decoded
+  again each time it is drawn, and after it has been drawn scaled (the
+  letterbox) a full-size draw (the grid fit) can come back a grey level off
+  here and there, differently from run to run. Two of 200 Y-LIChess photos
+  went from "no board" to a board and back between identical runs
+  (2026-11-13). The grid fit itself gives the same answer for the same
+  pixels every time. The app passes such an undecoded image only for a photo
+  that is already upright and no larger than 3072 px; each step is then
+  still right for the pixels it gets, they are just not the same pixels.
   `--a1-prior P|off`, `--grid-fit on|off` and `--sides-from-colour on|off`
   switch the steps.
 - For any list of photos, Python against Swift:
@@ -220,7 +232,9 @@ What this says:
 
 Through `app_check` on the Mac mini, 2026-11-13, grid fit on and prior 6,
 `--sides-from-colour off` against `on`. Boards exact (in brackets: once
-turned by 180 degrees) and squares right.
+turned by 180 degrees) and squares right. **The step is off in the app**
+(`CoreMLBoardRecognizer(sidesFromColour:)` defaults to false): what follows
+is why it was written and why it is off.
 
 | Piece model | Step | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
 |---|---|---|---|---|
@@ -238,30 +252,35 @@ rendered boards, exported for this measurement only, with the corner model in
   exact. The Python gets 15 there end to end (`Training/README.md`); it reads
   clean 1280-px copies with its own grid fit, the app the photos through
   Vision.
-- It costs nothing on the boards the models know: no ChessReD test photo
-  changes with either model. That is why it is on by default.
-- With the model in `Models/` it changes a side on 38 board B photos (+1.5
-  points of squares), on 4 Fenit A photos and on no ChessReD photo.
-- Weak spot, the reference's own: there is no smallest distance between the
-  two groups, and with six pieces or fewer one disagreement is already over
-  15%. The four Fenit A photos are such positions (2, 4, 6 and 9 pieces
-  found): on one, two black pieces are split into a "white" and a black one.
-  The boards were wrong before and are as wrong after, so the totals do not
-  move, but a sparse position whose pieces the model had right could be made
-  worse.
+- On these three sets it costs nothing: no ChessReD test photo changes with
+  either model. With the model in `Models/` it changes a side on 38 board B
+  photos (+1.5 points of squares), on 4 Fenit A photos and on no ChessReD
+  photo.
+- **But its weight (4) and its share (15%) were chosen on board B, and on the
+  second held-out set, which nothing is tuned on, it loses.** The training
+  session's numbers, in Python (`main`'s corner model, grid fit, prior 6),
+  `pieces_s_render1` without and with the step, squares right: Y-LIChess game
+  positions 75.2% -> 51.9% (102 photos), Y-LIChess layouts 75.4% -> 74.3%
+  (98), ChessQ 70.6% -> 68.6% (50), samryan 79.5% -> 79.2% (500), chesscog
+  and chess-cv unchanged; boards exact unchanged everywhere. So the step is
+  off by default until the reference has a rule that holds on boards it was
+  not tuned on (the training session reworks it on the training sources).
+  Through `app_check` the app shows the same: `pieces_s_render1` on the 200
+  Y-LIChess photos 77.8% -> 65.5% of squares with the step on, ChessQ 69.7%
+  -> 68.5% (one run each, before `app_check` decoded each photo once).
+- The rule has no smallest distance between the two groups, and with six
+  pieces or fewer one disagreement is already over 15%. The four Fenit A
+  photos are such positions (2, 4, 6 and 9 pieces found): on one, two black
+  pieces are split into a "white" and a black one. Asking for two
+  disagreeing pieces was tried in the Python and is no better (board B has
+  many sparse endgames where the one brown king is what needs correcting).
 - On the same boxes the Swift and the Python agree on the side of every
-  piece with the model in `Models/`: 11,749 pieces on the 692 photos of the
-  three sets, the step changing a side on the same photos in both (38, 4, 0).
-  On `pieces_s_render1`'s boxes they agree on 11,772 of 11,774: one board B
-  photo with four near-black pieces and one Fenit A photo each have a piece
-  about as far from one group as from the other (54.3 against 55.6 on the
-  second), and it falls the other way; on board B that changes the class of
-  one piece. Both are OpenCV's Lab table: with the formula on OpenCV's own
-  pixels the Python gives the Swift's groups. The JPEG decoders changed no
-  side on any of the 1,384 readings.
-- Cost: 0.07 s a photo with 32 pieces in a release build, about 1 s in a
-  debug build; like the grid fit it reads the photo's pixels once more (the
-  rectangle that holds all the pieces).
+  piece: 23,523 pieces on the 692 photos of the three sets, found by the
+  model in `Models/` (11,749) and by `pieces_s_render1` (11,774), the step
+  changing a side on the same photos in both (38, 4, 0 and 61, 1, 0).
+- Cost when on: 0.07 s a photo with 32 pieces in a release build, about 1 s
+  in a debug build; like the grid fit it reads the photo's pixels once more
+  (the rectangle that holds all the pieces).
 
 ## Known weak spot: endgames that point the wrong way
 
