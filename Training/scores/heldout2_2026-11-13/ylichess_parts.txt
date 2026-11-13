@@ -1,0 +1,115 @@
+== wood180: piece model + labelled corners
+boards evaluated:        102
+corner detection failed: 0
+per-square accuracy:     70.0980%
+full-board exact match:  0.00%  (95% interval 0%-4% on 102 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-4%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  p -> ·: 343
+  p -> P: 220
+  P -> B: 178
+  r -> ·: 126
+  b -> ·: 107
+  n -> ·: 103
+  P -> ·: 94
+  P -> N: 71
+  q -> ·: 67
+  R -> Q: 57
+  k -> ·: 42
+  r -> P: 37
+  · -> p: 30
+  Q -> B: 23
+  Q -> K: 23
+== wood180: exp3 corners + labelled boxes
+boards evaluated:        102
+corner detection failed: 0
+per-square accuracy:     99.6477%
+full-board exact match:  97.06%  (95% interval 92%-99% on 102 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 97.06%  (92%-99%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  P -> ·: 5
+  · -> P: 3
+  · -> p: 2
+  K -> P: 1
+  R -> ·: 1
+  N -> ·: 1
+  · -> R: 1
+  · -> N: 1
+  r -> ·: 1
+  n -> P: 1
+  k -> r: 1
+  P -> n: 1
+  · -> k: 1
+  p -> ·: 1
+  B -> P: 1
+== wood180: labelled boxes + labelled corners
+boards evaluated:        102
+corner detection failed: 0
+per-square accuracy:     100.0000%
+full-board exact match:  100.00%  (95% interval 96%-100% on 102 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 100.00%  (96%-100%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+== wood180-layout: piece model + labelled corners
+boards evaluated:        98
+corner detection failed: 0
+per-square accuracy:     91.5019%
+full-board exact match:  1.02%  (95% interval 0%-6% on 98 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 1.02%  (0%-6%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  p -> ·: 52
+  P -> B: 44
+  · -> p: 35
+  r -> ·: 33
+  b -> ·: 30
+  p -> P: 29
+  k -> ·: 29
+  n -> ·: 28
+  q -> ·: 20
+  P -> N: 18
+  R -> Q: 14
+  R -> ·: 11
+  P -> ·: 10
+  Q -> B: 10
+  Q -> K: 8
+== wood180-layout: exp3 corners + labelled boxes
+boards evaluated:        98
+corner detection failed: 0
+per-square accuracy:     90.3699%
+full-board exact match:  31.63%  (95% interval 23%-41% on 98 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 44.90%  (35%-55%)
+180-degree flip suspects: 14
+
+top confusions (truth -> predicted):
+  p -> ·: 41
+  · -> p: 41
+  · -> P: 39
+  P -> ·: 39
+  K -> ·: 33
+  · -> K: 29
+  k -> ·: 29
+  · -> k: 27
+  b -> ·: 22
+  · -> b: 18
+  B -> ·: 17
+  Q -> ·: 17
+  · -> n: 15
+  n -> ·: 15
+  · -> B: 15
+== wood180-layout: labelled boxes + labelled corners
+boards evaluated:        98
+corner detection failed: 0
+per-square accuracy:     100.0000%
+full-board exact match:  100.00%  (95% interval 96%-100% on 98 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 100.00%  (96%-100%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+== done

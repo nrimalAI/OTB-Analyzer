@@ -1,0 +1,145 @@
+== chessq
+boards evaluated:        50
+corner detection failed: 0
+per-square accuracy:     74.5000%
+full-board exact match:  0.00%  (95% interval 0%-7% on 50 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-7%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  p -> ·: 131
+  P -> ·: 103
+  · -> p: 47
+  · -> P: 43
+  r -> ·: 32
+  k -> ·: 29
+  · -> r: 27
+  K -> ·: 23
+  B -> ·: 22
+  q -> ·: 21
+  n -> ·: 20
+  b -> ·: 19
+  R -> ·: 19
+  · -> B: 18
+  Q -> ·: 18
+== ylichess --group wood180
+boards evaluated:        102
+corner detection failed: 0
+per-square accuracy:     69.9295%
+full-board exact match:  0.00%  (95% interval 0%-4% on 102 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-4%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  p -> ·: 344
+  p -> P: 216
+  P -> B: 175
+  r -> ·: 130
+  n -> ·: 108
+  b -> ·: 107
+  P -> ·: 99
+  P -> N: 71
+  q -> ·: 68
+  R -> Q: 56
+  k -> ·: 43
+  r -> P: 37
+  · -> p: 27
+  Q -> B: 23
+  Q -> K: 23
+== ylichess --group wood180-layout
+boards evaluated:        98
+corner detection failed: 0
+per-square accuracy:     87.8348%
+full-board exact match:  1.02%  (95% interval 0%-6% on 98 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 1.02%  (0%-6%)
+180-degree flip suspects: 6
+
+top confusions (truth -> predicted):
+  p -> ·: 71
+  P -> ·: 56
+  · -> B: 42
+  · -> P: 41
+  k -> ·: 40
+  K -> ·: 37
+  r -> ·: 36
+  · -> p: 35
+  b -> ·: 33
+  n -> ·: 31
+  · -> K: 28
+  R -> ·: 26
+  P -> B: 23
+  q -> ·: 22
+  · -> N: 21
+== chesscog_real
+boards evaluated:        29
+corner detection failed: 0
+per-square accuracy:     78.3405%
+full-board exact match:  0.00%  (95% interval 0%-12% on 29 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-12%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  p -> ·: 71
+  P -> B: 58
+  p -> r: 32
+  r -> ·: 26
+  R -> ·: 25
+  P -> ·: 23
+  P -> N: 22
+  p -> b: 17
+  p -> n: 17
+  Q -> K: 13
+  P -> R: 11
+  b -> n: 11
+  k -> ·: 8
+  n -> ·: 7
+  n -> q: 7
+== samryan
+boards evaluated:        500
+corner detection failed: 0
+per-square accuracy:     68.3688%
+full-board exact match:  0.00%  (95% interval 0%-1% on 500 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-1%)
+180-degree flip suspects: 1
+
+top confusions (truth -> predicted):
+  · -> n: 2565
+  P -> ·: 1036
+  p -> ·: 411
+  p -> n: 394
+  · -> p: 339
+  P -> r: 302
+  R -> ·: 293
+  · -> q: 275
+  K -> ·: 265
+  · -> r: 254
+  b -> p: 233
+  N -> ·: 213
+  B -> ·: 206
+  P -> n: 206
+  b -> ·: 154
+== chesscv_games
+boards evaluated:        840
+corner detection failed: 0
+per-square accuracy:     85.4390%
+full-board exact match:  0.00%  (95% interval 0%-0% on 840 boards)
+exact, or exact once turned 180 degrees (one tap in the app): 0.00%  (0%-0%)
+180-degree flip suspects: 0
+
+top confusions (truth -> predicted):
+  n -> r: 989
+  p -> ·: 592
+  k -> r: 553
+  b -> n: 541
+  N -> R: 519
+  q -> r: 500
+  r -> ·: 400
+  b -> p: 381
+  p -> r: 313
+  p -> P: 290
+  B -> N: 282
+  B -> P: 165
+  K -> B: 154
+  r -> p: 141
+  b -> ·: 138
+== done

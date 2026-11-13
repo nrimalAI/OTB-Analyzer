@@ -5,3 +5,4 @@ opencv-python
 pyyaml
 tqdm
 pillow
+chess  # python-chess: replays the PGN files of the chesscv_games test source
