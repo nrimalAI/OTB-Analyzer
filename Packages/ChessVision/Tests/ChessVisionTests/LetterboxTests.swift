@@ -1,78 +1,78 @@
 import CoreGraphics
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessVision
 
-final class LetterboxTests: XCTestCase {
+struct LetterboxTests {
 
-    func testPortraitPhotoIsCentredWithSideBars() {
+    @Test func testPortraitPhotoIsCentredWithSideBars() {
         let box = Letterbox(imageSize: CGSize(width: 3000, height: 4000))
-        XCTAssertEqual(box.content.minX, 0.125, accuracy: 1e-9)
-        XCTAssertEqual(box.content.width, 0.75, accuracy: 1e-9)
-        XCTAssertEqual(box.content.minY, 0, accuracy: 1e-9)
-        XCTAssertEqual(box.content.height, 1, accuracy: 1e-9)
-        XCTAssertFalse(box.isIdentity)
+        #expect(abs(box.content.minX - 0.125) <= 1e-9)
+        #expect(abs(box.content.width - 0.75) <= 1e-9)
+        #expect(abs(box.content.minY - 0) <= 1e-9)
+        #expect(abs(box.content.height - 1) <= 1e-9)
+        #expect(!box.isIdentity)
     }
 
-    func testPointsMapBackToImagePixels() {
+    @Test func testPointsMapBackToImagePixels() {
         let box = Letterbox(imageSize: CGSize(width: 3000, height: 4000))
         // Corners of the content area are the corners of the photo.
         let topLeft = box.imagePoint(fromSquare: CGPoint(x: 0.125, y: 0))
-        XCTAssertEqual(topLeft.x, 0, accuracy: 1e-6)
-        XCTAssertEqual(topLeft.y, 0, accuracy: 1e-6)
+        #expect(abs(topLeft.x - 0) <= 1e-6)
+        #expect(abs(topLeft.y - 0) <= 1e-6)
         let bottomRight = box.imagePoint(fromSquare: CGPoint(x: 0.875, y: 1))
-        XCTAssertEqual(bottomRight.x, 3000, accuracy: 1e-6)
-        XCTAssertEqual(bottomRight.y, 4000, accuracy: 1e-6)
+        #expect(abs(bottomRight.x - 3000) <= 1e-6)
+        #expect(abs(bottomRight.y - 4000) <= 1e-6)
         // The centre stays the centre.
         let centre = box.imagePoint(fromSquare: CGPoint(x: 0.5, y: 0.5))
-        XCTAssertEqual(centre.x, 1500, accuracy: 1e-6)
-        XCTAssertEqual(centre.y, 2000, accuracy: 1e-6)
+        #expect(abs(centre.x - 1500) <= 1e-6)
+        #expect(abs(centre.y - 2000) <= 1e-6)
     }
 
-    func testRectsKeepTheirShape() {
+    @Test func testRectsKeepTheirShape() {
         // A box that is square in the letterboxed input is square in the photo:
         // that is the whole point of not stretching.
         let box = Letterbox(imageSize: CGSize(width: 3000, height: 4000))
         let rect = box.imageRect(fromSquare: CGRect(x: 0.4, y: 0.4, width: 0.1, height: 0.1))
-        XCTAssertEqual(rect.width, rect.height, accuracy: 1e-6)
-        XCTAssertEqual(rect.width, 400, accuracy: 1e-6)
-        XCTAssertEqual(rect.minX, 1100, accuracy: 1e-6)
-        XCTAssertEqual(rect.minY, 1600, accuracy: 1e-6)
+        #expect(abs(rect.width - rect.height) <= 1e-6)
+        #expect(abs(rect.width - 400) <= 1e-6)
+        #expect(abs(rect.minX - 1100) <= 1e-6)
+        #expect(abs(rect.minY - 1600) <= 1e-6)
     }
 
-    func testSquareImageIsLeftAlone() throws {
+    @Test func testSquareImageIsLeftAlone() throws {
         let box = Letterbox(imageSize: CGSize(width: 64, height: 64))
-        XCTAssertTrue(box.isIdentity)
-        let image = try XCTUnwrap(Self.solid(width: 64, height: 64, red: 255, green: 0, blue: 0))
-        XCTAssertTrue(box.render(image) === image)
+        #expect(box.isIdentity)
+        let image = try #require(Self.solid(width: 64, height: 64, red: 255, green: 0, blue: 0))
+        #expect(box.render(image) === image)
     }
 
-    func testRenderPadsWithGreyAndKeepsThePhotoInTheMiddle() throws {
+    @Test func testRenderPadsWithGreyAndKeepsThePhotoInTheMiddle() throws {
         // A red 300×400 photo → 400×400 square: grey bars 50 px wide left and
         // right, red in between.
-        let image = try XCTUnwrap(Self.solid(width: 300, height: 400, red: 255, green: 0, blue: 0))
+        let image = try #require(Self.solid(width: 300, height: 400, red: 255, green: 0, blue: 0))
         let box = Letterbox(imageSize: CGSize(width: 300, height: 400))
-        let square = try XCTUnwrap(box.render(image))
-        XCTAssertEqual(square.width, 400)
-        XCTAssertEqual(square.height, 400)
+        let square = try #require(box.render(image))
+        #expect(square.width == 400)
+        #expect(square.height == 400)
 
-        let bar = try XCTUnwrap(Self.pixel(of: square, x: 20, y: 200))
-        XCTAssertEqual(bar.red, 114, accuracy: 2)
-        XCTAssertEqual(bar.green, 114, accuracy: 2)
-        XCTAssertEqual(bar.blue, 114, accuracy: 2)
-        let middle = try XCTUnwrap(Self.pixel(of: square, x: 200, y: 200))
-        XCTAssertEqual(middle.red, 255, accuracy: 2)
-        XCTAssertEqual(middle.green, 0, accuracy: 2)
-        let insideEdge = try XCTUnwrap(Self.pixel(of: square, x: 60, y: 10))
-        XCTAssertEqual(insideEdge.red, 255, accuracy: 2)
+        let bar = try #require(Self.pixel(of: square, x: 20, y: 200))
+        #expect(abs(bar.red - 114) <= 2)
+        #expect(abs(bar.green - 114) <= 2)
+        #expect(abs(bar.blue - 114) <= 2)
+        let middle = try #require(Self.pixel(of: square, x: 200, y: 200))
+        #expect(abs(middle.red - 255) <= 2)
+        #expect(abs(middle.green - 0) <= 2)
+        let insideEdge = try #require(Self.pixel(of: square, x: 60, y: 10))
+        #expect(abs(insideEdge.red - 255) <= 2)
     }
 
-    func testRenderCapsTheSide() throws {
-        let image = try XCTUnwrap(Self.solid(width: 1500, height: 2000, red: 0, green: 0, blue: 255))
-        let square = try XCTUnwrap(
-            Letterbox(imageSize: CGSize(width: 1500, height: 2000)).render(image, maxSide: 640))
-        XCTAssertEqual(square.width, 640)
-        XCTAssertEqual(square.height, 640)
+    @Test func testRenderCapsTheSide() throws {
+        let image = try #require(Self.solid(width: 1500, height: 2000, red: 0, green: 0, blue: 255))
+        let square = try #require(Letterbox(imageSize: CGSize(width: 1500, height: 2000)).render(image, maxSide: 640))
+        #expect(square.width == 640)
+        #expect(square.height == 640)
     }
 
     // MARK: - Helpers

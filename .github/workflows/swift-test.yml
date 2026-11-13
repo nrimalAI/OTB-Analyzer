@@ -1,8 +1,8 @@
 # Runs the ChessVision package's tests, including the end-to-end fixtures
 # against the models in Models/, on a GitHub-hosted Mac. The repo is public,
 # so this costs nothing. It is the check a pull request must pass before it
-# is merged (CLAUDE.md), and exists because the Mac mini cannot run XCTest
-# while Xcode's licence is unaccepted there.
+# is merged (CLAUDE.md). The same tests run on the Mac mini without Xcode
+# through ./Scripts/swift-test.sh.
 name: swift test
 
 on:
@@ -22,13 +22,16 @@ jobs:
   chessvision:
     runs-on: macos-15
     timeout-minutes: 30
+    defaults:
+      run:
+        # bash with pipefail, so that a failing `swift test | tee` fails the step.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: swift --version
       - name: swift test (Packages/ChessVision)
-        working-directory: Packages/ChessVision
-        run: swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+        run: ./Scripts/swift-test.sh 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
       - name: Fixture scores
         if: always()
-        run: grep -E "^fixture|Executed|error:" "$RUNNER_TEMP/swift-test.log" || true
+        run: grep -E "^fixture|^portrait|^grid|✘|Test run|error:" "$RUNNER_TEMP/swift-test.log" || true
