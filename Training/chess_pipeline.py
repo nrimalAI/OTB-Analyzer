@@ -8,10 +8,14 @@ The recognition pipeline:
   4. conflict resolution: one piece per square, highest confidence wins;
      the loser is demoted to its next-nearest square if empty, else dropped.
 
-Two optional steps around it (evaluate.py options of the same names):
-  - sides_from_colour: White and Black from the colours of the pieces in the
-    photo, where the model's own answer does not fit them (before step 3);
-  - orient_by_pieces: which corner is a1, from where the pieces stand.
+Optional steps around it:
+  - sides_from_colour (evaluate.py --sides-from-colour): White and Black from
+    the colours of the pieces in the photo, where the model's own answer does
+    not fit them (before step 3). OFF by default everywhere: it was fitted
+    to one board and loses on boards nobody tuned on (see its docstring);
+  - orient_by_pieces (--a1-from-pieces): which corner is a1, from where the
+    pieces stand;
+  - board_crop (--crop-board): the piece model looks at the board only.
 
 The Swift port in ChessVision (Phase 2) must match this file's behavior;
 evaluate.py is the executable spec.
@@ -259,9 +263,16 @@ def sides_from_colour(detections, colours, chroma=CHROMA_WEIGHT,
     piece takes its group's side. A piece keeps its kind and confidence
     either way.
 
-    On a board with six pieces or fewer one piece alone is over 15%. Asking
-    for two was tried (2026-11-13) and is no better: board B has many sparse
-    endgames where the one brown king is exactly what needs correcting."""
+    NOT TO BE SWITCHED ON AS IT IS. The colour weight and the 15% were
+    chosen on Fenit board B (brown "white" pieces), where the step turns 1
+    fully right board into 17 of 98. On the second test set, which nobody
+    tunes on, it gains nothing and the Y-LIChess game positions fall from
+    75% to 52% of squares (Training/README.md, "Second held-out test set").
+    By colour alone every piece of a photo gets the right side on only 85%
+    of the training photos, so this split cannot overrule a model. There is
+    also no smallest distance between the two groups: four white pieces and
+    a model that is right come out two and two. Kept because the app has a
+    port of it (off by default) and a better rule would start from here."""
     sides = colour_sides(colours, chroma)
     if sides is None:
         return list(detections)

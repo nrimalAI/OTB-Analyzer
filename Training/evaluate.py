@@ -178,6 +178,22 @@ def stretched(src, side=640):
     return cv2.resize(img, (side, side), interpolation=cv2.INTER_AREA), w / side, h / side
 
 
+def shrunk(src, max_side):
+    """The photo no longer than max_side on its long side, shrunk with
+    smoothing (INTER_AREA), and the factors that take model coordinates back
+    to photo pixels. What the merged datasets' copies are, made on the fly
+    for folders that have none; a photo already that small is returned as it
+    is."""
+    import cv2
+    img = cv2.imread(str(src))
+    h, w = img.shape[:2]
+    s = max(h, w) / max_side
+    if s <= 1:
+        return img, 1.0, 1.0
+    small = cv2.resize(img, (round(w / s), round(h / s)), interpolation=cv2.INTER_AREA)
+    return small, w / small.shape[1], h / small.shape[0]
+
+
 def chessred_items(args):
     """(image, true board, annotated corners or None) for a ChessReD split."""
     data = json.loads(Path(args.annotations).read_text())
@@ -244,7 +260,8 @@ def merged_labels(row, src):
 
 def position_items(args):
     """The same tuples from a positions.json written by build_dataset.py. The
-    photo scored is the original one, not a resized training copy."""
+    photo scored is the original one, or with --copies the dataset's resized
+    copy of it."""
     for row in json.loads(Path(args.positions).read_text()):
         if args.split != "all" and row["split"] != args.split:
             continue
@@ -252,7 +269,16 @@ def position_items(args):
             continue
         if args.group and row.get("group") != args.group:
             continue
-        src = Path(row["image"] if args.copies else row.get("original") or row["image"])
+        if args.copies:
+            src = Path(row["image"])
+            original = row.get("original")
+            if original and src.resolve() == Path(original).resolve():
+                raise SystemExit(
+                    f"--copies: {args.positions} has no copies ({src.name} is the "
+                    "original photo: the folder was merged without --max-side). "
+                    "Use --max-side 1280 instead.")
+        else:
+            src = Path(row.get("original") or row["image"])
         corners, boxes = (merged_labels(row, src) if args.gt_corners or args.gt_boxes
                           else (None, None))
         yield src, fen_placement_to_board(row["placement"]), corners, boxes
@@ -324,6 +350,10 @@ def main():
                          "without smoothing, which a model trained on the copies reads "
                          "badly and the app does not do (it draws the photo into at most "
                          "1280 px first): the copies are the fairer test of such a model")
+    ap.add_argument("--max-side", type=int, default=0, metavar="PX",
+                    help="shrink each photo, with smoothing, to at most PX on its long "
+                         "side before the models see it (1280: what --copies gives, for "
+                         "folders that have no copies, e.g. datasets/heldout2)")
     ap.add_argument("--device", default=None,
                     help="where the models run, e.g. cpu, so as not to take GPU "
                          "memory from a training job (default: ultralytics picks)")
@@ -353,6 +383,10 @@ def main():
         ap.error("--stretch and --two-pass cannot be combined")
     if args.stretch and args.crop_board:
         ap.error("--stretch and --crop-board cannot be combined")
+    if args.max_side and (args.stretch or args.two_pass):
+        ap.error("--max-side cannot be combined with --stretch or --two-pass")
+    if args.copies and not args.positions:
+        ap.error("--copies needs --positions")
     if not args.gt_corners and not args.corners_model:
         ap.error("give --corners-model or --gt-corners")
     if not args.gt_boxes and not args.pieces_model:
@@ -379,7 +413,13 @@ def main():
         if (args.gt_corners and not gt_kpts) or (args.gt_boxes and not gt_boxes):
             unlabelled += 1
             continue
-        photo, sx, sy = stretched(src) if args.stretch else (src, 1.0, 1.0)
+        if args.stretch:
+            photo, sx, sy = stretched(src)
+        elif args.max_side:
+            photo, sx, sy = shrunk(src, args.max_side)
+        else:
+            photo, sx, sy = src, 1.0, 1.0
+        as_array = args.stretch or bool(args.max_side)
         # 1. corners
         if args.gt_corners:
             kpts = gt_kpts
@@ -420,14 +460,16 @@ def main():
         if args.gt_boxes:
             detections = gt_boxes
         else:
-            piece_input, dx, dy = (photo if args.stretch else str(src)), 0.0, 0.0
+            piece_input, dx, dy = (photo if as_array else str(src)), 0.0, 0.0
             if args.crop_board:
                 # The piece model sees only the board (chess_pipeline.board_crop).
                 import cv2
-                whole = cv2.imread(str(src))
-                rect = board_crop(kpts, whole.shape[1], whole.shape[0])
+                whole = photo if as_array else cv2.imread(str(src))
+                rect = board_crop([[x / sx, y / sy] for x, y in kpts],
+                                  whole.shape[1], whole.shape[0])
                 if rect is not None:
-                    piece_input, dx, dy = whole[rect[1]:rect[3], rect[0]:rect[2]], rect[0], rect[1]
+                    piece_input = whole[rect[1]:rect[3], rect[0]:rect[2]]
+                    dx, dy = rect[0] * sx, rect[1] * sy
             pr = piece_model(piece_input, conf=args.conf,
                              verbose=False, device=args.device)[0]
             if pr.boxes is not None:

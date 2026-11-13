@@ -306,17 +306,21 @@ GPU and slows it a little.
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | queued |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
-**In `Models/` now (2026-11-13, evening):** the old corner model (yolo11n,
-ChessReD only) and the piece model `pieces_s_render1` (yolo11s, FP16; weights
-`baseline/pieces_yolo11s_render1.pt`; the INT8 export is half the size and
-reads one ChessReD board fewer). Through `app_check` with the app's defaults
-and the colour step off, against the baseline piece weights: ChessReD test
-286 against 280 of 306 boards exact; Fenit board B 82.5% against 82.3% of
-squares, 1 against 0 exact; Fenit A 184 against 15 of 286; on the second
-test set (in Python) 84.0% against 74.3% of squares and 18 against 2 of
-1,619 boards exact. The piece model that a new one has to beat is this one.
+**A candidate that is not in `Models/`: the piece model `pieces_s_render1`**
+(branch `model/pieces-render1`, commit 773e729, has it as
+`Models/Pieces.mlpackage` with its weights; exports in `runs/export_render1/`).
+It was put in and taken out again on 2026-11-13 because it does not meet
+the rule for replacing a model: on board B it changes nothing (through
+`app_check`, colour step off: 82.5% against 82.3% of squares, 1 against 0
+boards exact; photo by photo more squares right on 44 photos and fewer on
+31), and on ChessReD test it is not shown better (286 against 280 boards
+exact: 14 gained, 8 lost). What speaks for it is the second test set, where
+it reads clearly more squares on five of six parts (table there); whether
+that is enough is the owner's call (the notes, "Needs the owner"). Fenit A,
+184 against 15 of 286 boards exact, is no evidence: it trained on those
+photos.
 
-**In `Models/` from midday to evening of 2026-11-13:** `main`'s corner model again, and
+**In `Models/` now (2026-11-13, since midday):** `main`'s corner model again, and
 the baseline piece weights exported with NMS across classes. exp3's corners
 were taken back out: with the app-side steps (a1 from the pieces, grid-fit
 corners) they still turn three endgame photos of ChessReD game G033 by 180
