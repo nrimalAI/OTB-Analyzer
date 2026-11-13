@@ -1,0 +1,34 @@
+# Runs the ChessVision package's tests, including the end-to-end fixtures
+# against the models in Models/, on a GitHub-hosted Mac. The repo is public,
+# so this costs nothing. It is the check a pull request must pass before it
+# is merged (CLAUDE.md), and exists because the Mac mini cannot run XCTest
+# while Xcode's licence is unaccepted there.
+name: swift test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: swift-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  chessvision:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: swift test (Packages/ChessVision)
+        working-directory: Packages/ChessVision
+        run: swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+      - name: Fixture scores
+        if: always()
+        run: grep -E "^fixture|Executed|error:" "$RUNNER_TEMP/swift-test.log" || true

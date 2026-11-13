@@ -52,7 +52,23 @@ def ground_truth_board(piece_anns, categories):
     return board
 
 
-def detect_corners(model, src, imgsz=640, two_pass=False):
+def placement_of(board):
+    """{(file, rank): fen_letter} -> FEN placement field."""
+    rows = []
+    for rank in range(7, -1, -1):
+        row, empty = "", 0
+        for file in range(8):
+            letter = board.get((file, rank))
+            if letter is None:
+                empty += 1
+                continue
+            row += (str(empty) if empty else "") + letter
+            empty = 0
+        rows.append(row + (str(empty) if empty else ""))
+    return "/".join(rows)
+
+
+def detect_corners(model, src, imgsz=640, two_pass=False, device=None):
     """Predicted (a1, a8, h8, h1) image points, or None.
 
     With `two_pass`, re-runs the model on a crop around the first-pass board —
@@ -62,7 +78,7 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
     import cv2
 
     def run(img):
-        r = model(img, imgsz=imgsz, verbose=False)[0]
+        r = model(img, imgsz=imgsz, verbose=False, device=device)[0]
         if r.keypoints is None or len(r.keypoints) == 0:
             return None
         best = int(r.boxes.conf.argmax()) if r.boxes is not None and len(r.boxes) else 0
@@ -248,8 +264,27 @@ def main():
     ap.add_argument("--stretch", action="store_true",
                     help="feed the models the photo stretched to 640x640, as the app "
                          "does (.scaleFill), instead of letterboxed")
+    ap.add_argument("--device", default=None,
+                    help="where the models run, e.g. cpu, so as not to take GPU "
+                         "memory from a training job (default: ultralytics picks)")
+    ap.add_argument("--dump-list", metavar="FILE",
+                    help="run no model: write the chosen photos and their true "
+                         "placements as JSON, the list app_check (the app's own "
+                         "recognizer, see app_check/) takes")
     args = ap.parse_args()
 
+    if args.dump_list:
+        if args.positions:
+            items = position_items(args)
+        elif args.annotations and args.images:
+            items = chessred_items(args)
+        else:
+            ap.error("give --annotations and --images, or --positions")
+        photos = {str(Path(src).resolve()): placement_of(gt)
+                  for src, gt, _, _ in items}
+        Path(args.dump_list).write_text(json.dumps(photos, indent=0, sort_keys=True))
+        print(f"{len(photos)} photos written to {args.dump_list}")
+        return
     if args.stretch and args.two_pass:
         ap.error("--stretch and --two-pass cannot be combined")
     if not args.gt_corners and not args.corners_model:
@@ -284,7 +319,8 @@ def main():
             kpts = gt_kpts
         else:
             kpts = detect_corners(
-                corner_model, photo, imgsz=args.corner_imgsz, two_pass=args.two_pass)
+                corner_model, photo, imgsz=args.corner_imgsz, two_pass=args.two_pass,
+                device=args.device)
             if kpts is not None:
                 kpts = [[x * sx, y * sy] for x, y in kpts]
         if kpts is None:
@@ -312,7 +348,7 @@ def main():
             detections = gt_boxes
         else:
             pr = piece_model(photo if args.stretch else str(src), conf=args.conf,
-                             verbose=False)[0]
+                             verbose=False, device=args.device)[0]
             if pr.boxes is not None:
                 for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
                                           pr.boxes.conf.tolist()):
