@@ -22,11 +22,32 @@ cd "$(dirname "$0")" || exit 1
 mkdir -p runs
 log() { echo "$(date '+%F %T') $*" >> runs/queue.log; }
 
-if [ -f runs/queue.pid ] && kill -0 "$(cat runs/queue.pid)" 2>/dev/null \
-   && ps -p "$(cat runs/queue.pid)" -o command= | grep -q "queue.sh"; then
-  exit 0
+# One copy at a time. mkdir either makes the lock or fails, so two copies
+# started together cannot both pass; a lock left by a copy that died (a power
+# cut) is taken over.
+if ! mkdir runs/queue.lock 2>/dev/null; then
+  other="$(cat runs/queue.lock/pid 2>/dev/null)"
+  if [ -n "$other" ] && kill -0 "$other" 2>/dev/null \
+     && ps -p "$other" -o command= | grep -q "queue.sh"; then
+    exit 0
+  fi
 fi
-echo $$ > runs/queue.pid
+echo $$ > runs/queue.lock/pid
+trap 'rm -rf runs/queue.lock' EXIT
+
+# Take a line out of queue.txt (the first exact match only). The line is
+# passed through the environment: awk -v would read backslashes as escapes.
+drop_line() {
+  l="$1" awk 'done || $0 != ENVIRON["l"] { print; next } { done = 1 }' runs/queue.txt > runs/queue.tmp \
+    && mv runs/queue.tmp runs/queue.txt
+}
+
+# Training processes, ours or anyone's (two at once only slow each other).
+# The patterns are those of real command lines, so that a shell which merely
+# mentions a run does not hold the queue up.
+training() {
+  pgrep -f "[pP]ython -u train\.py (corners|pieces) |[pP]ython -u -c import sys; from ultralytics" >/dev/null
+}
 
 # The state of a run, from its last.pt.  resume: a checkpoint to continue
 # from;  done: it finished (the final checkpoint carries no optimizer);
@@ -40,16 +61,17 @@ EOF
 }
 
 while true; do
-  while pgrep -f "train.py (corners|pieces)|queue-resume" >/dev/null; do sleep 30; done
+  while training; do sleep 30; done
   if [ -s runs/queue.current ]; then
     line="$(cat runs/queue.current)"
     cut_off=1
+    # If the cut came between writing queue.current and dropping the line.
+    [ -f runs/queue.txt ] && grep -qxF -- "$line" runs/queue.txt && drop_line "$line"
   else
-    line="$(grep -v -E '^\s*(#|$)' runs/queue.txt 2>/dev/null | head -n 1)"
-    [ -z "$line" ] && { log "queue empty, stopping"; rm -f runs/queue.pid; exit 0; }
-    # Drop that line from the file (first exact match only).
-    awk -v l="$line" 'done || $0 != l { print; next } { done = 1 }' runs/queue.txt > runs/queue.tmp && mv runs/queue.tmp runs/queue.txt
+    line="$(grep -v -E '^[[:space:]]*(#|$)' runs/queue.txt 2>/dev/null | head -n 1)"
+    [ -z "$line" ] && { log "queue empty, stopping"; exit 0; }
     echo "$line" > runs/queue.current
+    drop_line "$line"
     cut_off=0
   fi
   name="${line%% *}"; args="${line#* }"
@@ -62,13 +84,19 @@ while true; do
     rc=0
   elif [ "$state" = resume ]; then
     log "continue $name from $dir/weights/last.pt"
-    # "queue-resume" in the command line is what the wait above looks for.
-    caffeinate -i ./venv/bin/python -u -c 'import sys; from ultralytics import YOLO; YOLO(sys.argv[1]).train(resume=True)  # queue-resume' \
-      "$dir/weights/last.pt" >> "runs/$name.log" 2>&1
+    # The arguments after the checkpoint are not read: they put the run's
+    # name on the command line, so pkill -f "name <run name>" finds it.
+    caffeinate -i ./venv/bin/python -u -c 'import sys; from ultralytics import YOLO; YOLO(sys.argv[1]).train(resume=True)' \
+      "$dir/weights/last.pt" --name "$name" >> "runs/$name.log" 2>&1
     rc=$?
+  elif [ "$cut_off" = 0 ] && [ -d "$dir" ]; then
+    # A run of that name already exists (and later lines may use its
+    # weights): do not touch it.
+    log "$name: $dir exists already, not started; give the run another name"
+    rc=1
   else
-    # A folder left by a run that never wrote a usable checkpoint would make
-    # ultralytics pick another name; keep it out of the way.
+    # The folder of a cut-off run that never wrote a usable checkpoint would
+    # make ultralytics pick another name; keep it out of the way.
     [ -d "$dir" ] && mv "$dir" "$dir.cut-$(date +%s)"
     log "start $name: $args"
     # shellcheck disable=SC2086

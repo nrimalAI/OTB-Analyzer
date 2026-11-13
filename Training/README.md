@@ -150,7 +150,7 @@ scores the original photos.
 - `datasets/merged/manifest.json` records what went in and what was skipped.
 
 `evaluate.py` on ChessReD's test split is unchanged, so those numbers stay
-comparable (baseline: 97.9% per-square, 73.2% boards exact). To score whole
+comparable (baseline: 97.9% per-square, 73.5% boards exact). To score whole
 boards on the held-out Fenit photos — board B, a board the models have not
 seen — use the `positions.json` the merge writes:
 
@@ -219,15 +219,16 @@ choosing. Copy the winners to `Models/BoardCorners.mlpackage` and
 Export settings, fixed in the script because the Swift code depends on them:
 both `format="coreml", imgsz=640`; corners `nms=False` (one raw output
 `[1, 17, 8400]`: box 4, score 1, 4 keypoints x 3, in 640-px input pixels);
-pieces `nms=True, iou=0.7` (a Vision object-detection pipeline with labels
-like `white_pawn`). Checked 2026-11 with torch 2.8.0 / coremltools 9.0 by
+pieces `nms=True, iou=0.7, agnostic_nms=True` (a Vision object-detection
+pipeline with labels like `white_pawn`; NMS across classes since 2026-11-13,
+`--pieces-nms-per-class` gives the earlier export). Checked 2026-11 with torch 2.8.0 / coremltools 9.0 by
 re-exporting `baseline/*.pt`: same inputs and outputs as the models in
 `Models/`, and 97.9% / 74.2% on ChessReD test for FP16 (INT8: 97.8% / 74.2%).
 
-The app scales the photo to 640x640 with Vision's `.scaleFill`, which
-stretches a 3:4 phone photo; `evaluate.py` letterboxes it instead. ChessReD
-photos are square, so the two agreed until now. With non-square training
-photos they no longer do: measure both before shipping a model.
+The app letterboxes the photo into 640x640 (grey 114, centred; `Letterbox.swift`,
+since PR #3), as `evaluate.py` and Ultralytics do. Before that it stretched a
+3:4 phone photo with Vision's `.scaleFill`; `evaluate.py --stretch` reproduces
+that for comparison.
 
 > **License note:** Ultralytics YOLO is AGPL-3. Fine for this GPL-3 app; a
 > proprietary fork would need a different detector (see docs/PLAN.md).
@@ -241,15 +242,18 @@ Written so that a new session can continue from this file and
 torch 2.8.0, ultralytics 8.4.211, coremltools 9.0. Everything on disk is under
 `Training/datasets/` (git-ignored): the four sources, `_resized/1280/` (the
 cache of small training copies), `_dropped/` (a Roboflow project taken out),
-and three merged sets, all built with `--max-side 1280`:
+and the merged sets, all built with `--max-side 1280`:
 
 | Folder | Built with | Used by |
 |---|---|---|
-| `merged` | `merge --max-side 1280` before the extra Roboflow projects | both corner runs; its `positions.json` is the one to score with |
+| `merged` | `merge --max-side 1280` before the extra Roboflow projects | `corners_s_exp1`, `corners_s_exp2`; its `positions.json` is the one to score with |
+| `merged_synth` | the same after `synth_boards.py` made `datasets/synth` | `corners_s_exp3` |
+| `merged_rf` | `--sources chessred2k chesscog fenit rf_corners` | `corners_s_exp4` |
 | `merged_v2` | `merge --max-side 1280 --out datasets/merged_v2` | `pieces_s_rf` |
 | `merged_norf` | the same with `--sources chessred2k chesscog fenit` | `pieces_s_norf` |
 
-Corner labels are identical in all three (Roboflow has none). `merge` refuses
+Corner labels of the labelled boards are the same in all of them; `merged_synth`
+and `merged_rf` add corner photos to train only. `merge` refuses
 to rebuild a folder a running job reads.
 
 **Running jobs.** Start them detached and awake, so no session has to stay
@@ -300,8 +304,12 @@ Scored through the `.mlpackage`s, letterboxed, per-square / boards exact:
 | Before | 97.86% / 74.2% (interval 69-79%) | 24.2% / 0%, board not found in 66 (58.0% / 0% with the `.pt` files) |
 | Now | 99.47% / **87.6%** (83-91%) | 67.7% / 0%, board always found |
 
-On board B no board is fully right yet with either: the gain there is in
-squares, and what is missing is described below.
+On board B no board is fully right with either, and both are below what an
+empty prediction scores there (73%). The gain is that the board is found: a
+board that is not found counts as 64 wrong squares, and on the 34 photos
+where the old exported model does find it, it scores about 71%, no worse than
+the new one's 67.7% over all 100. So the new corner model reads known boards
+much better and unknown boards no better; what is missing is described below.
 
 **What has been learned, and what to try next.**
 
@@ -341,8 +349,13 @@ squares, and what is missing is described below.
   | + classical grid fit, model corners where it rejects itself | 18% / 47% | 99.3% / 100% |
   | + a1 from the pieces (`chess_pipeline.orient_by_pieces`) | **63% / 77%** | 99.3% / 100% |
 
-  The grid fit rejected itself on 8 of 95 board B photos and 20 of 306
-  ChessReD photos. `--a1-from-pieces 6` adds 6 to the score of the corner
+  **These are not held-out numbers.** The grid fit's thresholds were tuned on
+  board B, Fenit A and ChessReD test, and the prior of 6 was chosen on
+  ChessReD test: on a board none of this has seen, expect less, with a few
+  percent of fits shifted by one square. They also use labelled boxes.
+  The grid fit (run here on the whole photo, without the model's box, where it
+  accepts slightly fewer than the 90% and 97% quoted above for the box prior)
+  rejected itself on 8 of 95 board B photos and 20 of 306 ChessReD photos. `--a1-from-pieces 6` adds 6 to the score of the corner
   model's own order: on ChessReD, where that order is right, a prior of 0
   loses 3 boards and 6 loses none; on board B the two give the same result.
   These numbers are an upper bound for any piece model.
@@ -357,6 +370,11 @@ squares, and what is missing is described below.
   chesscog renders** (`chessred2k_*`, `chesscog_*`); 254 were in `merged_v2`'s
   piece training data. `exclude_prefixes` in `sources.yaml` now drops them and
   `merged_v2` was rebuilt before any piece run used it.
+- Known weakness of the piece data: Roboflow photos are split into train and
+  val by file name, and `chess-vision-ljby5` is video, so neighbouring frames
+  of one game are on both sides. Piece validation scores, and the choice of
+  `best.pt`, are optimistic; the test scores (ChessReD test, board B) are not
+  affected. A split by video would fix it and needs `merged_v2` rebuilt.
 - Validation pose mAP says little: at exp1 epoch 20 it was 0.87 (mAP50-95)
   with corners 0.6-0.8 squares off, because the default tolerance is loose
   (see `train.py`). Judge corner models with `corner_error.py`. About 0.25

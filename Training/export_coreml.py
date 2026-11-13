@@ -32,10 +32,11 @@ MODEL_ARGS = {"BoardCorners": dict(nms=False),
               "Pieces": dict(nms=True, iou=0.7, agnostic_nms=True)}
 
 
-def export(weights, out_dir, base_name):
+def export(weights, out_dir, base_name, **overrides):
     for suffix, quant in VARIANTS.items():
         model = YOLO(weights)
-        path = model.export(format="coreml", imgsz=640, **MODEL_ARGS[base_name], **quant)
+        path = model.export(format="coreml", imgsz=640,
+                            **{**MODEL_ARGS[base_name], **overrides}, **quant)
         dest = out_dir / f"{base_name}-{suffix}.mlpackage"
         if dest.exists():
             shutil.rmtree(dest)
@@ -48,12 +49,15 @@ def main():
     ap.add_argument("--corners", required=True)
     ap.add_argument("--pieces", required=True)
     ap.add_argument("--out", default="../Models")
+    ap.add_argument("--pieces-nms-per-class", action="store_true",
+                    help="export the piece model as it was before 2026-11-13, with "
+                         "NMS within each class (to reproduce or restore that model)")
     args = ap.parse_args()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     export(args.corners, out, "BoardCorners")
-    export(args.pieces, out, "Pieces")
+    export(args.pieces, out, "Pieces", agnostic_nms=not args.pieces_nms_per_class)
     print(
         "\nPick a variant per model (compare with evaluate.py), then rename to\n"
         f"  {out}/BoardCorners.mlpackage and {out}/Pieces.mlpackage\n"

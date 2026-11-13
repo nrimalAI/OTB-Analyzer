@@ -636,18 +636,27 @@ def write_sample(sample, out, counts, positions, max_side=0, cache=None):
 
 
 def readers(out):
-    """Running processes whose command line names something inside `out`,
-    such as a training run started with --data <out>/corners/data.yaml."""
-    inside = {f"{out}/"}
+    """Running jobs that read something inside `out`: processes whose command
+    line names it (a training run started with --data <out>/corners/data.yaml,
+    absolute or as datasets/<name>/...), and the run queue.sh has under way,
+    whose command line names only a checkpoint once it has been continued
+    after a restart."""
+    inside = {f"{out}/", f"{out.parent.name}/{out.name}/"}
     try:
         inside.add(f"{out.relative_to(HERE)}/")
-    except ValueError:
+    except ValueError:  # out is reached through a link, e.g. from a worktree
         pass
     listing = subprocess.run(["ps", "-axo", "pid=,command="],
                              capture_output=True, text=True).stdout
-    return [line.strip() for line in listing.splitlines()
+    busy = [line.strip() for line in listing.splitlines()
             if any(path in line for path in inside)
             and line.split(None, 1)[0] != str(os.getpid())]
+    current = out.parent.parent / "runs" / "queue.current"
+    if current.exists():
+        line = current.read_text().strip()
+        if any(path in line for path in inside):
+            busy.append(f"queue.sh: {line}")
+    return busy
 
 
 def merge(args, sources):

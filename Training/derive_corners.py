@@ -540,7 +540,11 @@ def main():
             p.add_argument("--dry-run", action="store_true", help="count only, write nothing")
             p.add_argument("--reuse", action="store_true",
                            help="take photos already in runs/grid/rf_results.json from "
-                                "there and detect only the new ones")
+                                "there and detect only the new ones. Their accept or "
+                                "reject decision is the one made by the run that "
+                                "detected them: after changing --margin, --pinned, "
+                                "--min-pieces or --prior, run without --reuse. A run "
+                                "with --limit rewrites that file with its subset")
             p.add_argument("--cap", nargs="*", metavar="PROJECT=N",
                            help="this many images of a project instead of its max_images "
                                 "in sources.yaml (0 = all), for this run only")
