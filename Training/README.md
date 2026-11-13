@@ -490,8 +490,8 @@ the CPU and writes `runs/scores/heldout2_<tag>.txt`.
 
 Outside `merge` the rule is not mechanical. `evaluate.py`, `corner_error.py`
 and `grid_corners.py` read whatever `--positions` they are given, which is
-what scoring needs (`grid_corners.py` prints a reminder when the folder is
-test-only), and `score_heldout2.sh` passes any `evaluate.py` setting on. The
+what scoring needs, and `score_heldout2.sh` passes any `evaluate.py` setting
+on. A test-only folder says so in its `manifest.json` (`"test_only": true`). The
 rule is about what is done with the number: `--pull`, `--conf`, the a1 prior
 and the grid fit's thresholds are chosen on other data. `render_boards.py
 --positions` takes `train` rows only, so it never uses these positions.
