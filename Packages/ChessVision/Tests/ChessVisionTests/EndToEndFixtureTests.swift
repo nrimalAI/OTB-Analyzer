@@ -40,7 +40,7 @@ import Testing
 
     /// Compiled and loaded once for all tests (a static is initialised once,
     /// even when tests run in parallel).
-    private static let recognizer = Result { () throws -> CoreMLBoardRecognizer in
+    private static let models = Result { () throws -> (corners: MLModel, pieces: MLModel) in
         // .mlpackage must be compiled before loading (Xcode normally does this
         // at build time; tests do it at runtime).
         let config = MLModelConfiguration()
@@ -50,16 +50,32 @@ import Testing
             contentsOf: MLModel.compileModel(at: packages.corners), configuration: config)
         let pieces = try MLModel(
             contentsOf: MLModel.compileModel(at: packages.pieces), configuration: config)
-        return try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces)
+        return (corners, pieces)
     }
 
-    private func makeRecognizer() throws -> CoreMLBoardRecognizer {
-        try Self.recognizer.get()
+    /// The recognizer as the app builds it, or with the grid fit switched off.
+    private func makeRecognizer(gridFit: Bool = true) throws -> CoreMLBoardRecognizer {
+        let models = try Self.models.get()
+        return try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
     }
 
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testRecognizesFixturePositions() async throws {
-        let recognizer = try makeRecognizer()
+        try await expectFixturesRead(by: try makeRecognizer(), label: "fixture")
+    }
+
+    /// The same photos with the grid fit switched off: the corner model on
+    /// its own. With the fit on, a corner model that found no board at all
+    /// would go unnoticed here, because the fit reads these photos by itself
+    /// (and the pieces alone happen to put a1 right on them). This is the
+    /// test that a corner model has to pass on its own corners and its own a1.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testCornerModelAloneReadsTheFixtures() async throws {
+        try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")
+    }
+
+    private func expectFixturesRead(by recognizer: CoreMLBoardRecognizer, label: String) async throws {
 
         let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
@@ -95,25 +111,26 @@ import Testing
             }
             totalCorrect += correct
             totalSquares += 64
-            print("fixture \(file): \(correct)/64 squares  (expected \(expectedPlacement), got \(FENBuilder.placement(got)))")
+            print("\(label) \(file): \(correct)/64 squares  (expected \(expectedPlacement), got \(FENBuilder.placement(got)))")
 
             // Per-board floor: recognition quality on known test images should
             // never regress below ~90% per-square.
             //
-            // test_004005.jpg is a weak guard for which corner is a1. Its
-            // position (7Q/8/1k3p2/4p3/8/p3K3/8/8) points the wrong way: it
-            // scores only +2.5 the right way up (BoardOrientation), less than
-            // the prior of 6 for the corner model's choice. With a corner
-            // model that puts a1 at the wrong end (exp3, 2026-11) it passes
-            // only while imprecise corners lose two of the six pieces; read
-            // in full it would stay turned and fail here. See
-            // docs/RECOGNITION.md.
+            // test_004005.jpg guards which corner is a1. Its position
+            // (7Q/8/1k3p2/4p3/8/p3K3/8/8) points the wrong way: it scores
+            // only +2.5 the right way up (BoardOrientation), less than the
+            // prior of 6 for the corner model's choice, so the pieces cannot
+            // overrule a corner model that puts a1 at the wrong end. With
+            // exact corners (the grid fit) all six pieces are read: 64/64
+            // with a corner model that knows a1 here (main's), 52/64, the
+            // board turned by 180 degrees, with one that does not (exp3,
+            // exp4). See docs/RECOGNITION.md.
             #expect(correct >= 58, "\(file) regressed: \(correct)/64")
         }
 
         // Aggregate floor mirrors the Python eval (~98% per-square on test).
         let accuracy = Double(totalCorrect) / Double(totalSquares)
-        print(String(format: "fixture aggregate: %.1f%% per-square", accuracy * 100))
+        print(String(format: "%@ aggregate: %.1f%% per-square", label, accuracy * 100))
         #expect(accuracy >= 0.94)
     }
 
