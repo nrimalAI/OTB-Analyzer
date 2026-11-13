@@ -129,7 +129,7 @@ sources:
   rf_corners:
     kind: native
     dir: datasets/rf_corners
-    license: CC BY 4.0 (13 photos from chess-vision-jmf56: unknown)
+    license: "CC BY 4.0 (13 photos from chess-vision-jmf56 have no stated licence)"
     shippable: false
 
   # The rest of ChessReD: positions are labelled, boxes are not. About 5,000
