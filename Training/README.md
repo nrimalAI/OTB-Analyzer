@@ -306,7 +306,17 @@ GPU and slows it a little.
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | queued |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
-**In `Models/` now (2026-11-13, midday):** `main`'s corner model again, and
+**In `Models/` now (2026-11-13, evening):** the old corner model (yolo11n,
+ChessReD only) and the piece model `pieces_s_render1` (yolo11s, FP16; weights
+`baseline/pieces_yolo11s_render1.pt`; the INT8 export is half the size and
+reads one ChessReD board fewer). Through `app_check` with the app's defaults
+and the colour step off, against the baseline piece weights: ChessReD test
+286 against 280 of 306 boards exact; Fenit board B 82.5% against 82.3% of
+squares, 1 against 0 exact; Fenit A 184 against 15 of 286; on the second
+test set (in Python) 84.0% against 74.3% of squares and 18 against 2 of
+1,619 boards exact. The piece model that a new one has to beat is this one.
+
+**In `Models/` from midday to evening of 2026-11-13:** `main`'s corner model again, and
 the baseline piece weights exported with NMS across classes. exp3's corners
 were taken back out: with the app-side steps (a1 from the pieces, grid-fit
 corners) they still turn three endgame photos of ChessReD game G033 by 180
@@ -713,7 +723,7 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `chesscog_real` | 29 | 78.3% / 0% | 93.7% / 0% | 93.7% / 0% |
 | `samryan` | 500 | 64.6% / 0% | 79.5% / 2% | 79.2% / 2% |
 | `chesscv_games` | 840 | 81.5% / 0% | 89.1% / 0.5% | 89.1% / 0.5% |
-| all | 1,619 | 74.3%, 2 exact | **84.0%, 18 exact** | 82.4%, 18 exact |
+| all | 1,619 | 74.3%, 2 exact | **84.0%, 18 exact** | 82.3%, 18 exact |
 
 Two verdicts. The piece model trained with rendered data is better on boards
 nobody trained on: ten points of squares, and worse only on the Y-LIChess
