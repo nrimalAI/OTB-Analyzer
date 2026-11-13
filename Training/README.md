@@ -318,6 +318,21 @@ GPU and slows it a little.
   corner step (needs Swift, see the notes), and labels for training
   (`derive_corners.py` labels corners on the Roboflow photos, checks them
   against the piece boxes and takes a1 from square colour and pieces).
+- **What the two app-side steps are worth**, measured with labelled boxes and
+  exp3's corners (`evaluate.py --gt-boxes --grid-corners --a1-from-pieces 6`;
+  boards exact / exact once turned 180 degrees):
+
+  | | Board B (95) | ChessReD test (306) |
+  |---|---|---|
+  | exp3 corners as they are | 3% / 13% | 95.8% / - |
+  | + classical grid fit, model corners where it rejects itself | 18% / 47% | 99.3% / 100% |
+  | + a1 from the pieces (`chess_pipeline.orient_by_pieces`) | **63% / 77%** | 99.3% / 100% |
+
+  The grid fit rejected itself on 8 of 95 board B photos and 20 of 306
+  ChessReD photos. `--a1-from-pieces 6` adds 6 to the score of the corner
+  model's own order: on ChessReD, where that order is right, a prior of 0
+  loses 3 boards and 6 loses none; on board B the two give the same result.
+  These numbers are an upper bound for any piece model.
 - Which corner is a1 cannot be had from the corner model on a new board
   (right in 26-43 of 93 on B). From the pieces alone (true positions) the
   right rotation is picked in 97% of ChessReD and chesscog positions, 82% of

@@ -135,6 +135,40 @@ def assign_detections(H, detections, pull=0.30):
     return board
 
 
+def white_side_score(board):
+    """How much a board {(file, rank): (cls, conf)} looks like one seen with
+    White at ranks 1-2: White's pieces count for being near rank 1, Black's
+    for being near rank 8, pawns three times and kings one and a half times
+    as much as the rest, and a pawn on the first or last rank (impossible)
+    costs 20. Positive when the orientation is plausible, negative when the
+    board is upside down, near zero when it is turned by 90 degrees."""
+    score = 0.0
+    for (_, rank), (cls, _) in board.items():
+        letter = FEN_LETTER[cls]
+        weight = {"p": 3.0, "k": 1.5}.get(letter.lower(), 1.0)
+        score += weight * ((3.5 - rank) if letter.isupper() else (rank - 3.5))
+        if letter.lower() == "p" and rank in (0, 7):
+            score -= 20.0
+    return score
+
+
+def orient_by_pieces(corners, detections, pull=0.30, prior=0.0):
+    """The corners (a1, a8, h8, h1) turned so that the pieces say which one is
+    a1: of the four rotations, the one whose board has the highest
+    white_side_score. `prior` is added to the score of the corners as given,
+    i.e. how much to trust the corner model's own choice (0: not at all)."""
+    corners = [tuple(c) for c in corners]
+    best, best_score = corners, None
+    for turn in range(4):
+        turned = corners[turn:] + corners[:turn]
+        score = white_side_score(assign_squares(homography(turned), detections, pull))
+        if turn == 0:
+            score += prior
+        if best_score is None or score > best_score:
+            best, best_score = turned, score
+    return best
+
+
 def board_to_fen_placement(board):
     """{(file, rank): (cls, conf)} -> FEN placement field."""
     rows = []

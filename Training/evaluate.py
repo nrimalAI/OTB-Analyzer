@@ -31,7 +31,7 @@ from pathlib import Path
 
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
-    assign_squares, fen_placement_to_board, homography,
+    assign_squares, fen_placement_to_board, homography, orient_by_pieces,
 )
 from prepare_data import image_index, image_size, normalize_category, official_splits
 
@@ -215,6 +215,15 @@ def main():
                     help="use the labelled corners instead of the corner model")
     ap.add_argument("--gt-boxes", action="store_true",
                     help="use the labelled piece boxes instead of the piece model")
+    ap.add_argument("--grid-corners", action="store_true",
+                    help="replace the corners by the classical grid fit "
+                         "(grid_corners.py) where it accepts its own result; the "
+                         "rotation stays the one nearest the model's or labelled corners")
+    ap.add_argument("--a1-from-pieces", type=float, nargs="?", const=0.0, default=None,
+                    metavar="PRIOR",
+                    help="choose which corner is a1 from the detected pieces "
+                         "(chess_pipeline.orient_by_pieces); PRIOR is how much the "
+                         "corners' own order counts (default 0)")
     ap.add_argument("--stretch", action="store_true",
                     help="feed the models the photo stretched to 640x640, as the app "
                          "does (.scaleFill), instead of letterboxed")
@@ -240,6 +249,7 @@ def main():
 
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
+    exact_or_flipped = grid_rejected = 0
     confusion = Counter()
 
     for src, gt, gt_kpts, gt_boxes in items:
@@ -261,6 +271,18 @@ def main():
             boards += 1
             total_squares += 64
             continue
+        if args.grid_corners:
+            import cv2
+            import numpy as np
+            from grid_corners import find_grid
+            grid, _ = find_grid(cv2.imread(str(src)))
+            if grid is None:
+                grid_rejected += 1
+            else:
+                grid, old = np.array(grid, float), np.array(kpts, float)
+                turn = min(range(4), key=lambda j: np.linalg.norm(
+                    np.roll(grid, -j, axis=0) - old, axis=1).sum())
+                kpts = np.roll(grid, -turn, axis=0).tolist()
         H = homography(kpts)
 
         # 2. pieces
@@ -277,6 +299,9 @@ def main():
                     detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
                                                 (x1 * sx, y1 * sy, x2 * sx, y2 * sy)))
 
+        if args.a1_from_pieces is not None:
+            H = homography(orient_by_pieces(kpts, detections, args.pull,
+                                            prior=args.a1_from_pieces))
         predicted = assign_squares(H, detections, pull=args.pull)
         pred_letters = {sq: FEN_LETTER[cls] for sq, (cls, _) in predicted.items()}
 
@@ -296,6 +321,9 @@ def main():
                     confusion[(want or "·", got or "·")] += 1
         boards += 1
         exact += board_ok
+        flipped = {(7 - f, 7 - r): v for (f, r), v in pred_letters.items()}
+        exact_or_flipped += board_ok or all(
+            gt.get((f, r)) == flipped.get((f, r)) for f in range(8) for r in range(8))
 
         # Diagnostic: would the 180°-rotated prediction have matched better?
         # A high count here means the corner model confuses a1 with h8
@@ -323,6 +351,11 @@ def main():
     low, high = wilson(exact, boards)
     print(f"full-board exact match:  {exact / boards:.2%}"
           f"  (95% interval {low:.0%}-{high:.0%} on {boards} boards)")
+    low, high = wilson(exact_or_flipped, boards)
+    print(f"exact, or exact once turned 180 degrees (one tap in the app): "
+          f"{exact_or_flipped / boards:.2%}  ({low:.0%}-{high:.0%})")
+    if args.grid_corners:
+        print(f"grid fit gave no result (model corners kept): {grid_rejected}")
     print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):
