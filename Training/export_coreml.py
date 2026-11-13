@@ -13,7 +13,8 @@ in Packages/ChessVision reads (CoreMLBoardRecognizer.swift):
   corners  no NMS: one raw output of shape [1, 17, anchors] (box 4, score 1,
            4 keypoints x 3), which the app scans for the best-scoring anchor
   pieces   with NMS: a pipeline Vision turns into VNRecognizedObjectObservation,
-           class labels like "white_pawn", IoU 0.7 / confidence 0.25 defaults
+           class labels like "white_pawn", IoU 0.7 / confidence 0.25 defaults,
+           NMS across classes (one box per piece)
 Both take a 640x640 RGB image named "image".
 """
 
@@ -24,7 +25,11 @@ from pathlib import Path
 from ultralytics import YOLO
 
 VARIANTS = {"fp16": dict(quantize=16), "int8": dict(quantize=8)}
-MODEL_ARGS = {"BoardCorners": dict(nms=False), "Pieces": dict(nms=True, iou=0.7)}
+# agnostic_nms: the pieces model's NMS runs over all classes together, so a
+# piece that scores for two classes comes back once (the more confident one),
+# not as two boxes that then compete for squares.
+MODEL_ARGS = {"BoardCorners": dict(nms=False),
+              "Pieces": dict(nms=True, iou=0.7, agnostic_nms=True)}
 
 
 def export(weights, out_dir, base_name):
