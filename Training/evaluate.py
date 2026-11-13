@@ -308,7 +308,7 @@ def main():
 
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
-    exact_or_flipped = grid_rejected = 0
+    exact_or_flipped = grid_rejected = grid_alone = 0
     confusion = Counter()
 
     for src, gt, gt_kpts, gt_boxes in items:
@@ -326,11 +326,10 @@ def main():
                 device=args.device)
             if kpts is not None:
                 kpts = [[x * sx, y * sy] for x, y in kpts]
-        if kpts is None:
-            corner_failures += 1
-            boards += 1
-            total_squares += 64
-            continue
+        # With the grid fit, a board the corner model does not find can still
+        # be read: the fit needs no model. Its corners then come in no
+        # particular order, so a1 is taken from the pieces alone below.
+        model_found = kpts is not None
         if args.grid_corners:
             import cv2
             import numpy as np
@@ -338,11 +337,19 @@ def main():
             grid, _ = find_grid(cv2.imread(str(src)))
             if grid is None:
                 grid_rejected += 1
-            else:
+            elif model_found:
                 grid, old = np.array(grid, float), np.array(kpts, float)
                 turn = min(range(4), key=lambda j: np.linalg.norm(
                     np.roll(grid, -j, axis=0) - old, axis=1).sum())
                 kpts = np.roll(grid, -turn, axis=0).tolist()
+            else:
+                kpts = np.array(grid, float).tolist()
+                grid_alone += 1
+        if kpts is None:
+            corner_failures += 1
+            boards += 1
+            total_squares += 64
+            continue
         H = homography(kpts)
 
         # 2. pieces
@@ -361,7 +368,10 @@ def main():
 
         if args.one_piece_per_spot is not None and not args.gt_boxes:
             detections = one_per_spot(detections, args.one_piece_per_spot)
-        if args.a1_from_pieces is not None:
+        if not model_found:
+            # No model opinion on a1 to weigh against the pieces.
+            H = homography(orient_by_pieces(kpts, detections, args.pull, prior=0.0))
+        elif args.a1_from_pieces is not None:
             H = homography(orient_by_pieces(kpts, detections, args.pull,
                                             prior=args.a1_from_pieces))
         predicted = assign_squares(H, detections, pull=args.pull)
@@ -417,7 +427,8 @@ def main():
     print(f"exact, or exact once turned 180 degrees (one tap in the app): "
           f"{exact_or_flipped / boards:.2%}  ({low:.0%}-{high:.0%})")
     if args.grid_corners:
-        print(f"grid fit gave no result (model corners kept): {grid_rejected}")
+        print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
+        print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
     print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):
