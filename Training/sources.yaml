@@ -122,6 +122,16 @@ sources:
     dir: datasets/synth
     license: CC BY 4.0
 
+  # Corner labels for Roboflow photos, derived by derive_corners.py with the
+  # classical grid detector (grid_corners.py): real boards for the corner
+  # model. Corners only. 13 photos are from chess-vision-jmf56 (licence
+  # unknown), hence not shippable as built.
+  rf_corners:
+    kind: native
+    dir: datasets/rf_corners
+    license: CC BY 4.0 (13 photos from chess-vision-jmf56: unknown)
+    shippable: false
+
   # The rest of ChessReD: positions are labelled, boxes are not. About 5,000
   # of them (the train split) can be used.
   # pseudo_label.py turns them into chessred_pseudo below.
