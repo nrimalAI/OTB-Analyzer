@@ -601,10 +601,11 @@ def load_chessq(name, cfg, root, skipped):
 
 
 def looks_like_a_game(placement):
-    """Whether the position could come from a game with enough pawns left to
-    show which way the board is played: one king a side, no pawn on the first
-    or last rank, at most eight pawns and sixteen pieces a side, and at least
-    six pawns on the board. Nothing a recognizer computes is used here, so
+    """Whether the pieces are enough to say which way the board is played: one
+    king a side, no pawn on the first or last rank, at most eight pawns and
+    sixteen pieces a side, and at least six pawns on the board. (Not whether
+    the position is legal: some are shuffled 32-piece set-ups with the pawns
+    on their home ranks.) Nothing a recognizer computes is used here, so
     which photos count as game positions does not depend on what is being
     tested. Y-LIChess also photographs piece layouts made to cover the board
     (two knights; all 32 pieces packed into four ranks), where a1 is only a
@@ -648,9 +649,11 @@ def load_ylichess(name, cfg, root, skipped):
     move; photos numbered up to `white_far_until` have White on the far side
     (a1 is the top-right corner, which is also what the stickers on the
     board's frame say), the later ones are set up the other way round. The
-    group is the board, or `<board>-layout` where the pieces do not form a
-    game position and a1 is that convention only (score those with
-    evaluate.py's "exact once turned 180 degrees")."""
+    group is the board, or `<board>-layout` where a1 is that convention only
+    (score those with evaluate.py's "exact once turned 180 degrees"): where
+    the pieces do not say which way the board is played (looks_like_a_game),
+    and the photos listed under `a1_unclear`, where they contradict the
+    numbering."""
     for board_name, rule in (cfg.get("boards") or {}).items():
         for folder in sorted(f for f in root.glob(f"{board_name}_*") if f.is_dir()):
             calibrations = []
@@ -711,10 +714,11 @@ def load_ylichess(name, cfg, root, skipped):
                     skipped["a box is off the board, shares a square or sits on an edge"] += 1
                     continue
                 placement = readings.pop()
+                clear = (looks_like_a_game(placement)
+                         and number not in rule.get("a1_unclear", []))
                 yield Sample(name, f"{folder.name}_{img.stem}", img, "test", boxes,
                              [(x / w, y / h) for x, y in corners], placement,
-                             board_name if looks_like_a_game(placement)
-                             else f"{board_name}-layout")
+                             board_name if clear else f"{board_name}-layout")
 
 
 def load_fen_json(name, cfg, root, skipped):
@@ -889,6 +893,32 @@ def readers(out):
     return busy
 
 
+LOADERS = {"chessred": load_chessred, "chesscog": load_chesscog,
+           "fenit": load_fenit, "native": load_native,
+           "chessq": load_chessq, "ylichess": load_ylichess,
+           "fen_json": load_fen_json, "fen_names": load_fen_names,
+           "pgn_games": load_pgn_games}
+
+
+def adapter_problems(sources, names):
+    """What would stop a merge of these sources half way: checked before the
+    old folder is removed."""
+    problems = []
+    for name in names:
+        cfg = sources[name]
+        if cfg["kind"] in ("raw", "roboflow") or not (HERE / cfg["dir"]).exists():
+            continue
+        if cfg["kind"] not in LOADERS:
+            problems.append(f"{name}: no adapter for kind '{cfg['kind']}'")
+        elif cfg["kind"] == "pgn_games":
+            try:
+                import chess.pgn  # noqa: F401
+            except ImportError:
+                problems.append(f"{name}: replaying the PGN files needs python-chess "
+                                "(pip install chess)")
+    return problems
+
+
 def merge(args, sources):
     # Test-only sources never share a folder with data a model is trained on:
     # the training scripts read every photo and every positions.json row of
@@ -914,6 +944,12 @@ def merge(args, sources):
         if was_testing != testing:
             sys.exit(f"{out} holds a {'test-only' if was_testing else 'training'} set; "
                      "pick another --out.")
+    problems = adapter_problems(sources, [
+        n for n, c in sources.items()
+        if (not args.sources or n in args.sources) and (testing or not c.get("test_only"))])
+    if problems:
+        sys.exit("\n".join(problems))
+    if out.exists() and any(out.iterdir()):
         busy = readers(out)
         if busy and not args.force:
             # merge deletes and rebuilds the folder: files would vanish under the job.
@@ -945,13 +981,7 @@ def merge(args, sources):
             continue
         skipped = Counter()
         cfg["only_shippable"] = args.shippable
-        loader = {"chessred": load_chessred, "chesscog": load_chesscog,
-                  "fenit": load_fenit, "native": load_native,
-                  "chessq": load_chessq, "ylichess": load_ylichess,
-                  "fen_json": load_fen_json, "fen_names": load_fen_names,
-                  "pgn_games": load_pgn_games}.get(kind)
-        if loader is None and kind != "roboflow":
-            sys.exit(f"{name}: no adapter for kind '{kind}'")
+        loader = LOADERS.get(kind)
         samples = (load_roboflow(name, cfg, root, skipped, seen) if kind == "roboflow"
                    else loader(name, cfg, root, skipped))
         n, stems = 0, set()
@@ -1022,6 +1052,15 @@ def download(url, dest, size=None):
         # than the remote one) can never succeed: start this file over once.
         dest.unlink(missing_ok=True)
         subprocess.run(command, check=True)
+    with open(dest, "rb") as handle:
+        head = handle.read(512).lstrip().lower()
+    if head.startswith((b"<!doctype html", b"<html")) and dest.suffix.lower() not in (".html", ".htm"):
+        # Google Drive answers a refusal (quota, virus scan) with a page and
+        # status 200. Left in place, the next run would resume after it and
+        # end up with a file of the right size and a broken start.
+        dest.unlink()
+        sys.exit(f"{dest.name}: the server sent a web page instead of the file "
+                 "(a download limit, usually); nothing was kept. Try again later.")
     if size and dest.stat().st_size != size:
         print(f"note: {dest.name} is {dest.stat().st_size} bytes, sources.yaml says "
               f"{size}; update sources.yaml if the publisher changed the file.")
@@ -1107,18 +1146,36 @@ def fetch_hf(cfg, root, dry_run):
 
 def fetch_git(cfg, root):
     """Some folders of a git repository (`git_paths`) and the files at its top
-    level, without its history or its other folders. The clone's .git is
-    removed afterwards: it holds a second copy of every file."""
+    level, at the commit `git_rev` (default: the head of the default branch),
+    without its history or its other folders. The clone's .git is removed
+    afterwards: it holds a second copy of every file."""
     marker = root / ".fetched"
     if marker.exists():
         return
+    need = 2 * cfg.get("approx_bytes", 0)  # the files and, until it is removed, .git
+    free = shutil.disk_usage(root.parent).free
+    if need > free:
+        sys.exit(f"Not enough disk for {root.name}: need about {human(need)} at peak, "
+                 f"{human(free)} free.")
     partial = root.parent / f"{root.name}.partial"
     if partial.exists():
         shutil.rmtree(partial)  # an interrupted fetch of ours
-    subprocess.run(["git", "clone", "--quiet", "--depth", "1", "--filter=blob:none",
-                    "--sparse", cfg["git"], str(partial)], check=True)
-    subprocess.run(["git", "-C", str(partial), "sparse-checkout", "set",
-                    *cfg.get("git_paths", [])], check=True)
+    paths = cfg.get("git_paths", [])
+
+    def git(*command):
+        subprocess.run(["git", "-C", str(partial), *command], check=True)
+    partial.mkdir(parents=True)
+    git("init", "--quiet")
+    git("remote", "add", "origin", cfg["git"])
+    git("sparse-checkout", "set", *paths)
+    git("fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin",
+        cfg.get("git_rev", "HEAD"))
+    git("checkout", "--quiet", "FETCH_HEAD")
+    empty = [p for p in paths if not (partial / p).is_dir() or not any((partial / p).iterdir())]
+    if empty:
+        shutil.rmtree(partial)
+        sys.exit(f"{root.name}: {', '.join(empty)} is missing or empty in {cfg['git']}; "
+                 "nothing was kept.")
     shutil.rmtree(partial / ".git")
     root.mkdir(parents=True, exist_ok=True)
     for entry in partial.iterdir():
@@ -1126,7 +1183,7 @@ def fetch_git(cfg, root):
             entry.rename(root / entry.name)
     shutil.rmtree(partial)
     marker.touch()
-    print(f"{root.name}: cloned {', '.join(cfg.get('git_paths', []))} of {cfg['git']}")
+    print(f"{root.name}: fetched {', '.join(paths)} of {cfg['git']}")
 
 
 def fetch_list(root, files, dry_run):

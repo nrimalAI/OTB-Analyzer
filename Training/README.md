@@ -466,21 +466,30 @@ training source, every photo is split `test`, and they go into a folder of
 their own, so the scripts that read `datasets/merged*/` never see them.
 
 ```sh
-python build_dataset.py fetch chessq ylichess chesscog_real samryan chesscv_games   # 2.6 GB
+python build_dataset.py fetch chessq ylichess chesscog_real samryan chesscv_games   # 2.5 GB
 python build_dataset.py merge --out datasets/heldout2 \
     --sources chessq ylichess chesscog_real samryan chesscv_games
 python preview_labels.py --merged datasets/heldout2 --per-source 12   # look at the labels
 ./score_heldout2.sh <tag> <corners model> <pieces model> [evaluate.py arguments]
 ```
 
+The download is 2.5 GB, 3.3 GB on disk with the archives kept.
 `chesscv_games` needs python-chess (`pip install chess`; it is in
 `requirements.txt`). `score_heldout2.sh` runs `evaluate.py` on each part on
 the CPU and writes `runs/scores/heldout2_<tag>.txt`.
 
+Outside `merge` the rule is not mechanical. `evaluate.py`, `corner_error.py`
+and `grid_corners.py` read whatever `--positions` they are given, which is
+what scoring needs (`grid_corners.py` prints a reminder when the folder is
+test-only), and `score_heldout2.sh` passes any `evaluate.py` setting on. The
+rule is about what is done with the number: `--pull`, `--conf`, the a1 prior
+and the grid fit's thresholds are chosen on other data. `render_boards.py
+--positions` takes `train` rows only, so it never uses these positions.
+
 | Source | Photos | Boards | Camera | Position from | Licence |
 |---|---|---|---|---|---|
 | `chessq` ([ChessQ Test](https://huggingface.co/datasets/joelseytre/chessq-test)) | 50 | 15 kinds of set, at most 5 photos each | phones, oblique, 768x1024 to 3072x4080 | `metadata.jsonl`, reviewed by hand by its author | CC BY-NC 4.0 |
-| `ylichess` ([Y-LIChess](https://github.com/GibranBenitez/Y-LIChess), light-wood board) | 200: 104 game positions, 96 layouts | 1 folding wooden board | fixed webcam, high oblique, 1920x1080 | derived from its piece boxes and board outline; also gives boxes and corners | CC BY 4.0 |
+| `ylichess` ([Y-LIChess](https://github.com/GibranBenitez/Y-LIChess), light-wood board) | 200: 102 game positions, 98 layouts | 1 folding wooden board | fixed webcam, high oblique, 1920x1080 | derived from its piece boxes and board outline; also gives boxes and corners | CC BY 4.0 |
 | `chesscog_real` ([chesscog](https://github.com/georg-wolflein/chesscog) transfer set) | 29 | 1 black-bordered wooden board | iPhone, low, from a player's seat, 1200x900 | one JSON per photo | none stated |
 | `samryan` ([samryan18/chess-dataset](https://github.com/samryan18/chess-dataset)) | 500 (476 positions) | 1 green vinyl mat on the floor | straight down, 6000x4000 | the file name | MIT |
 | `chesscv_games` ([Rizo-R/chess-cv](https://github.com/Rizo-R/chess-cv)) | 840 (405 positions) | 1 folding brown and cream board | phone in the hand, oblique, 2048x1536 | 8 games replayed; photo N is the game after ply N | none stated |
@@ -502,8 +511,9 @@ What each is worth:
 
 What to know about the labels:
 
-- **a1 follows the pieces, not the print on the board.** In ChessQ, in
-  `chesscv_games`' `rev/` photos and in the second half of `ylichess` the
+- **a1 follows the pieces, not the print on the board.** In some ChessQ
+  photos, in `chesscv_games`' `rev/` photos and in the second half of
+  `ylichess` the
   position is set up against the coordinates printed on the board (White's
   pieces on the printed 7th and 8th ranks). The label is the position as a
   player reads it from the pieces. `evaluate.py` also prints "exact once
@@ -516,12 +526,21 @@ What to know about the labels:
   Which corner is a1 is not recorded: the camera and board never move, photos
   numbered up to 100 have White on the far side (a1 top right, as the
   stickers on the board's frame say) and the rest are set up the other way
-  round. 96 photos are piece layouts made to cover the board (two knights; a
-  king and queen; all 32 pieces packed into four ranks), where a1 is only
-  that convention: they are the group `wood180-layout`, the 104 positions
-  that could come from a game are `wood180` (the split looks at the position
-  alone, never at what a model or `white_side_score` makes of it). Score layouts by "exact once
-  turned 180 degrees".
+  round. That rule is all there is for a1, so the photos are in two groups:
+  - `wood180` (102): the pieces themselves show which way the board is
+    played (one king a side, six or more pawns, none on the first or last
+    rank) and agree with the rule. Not all are legal positions: a few are
+    shuffled 32-piece set-ups with the pawns on their home ranks.
+  - `wood180-layout` (98): a1 is the rule's convention only. 96 are piece
+    layouts made to cover the board (two knights; a king and queen; all 32
+    pieces packed into four ranks). Two are king-and-pawn endings (photos 43
+    and 144, `a1_unclear` in `sources.yaml`) where the rule's a1 has pawns
+    that passed each other on two files, and the board turned 180 degrees is
+    an ordinary ending: which way they were set up cannot be told.
+    Score this group by "exact once turned 180 degrees".
+
+  The split looks at the position alone, never at what a model or
+  `white_side_score` makes of it.
 - **Only one of Y-LIChess's four boards is used.** On the other three
   (`plastic_bw`, `wood_dark`, `mat_green`, 615 photos) the boxes are a
   detector's output, not labels: pieces without a box, kings labelled queen,
@@ -551,7 +570,7 @@ stands in for the export's NMS across classes.
 | Part | Photos | Empty | Baseline (`baseline/*_yolo11n_chessred2k.pt`) | Now (`corners_yolo11s_exp3.pt` + baseline pieces) | Now + `--a1-from-pieces 6` |
 |---|---|---|---|---|---|
 | `chessq` | 50 | 68.9% | 37.4% / 0%, board not found in 18 | 74.5% / 0% | 74.5% / 0% |
-| `ylichess`, `wood180` | 102 | 57.5% | 0% / 0%, board not found in 102 | 69.9% / 0% | 65.1% / 0% |
+| `ylichess`, `wood180` | 104 | 58.1% | 0% / 0%, board not found in 104 | 70.1% / 0% | 65.3% / 0% |
 | `ylichess`, `wood180-layout` | 96 | 89.8% | 0% / 0%, board not found in 96 | 88.0% / 1.0% | 86.8% / 1.0% |
 | `chesscog_real` | 29 | 52.9% | 49.4% / 0% | 78.3% / 0% | 78.3% / 0% |
 | `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
@@ -560,13 +579,14 @@ stands in for the export's NMS across classes.
 - **Neither pair reads one game position fully right on any of the 19
   boards** (one layout photo of 96 comes out right). Counting a board turned
   180 degrees as right changes nothing. The target is 85% of boards exact.
-- The new corner model finds the board in all 1,617 photos; the baseline
-  misses it in 292, among them every photo of the Y-LIChess board.
+- The new corner model finds the board in all 1,619 photos; the baseline
+  misses it in 294, among them every photo of the Y-LIChess board.
 - **Which model fails**, on the one source that has boxes and corners
-  (`ylichess`, `wood180`, 102 game positions): exp3's corners with the
-  labelled boxes give 99.6% / **97.1% exact** (interval 92-99%), so on this
-  board the corner model is precise and has a1 right; the piece model with
-  the labelled corners gives 70.1% / 0%. The piece model is what fails, as on
+  (`ylichess`, `wood180`, 104 game positions): exp3's corners with the
+  labelled boxes give 99.2% / **95.2% exact** (interval 89-98%; 97.1% counting
+  a board turned 180 degrees: the two pawn-race endgames come out turned), so
+  on this board the corner model is precise and nearly always has a1 right;
+  the piece model with the labelled corners gives 70.5% / 0%. The piece model is what fails, as on
   board B. On the layouts the corners with labelled boxes give 32% exact,
   44% counting a turn: a1 cannot be told there.
 - `--a1-from-pieces 6` (what the app does since pull request #5) does not

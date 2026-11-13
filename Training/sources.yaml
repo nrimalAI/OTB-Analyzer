@@ -233,6 +233,11 @@ sources:
         # Photos numbered up to this have White on the far side (a1 top right
         # in the frame); the later ones are set up the other way round.
         white_far_until: 100
+        # Two king-and-pawn endings where that rule cannot be trusted: with
+        # the a1 it gives, pawns have passed each other on two files; turned
+        # 180 degrees both are ordinary endings. Which way they were set up
+        # cannot be told from the photo, so they go with the layouts.
+        a1_unclear: [43, 144]
     downloads:
       - file: wood180_train.zip
         provides: wood180_train
@@ -275,6 +280,7 @@ sources:
     license: MIT
     shippable: false
     git: https://github.com/samryan18/chess-dataset
+    git_rev: 62a8f5b0a45a931c91fd11bf6e1fe0c9fa0d25d9
     git_paths: [labeled_originals]
     approx_bytes: 1271247945
 
