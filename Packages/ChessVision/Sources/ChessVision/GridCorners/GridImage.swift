@@ -109,7 +109,7 @@ extension GrayImage {
     /// The pixels of a rectangle of the image as RGBX bytes, in the image's
     /// own colour space where that is an RGB one, so that the numbers are the
     /// ones stored in the file (what `cv2.imread` returns).
-    private static func rgba(of image: CGImage, x: Int, y: Int, width: Int, height: Int) -> [UInt8]? {
+    static func rgba(of image: CGImage, x: Int, y: Int, width: Int, height: Int) -> [UInt8]? {
         let whole = x == 0 && y == 0 && width == image.width && height == image.height
         guard let part = whole
             ? image

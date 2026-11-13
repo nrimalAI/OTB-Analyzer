@@ -21,6 +21,13 @@
 //                   "off" to keep the corner model's a1 as it is.
 //   --grid-fit on|off  corners from the classical grid fit where it accepts
 //                   its own result (the app's default: on).
+//   --sides-from-colour on|off  White and Black from the colours of the
+//                   pieces where they contradict the piece model (default on,
+//                   as in the app).
+//   --colours FILE  score nothing: write, for each photo, what the piece model
+//                   finds, the colour of each piece and the sides the colour
+//                   step gives, for `swift_reference.py colours` to compare
+//                   with the Python on the same boxes.
 //   --grid FILE     run no model: write what the classical grid fit
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
@@ -69,6 +76,9 @@ var a1PriorGiven = false
 var gridPath: String?
 var gridFit = true
 var gridFitGiven = false
+var sidesFromColour = true
+var sidesFromColourGiven = false
+var coloursPath: String?
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
     let flag = arguments.removeFirst()
@@ -83,6 +93,12 @@ while !arguments.isEmpty {
         gridFit = value == "on"
         gridFitGiven = true
     case "--grid": gridPath = arguments.isEmpty ? nil : arguments.removeFirst()
+    case "--sides-from-colour":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--sides-from-colour takes on or off") }
+        sidesFromColour = value == "on"
+        sidesFromColourGiven = true
+    case "--colours": coloursPath = arguments.isEmpty ? nil : arguments.removeFirst()
     case "--a1-prior":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         if value == "off" {
@@ -96,6 +112,9 @@ while !arguments.isEmpty {
     case "--verbose": verbose = true
     default: fail("unknown argument \(flag)")
     }
+}
+if coloursPath != nil && (gridPath != nil || redraw != nil || portrait) {
+    fail("--colours reads the photos as they are: it goes with neither --grid, --redraw nor --portrait")
 }
 if let gridPath, let listPath {
     let listURL = URL(fileURLWithPath: listPath)
@@ -135,7 +154,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--verbose]")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--colours FILE] [--verbose]")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -185,7 +204,8 @@ do {
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
     recognizer = try CoreMLBoardRecognizer(
-        cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit)
+        cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+        sidesFromColour: sidesFromColour)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -196,6 +216,44 @@ guard
     let list = try? JSONDecoder().decode([String: String].self, from: data),
     !list.isEmpty
 else { fail("could not read \(listPath) as a JSON object of photo -> placement") }
+
+if let coloursPath {
+    // What the piece model finds and what the colour step makes of it.
+    var out: [String: Any] = [:]
+    var changed = 0
+    for path in list.keys.sorted() {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : listURL.deletingLastPathComponent().appending(path: path)
+        guard let image = upright(url) else { fail("could not load \(path)") }
+        let pieces: [PieceSideDiagnosis]
+        do {
+            pieces = try recognizer.diagnosePieceSides(image)
+        } catch {
+            fail("\(path): \(error)")
+        }
+        if pieces.contains(where: { $0.label != $0.finalLabel }) {
+            changed += 1
+        }
+        out[path] = pieces.map { piece in
+            [
+                "cls": piece.label, "confidence": Double(piece.confidence),
+                "box": [piece.box.minX, piece.box.minY, piece.box.maxX, piece.box.maxY].map { Double($0) },
+                "colour": piece.colour ?? NSNull(),
+                "colour_side": piece.colourSide ?? NSNull(),
+                "final": piece.finalLabel,
+            ] as [String: Any]
+        }
+    }
+    do {
+        try JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])
+            .write(to: URL(fileURLWithPath: coloursPath))
+    } catch {
+        fail("could not write \(coloursPath): \(error)")
+    }
+    print("\(out.count) photos; the colours changed a side on \(changed); written to \(coloursPath)")
+    exit(0)
+}
 
 var photos = 0
 var squaresRight = 0
@@ -251,7 +309,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))

@@ -75,6 +75,35 @@ import Testing
         try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")
     }
 
+    /// The colour step on the fixtures: every piece the model finds has a
+    /// colour, the pieces split in two colours, and the split by colour alone
+    /// gives as many White and as many Black pieces as the position has. (Not
+    /// that the piece model's sides stand: a model that has one side wrong
+    /// here, which the colours then put right, is no failure. That the final
+    /// sides are right is what the two fixture tests above check.)
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testColoursSplitThePiecesOfTheFixturesAsThePositionsDo() throws {
+        let recognizer = try makeRecognizer()
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self,
+            from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+        for (file, placement) in manifest.sorted(by: { $0.key < $1.key }) {
+            let source = try #require(
+                CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
+            let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            let pieces = try recognizer.diagnosePieceSides(image)
+            let agree = pieces.filter { $0.colourSide.map($0.label.hasPrefix) == true }.count
+            print("colour \(file): \(pieces.count) pieces, the colours agree with the model on \(agree)")
+            #expect(pieces.allSatisfy { $0.colour != nil }, "\(file)")
+            #expect(pieces.allSatisfy { $0.colourSide != nil }, "\(file)")
+            #expect(pieces.filter { $0.colourSide == "white" }.count
+                == placement.filter { $0.isLetter && $0.isUppercase }.count, "\(file)")
+            #expect(pieces.filter { $0.colourSide == "black" }.count
+                == placement.filter { $0.isLetter && $0.isLowercase }.count, "\(file)")
+        }
+    }
+
     private func expectFixturesRead(by recognizer: CoreMLBoardRecognizer, label: String) async throws {
 
         let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))

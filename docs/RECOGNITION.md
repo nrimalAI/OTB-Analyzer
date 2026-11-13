@@ -20,16 +20,28 @@ and what they were measured to be worth. Training results are in
    both fail is there no board. The fit needs no training, so it works on
    boards no model has seen, where learned corners are a square or so off.
 4. Piece model: boxes with a class and a confidence.
-5. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
+5. **White and Black from the colours** (`PieceSides`, port of
+   `sides_from_colour` and of `evaluate.piece_colours`): the colour of each
+   piece is the median CIE Lab of the middle of its box in the photo; the
+   pieces are split in two groups by colour (2-means on L*, 4a*, 4b*) and the
+   lighter group is White. A piece model that has not seen a piece set (brown
+   "white" pieces) can get the kinds right and the sides wrong, while the
+   pieces are still two groups of one colour each. The split can be wrong for
+   a few pieces (a shadow, a glint), so the model's sides stand unless the
+   colours contradict them for more than 15% of the pieces that have a colour
+   (a box whose middle lies outside the photo has none); then each of those
+   takes its group's side. Kinds and confidences are never changed.
+6. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
    `orient_by_pieces`): of the four rotations of the corners, the one whose
    board looks most like White at ranks 1-2 wins; the corner model's own
    rotation gets a head start of 6 (`BoardOrientation.appPrior`). When the
    corners are the fit's alone there is no model opinion, and the pieces
    decide without a head start.
-6. Each box's bottom centre goes through the corner homography to a square
+7. Each box's bottom centre goes through the corner homography to a square
    (`Homography`, `SquareAssignment`); one piece per square.
 
-Steps 3 and 5 can be switched off (`CoreMLBoardRecognizer(gridFit:a1Prior:)`).
+Steps 3, 5 and 6 can be switched off
+(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:)`).
 How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
 and it is what `Training/evaluate.py --grid-corners` does.
 
@@ -102,14 +114,37 @@ photos by itself.
   dropped differently, and one stray x-corner can change which lattice wins.
   The picture with no board among the drawn ones shows it: Python counts 23
   x-corners, Swift 25, and both find no grid.
+- `Training/swift_reference.py colour-cases` writes `Fixtures/colour_cases.json`
+  and a drawn picture (`colour_pieces.png`): 200 colours in Lab as OpenCV
+  gives them, 120 boxes with their patches (in, partly in and beside the
+  photo), 60 sets of points split in two (with ties), 74 sets of detections
+  with their colours (the model wrong about the side of none, a few, exactly
+  15%, or all of the pieces), the drawn picture's brown and black pieces that
+  a model calls all black, and the colours of 24 boxes on a fixture photo.
+  `PieceSidesTests` replays them: patches, groups and sides must be the
+  Python's exactly.
+- The colours themselves are the Python's only to within 0.2 in L*, 0.5 in a*
+  and 0.35 in b*, on the same pixels. `PieceSides.lab` is the CIE formula
+  (with OpenCV's matrix and white point); OpenCV does not compute the formula
+  for float pixels, it interpolates in a 33×33×33 table (measured over all
+  2^24 colours; L* comes out 0.09 too low on average). On the median of a
+  patch of a photo that is about as much as the two JPEG decoders add (0.09
+  against 0.04 on average, 0.15 against 0.43 at most, on the 24 patches of a
+  fixture). The two groups are usually tens of units apart, so the table was
+  not copied; a piece that lies between the two groups can fall the other
+  way (2 pieces of 23,523 on the test sets, below).
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
   lists) and prints what `evaluate.py` prints. It needs no Xcode.
-  `--a1-prior P|off` and `--grid-fit on|off` switch the two steps.
+  `--a1-prior P|off`, `--grid-fit on|off` and `--sides-from-colour on|off`
+  switch the steps.
 - For any list of photos, Python against Swift:
   `swift_reference.py grid --list L.json --out py.json`,
   `app_check --list L.json --grid sw.json`,
   `swift_reference.py compare --python py.json --swift sw.json`.
+  For the colour step, on the boxes the app's piece model finds:
+  `app_check --models M --list L.json --colours sw.json`,
+  `swift_reference.py colours --swift sw.json --list L.json`.
 
 ### How close the Swift grid fit is to the Python
 
@@ -180,6 +215,53 @@ What this says:
   the grid fit on and exp3's corners, priors 0 / 3 / 6 give 280 / 282 / 282
   boards on ChessReD, 86.4 / 86.4 / 86.3% of squares on board B and 92.7 /
   93.1 / 93.5% on Fenit A, so 6 stays.
+
+## What the colour step is worth
+
+Through `app_check` on the Mac mini, 2026-11-13, grid fit on and prior 6,
+`--sides-from-colour off` against `on`. Boards exact (in brackets: once
+turned by 180 degrees) and squares right.
+
+| Piece model | Step | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
+|---|---|---|---|---|
+| in `Models/` | off | 280 (280); 99.53% | 0 (1); 82.28% | 15 (17); 91.44% |
+| in `Models/` | **on** | 280 (280); 99.53% | **2 (3); 83.81%** | 15 (17); 91.44% |
+| `pieces_s_render1` (not in `Models/`) | off | 286 (286); 99.64% | 1 (1); 82.47% | 184 (200); 95.34% |
+| `pieces_s_render1` (not in `Models/`) | **on** | 286 (286); 99.64% | **11 (14); 87.08%** | 184 (200); 95.34% |
+
+(`pieces_s_render1` is the training session's piece model trained with
+rendered boards, exported for this measurement only, with the corner model in
+`Models/`; Fenit A is mostly photos it was trained on.)
+
+- The step is for a piece model that knows the kinds on a new piece set and
+  not the sides: with `pieces_s_render1`, board B goes from 1 to 11 boards
+  exact. The Python gets 15 there end to end (`Training/README.md`); it reads
+  clean 1280-px copies with its own grid fit, the app the photos through
+  Vision.
+- It costs nothing on the boards the models know: no ChessReD test photo
+  changes with either model. That is why it is on by default.
+- With the model in `Models/` it changes a side on 38 board B photos (+1.5
+  points of squares), on 4 Fenit A photos and on no ChessReD photo.
+- Weak spot, the reference's own: there is no smallest distance between the
+  two groups, and with six pieces or fewer one disagreement is already over
+  15%. The four Fenit A photos are such positions (2, 4, 6 and 9 pieces
+  found): on one, two black pieces are split into a "white" and a black one.
+  The boards were wrong before and are as wrong after, so the totals do not
+  move, but a sparse position whose pieces the model had right could be made
+  worse.
+- On the same boxes the Swift and the Python agree on the side of every
+  piece with the model in `Models/`: 11,749 pieces on the 692 photos of the
+  three sets, the step changing a side on the same photos in both (38, 4, 0).
+  On `pieces_s_render1`'s boxes they agree on 11,772 of 11,774: one board B
+  photo with four near-black pieces and one Fenit A photo each have a piece
+  about as far from one group as from the other (54.3 against 55.6 on the
+  second), and it falls the other way; on board B that changes the class of
+  one piece. Both are OpenCV's Lab table: with the formula on OpenCV's own
+  pixels the Python gives the Swift's groups. The JPEG decoders changed no
+  side on any of the 1,384 readings.
+- Cost: 0.07 s a photo with 32 pieces in a release build, about 1 s in a
+  debug build; like the grid fit it reads the photo's pixels once more (the
+  rectangle that holds all the pieces).
 
 ## Known weak spot: endgames that point the wrong way
 
