@@ -20,16 +20,27 @@ and what they were measured to be worth. Training results are in
    both fail is there no board. The fit needs no training, so it works on
    boards no model has seen, where learned corners are a square or so off.
 4. Piece model: boxes with a class and a confidence.
-5. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
+5. **White and Black from the colours** (`PieceSides`, port of
+   `sides_from_colour` and of `evaluate.piece_colours`): the colour of each
+   piece is the median CIE Lab of the middle of its box in the photo; the
+   pieces are split in two groups by colour (2-means on L*, 4a*, 4b*) and the
+   lighter group is White. A piece model that has not seen a piece set (brown
+   "white" pieces) can get the kinds right and the sides wrong, while the
+   pieces are still two groups of one colour each. The split can be wrong for
+   a few pieces (a shadow, a glint), so the model's sides stand unless the
+   colours contradict them for more than 15% of the pieces; then every piece
+   takes its group's side. Kinds and confidences are never changed.
+6. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
    `orient_by_pieces`): of the four rotations of the corners, the one whose
    board looks most like White at ranks 1-2 wins; the corner model's own
    rotation gets a head start of 6 (`BoardOrientation.appPrior`). When the
    corners are the fit's alone there is no model opinion, and the pieces
    decide without a head start.
-6. Each box's bottom centre goes through the corner homography to a square
+7. Each box's bottom centre goes through the corner homography to a square
    (`Homography`, `SquareAssignment`); one piece per square.
 
-Steps 3 and 5 can be switched off (`CoreMLBoardRecognizer(gridFit:a1Prior:)`).
+Steps 3, 5 and 6 can be switched off
+(`CoreMLBoardRecognizer(gridFit:sidesFromColour:a1Prior:)`).
 How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
 and it is what `Training/evaluate.py --grid-corners` does.
 
@@ -102,14 +113,33 @@ photos by itself.
   dropped differently, and one stray x-corner can change which lattice wins.
   The picture with no board among the drawn ones shows it: Python counts 23
   x-corners, Swift 25, and both find no grid.
+- `Training/swift_reference.py colour-cases` writes `Fixtures/colour_cases.json`
+  and a drawn picture (`colour_pieces.png`): 200 colours in Lab as OpenCV
+  gives them, 120 boxes with their patches (in, partly in and beside the
+  photo), 60 sets of points split in two (with ties), 74 sets of detections
+  with their colours (the model wrong about the side of none, a few, exactly
+  15%, or all of the pieces), the drawn picture's brown and black pieces that
+  a model calls all black, and the colours of 24 boxes on a fixture photo.
+  `PieceSidesTests` replays them: patches, groups and sides must be the
+  Python's exactly.
+- The colours themselves are the Python's only to within 0.2 in L* and 0.4 in
+  a* and b*, on the same pixels. `PieceSides.lab` is the CIE formula (with
+  OpenCV's matrix and white point); OpenCV does not compute the formula for
+  float pixels, it interpolates in a 33×33×33 table (L* comes out 0.09 too
+  low on average). That is less than the JPEG decoders add on a photo, and
+  the groups are tens of units apart, so it was not copied.
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
   lists) and prints what `evaluate.py` prints. It needs no Xcode.
-  `--a1-prior P|off` and `--grid-fit on|off` switch the two steps.
+  `--a1-prior P|off`, `--grid-fit on|off` and `--sides-from-colour on|off`
+  switch the steps.
 - For any list of photos, Python against Swift:
   `swift_reference.py grid --list L.json --out py.json`,
   `app_check --list L.json --grid sw.json`,
   `swift_reference.py compare --python py.json --swift sw.json`.
+  For the colour step, on the boxes the app's piece model finds:
+  `app_check --models M --list L.json --colours sw.json`,
+  `swift_reference.py colours --swift sw.json --list L.json`.
 
 ### How close the Swift grid fit is to the Python
 

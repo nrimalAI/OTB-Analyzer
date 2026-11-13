@@ -3,8 +3,10 @@ is checked against this folder's Python and not against a second opinion.
 
     python swift_reference.py orientation
     python swift_reference.py grid-cases
+    python swift_reference.py colour-cases
     python swift_reference.py grid --list photos.json --out python_grid.json
     python swift_reference.py compare --python python_grid.json --swift swift_grid.json
+    python swift_reference.py colours --swift swift_colours.json [--list photos.json]
 
 orientation: random boards seen in perspective with their corners given in a
 random rotation, some pieces missed, misread or found twice, some boxes beside
@@ -17,11 +19,26 @@ small inputs, for GridCornersTests: six drawn pictures (written next to the
 JSON as grid_board_*.png), the four fixture photos, sets of x-corners for the
 lattice fit, and a patch of image for the filters. Written to Fixtures/grid_cases.json.
 
+colour-cases: what chess_pipeline.sides_from_colour and its parts make of
+small inputs, for PieceSidesTests: colours in CIE Lab as OpenCV gives them,
+the patch of a box, points split in two groups, detections with their colours
+(the model wrong about the side of none, a few or all of the pieces), and one
+drawn picture of brown and black pieces that a model calls all black (written
+next to the JSON as colour_pieces.png). Written to Fixtures/colour_cases.json.
+
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
 the corners before the validity checks, the confidence and the numbers the
 checks look at. `app_check --grid` writes the same for the Swift port, and
 `swift_reference.py compare` puts the two side by side.
+
+colours: the colour step on photos, Swift against Python on the same boxes.
+`app_check --colours` writes what the app's piece model finds in each photo
+of a list, the colour Swift measures for each piece and the sides it ends up
+with; this reads that file, measures the colours and decides the sides in
+Python (evaluate.piece_colours, chess_pipeline.sides_from_colour) and counts
+where the two differ. `--list`: the list given to app_check, when its photo
+paths are relative.
 """
 
 import argparse
@@ -32,9 +49,9 @@ from pathlib import Path
 import numpy as np
 
 from chess_pipeline import (
-    Detection, FEN_LETTER, assign_detections, assign_squares, board_square,
-    board_to_fen_placement, fen_placement_to_board, homography, orient_by_pieces,
-    project, pulled_board_point, white_side_score,
+    Detection, FEN_LETTER, PIECE_CLASSES, assign_detections, assign_squares, board_square,
+    board_to_fen_placement, colour_patch, fen_placement_to_board, homography, orient_by_pieces,
+    project, pulled_board_point, sides_from_colour, two_groups, white_side_score,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -367,6 +384,181 @@ def grid_cases():
     print(f"written to {path} ({path.stat().st_size // 1024} kB)")
 
 
+def drawn_pieces(seed, size=(480, 400)):
+    """A chequered table top under uneven light with upright pieces of two
+    colours on it: light brown ("White") and near black. Returns (BGR image,
+    [(side, bbox)]), the boxes round each piece."""
+    import cv2
+    rng = np.random.default_rng(seed)
+    w, h = size
+    img = np.zeros((h, w, 3), np.uint8)
+    cell = 60
+    for j in range(0, h, cell):
+        for i in range(0, w, cell):
+            img[j:j + cell, i:i + cell] = (150, 200, 225) if (i + j) // cell % 2 == 0 else (60, 95, 140)
+    pieces = []
+    for j in range(3):
+        for i in range(7):
+            if rng.random() < 0.15:
+                continue
+            side = "white" if rng.random() < 0.5 else "black"
+            cx = 40 + i * 62 + int(rng.integers(-8, 9))
+            foot = 110 + j * 125 + int(rng.integers(-8, 9))
+            bw, bh = int(rng.integers(26, 40)), int(rng.integers(60, 100))
+            shade = rng.uniform(0.8, 1.15)
+            base = (95, 140, 190) if side == "white" else (38, 36, 40)
+            colour = tuple(int(min(255, v * shade)) for v in base)
+            cv2.ellipse(img, (cx, foot - bh // 3), (bw // 2, bh // 3), 0, 0, 360, colour, -1, cv2.LINE_AA)
+            cv2.rectangle(img, (cx - bw // 4, foot - bh + bw // 3), (cx + bw // 4, foot - bh // 3), colour, -1)
+            cv2.circle(img, (cx, foot - bh + bw // 3), bw // 3, colour, -1, cv2.LINE_AA)
+            pieces.append((side, (cx - bw / 2 - 1.5, foot - bh - 1.25, cx + bw / 2 + 1.5, foot + 1.75)))
+    light = np.linspace(0.6, 1.15, w)[None, :, None] * np.linspace(1.05, 0.85, h)[:, None, None]
+    img = (img * light).clip(0, 255).astype(np.uint8)
+    img = cv2.GaussianBlur(img, (0, 0), 0.9)
+    img = (img.astype(np.float32) + rng.normal(0, 2.0, img.shape)).clip(0, 255).astype(np.uint8)
+    return img, pieces
+
+
+def colour_cases(seed):
+    import cv2
+    from evaluate import piece_colours
+    cv2.setNumThreads(1)
+    rng = random.Random(seed)
+    out = {}
+
+    # 1. Colours: sRGB bytes -> CIE Lab as cv2 gives it for float pixels.
+    colours = [(0, 0, 0), (255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (1, 1, 1),
+               (10, 10, 10), (11, 11, 11), (23, 24, 25), (128, 128, 128)]
+    colours += [tuple(rng.randrange(256) for _ in range(3)) for _ in range(150)]
+    colours += [tuple(rng.randrange(40) for _ in range(3)) for _ in range(40)]   # dark: the linear parts
+    bgr = np.array([[(b, g, r) for r, g, b in colours]], np.uint8)
+    lab = cv2.cvtColor(bgr.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)[0]
+    out["lab"] = [dict(rgb=list(c), lab=[float(v) for v in l]) for c, l in zip(colours, lab)]
+
+    # 2. The patch of a box, also for boxes that stick out of the photo or
+    # lie beside it, and boxes too small to hold a pixel.
+    patches = []
+    for k in range(120):
+        width, height = rng.choice([(640, 480), (3024, 4032), (50, 40)])
+        w, h = rng.uniform(0, 0.2) * width, rng.uniform(0, 0.4) * height
+        if k % 10 == 0:
+            w = h = rng.choice([0.0, 0.3, 1.0])
+        x, y = rng.uniform(-0.3, 1.2) * width, rng.uniform(-0.3, 1.2) * height
+        box = (x, y, x + w, y + h)
+        patches.append(dict(box=list(box), width=width, height=height,
+                            patch=colour_patch(box, width, height)))
+    out["patches"] = patches
+
+    # 3. Points split in two groups: clouds, points on a grid (ties: a point
+    # as near to one mean as to the other; several pairs equally far apart),
+    # the same point twice, too few points, all points the same.
+    groups = []
+    for k in range(60):
+        n = rng.choice([0, 1, 2, 2, 3, 5, 8, 16, 32])
+        kind = k % 4
+        if kind == 0:      # two clouds, sometimes overlapping
+            gap = rng.choice([0.5, 2.0, 10.0, 40.0])
+            pts = [[rng.gauss(gap * (i % 2), 3), rng.gauss(0, 12), rng.gauss(-gap * (i % 2), 12)]
+                   for i in range(n)]
+        elif kind == 1:    # whole numbers
+            pts = [[float(rng.randrange(-2, 3)) for _ in range(3)] for _ in range(n)]
+        elif kind == 2:    # one cloud
+            pts = [[rng.uniform(0, 100), rng.uniform(-80, 80), rng.uniform(-80, 80)] for _ in range(n)]
+        else:              # all the same
+            pts = [[50.0, 8.0, -12.0]] * n
+        split = two_groups(pts)
+        groups.append(dict(points=pts, group=None if split is None else split[0],
+                           centres=None if split is None else split[1].tolist()))
+    out["groups"] = groups
+
+    # 4. Detections with their colours. The pieces are of two colours; the
+    # model has the side of some share of them wrong.
+    sides = []
+    tally = {"changed": 0, "kept, contradicted a little": 0, "kept, agreed": 0, "no split": 0}
+
+    def case(n, wrong, gap, missing):
+        light = (rng.uniform(55, 85), rng.uniform(-5, 15), rng.uniform(5, 35))
+        dark = (light[0] - gap, rng.uniform(-3, 6), rng.uniform(-6, 10))
+        truth = [rng.choice(["white", "black"]) for _ in range(n)]
+        wrong_ones = set(rng.sample(range(n), min(n, wrong)))
+        detections, cols = [], []
+        for k in range(n):
+            said = truth[k] if k not in wrong_ones else ("black" if truth[k] == "white" else "white")
+            kind = rng.choice(["king", "queen", "rook", "bishop", "knight", "pawn"])
+            x, y = rng.uniform(0, 2800), rng.uniform(0, 3800)
+            detections.append(Detection(f"{said}_{kind}", rng.randrange(250, 1000) / 1000,
+                                        (x, y, x + rng.uniform(60, 200), y + rng.uniform(120, 420))))
+            centre = light if truth[k] == "white" else dark
+            cols.append(None if rng.random() < missing
+                        else tuple(c + rng.gauss(0, s) for c, s in zip(centre, (6, 1.5, 3))))
+        result = sides_from_colour(detections, cols)
+        with_colour = [k for k in range(n) if cols[k] is not None]
+        split = two_groups([(cols[k][0], 4 * cols[k][1], 4 * cols[k][2]) for k in with_colour]) \
+            if len(with_colour) >= 2 else None
+        if split is None or len(set(split[0])) < 2:
+            tally["no split"] += 1
+        elif any(a.cls != b.cls for a, b in zip(detections, result)):
+            tally["changed"] += 1
+        elif wrong_ones:
+            tally["kept, contradicted a little"] += 1
+        else:
+            tally["kept, agreed"] += 1
+        sides.append(dict(
+            detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
+            colours=[None if c is None else list(c) for c in cols],
+            sides=[d.cls for d in result]))
+
+    for _ in range(70):
+        n = rng.choice([0, 1, 2, 3, 6, 12, 20, 20, 32])
+        case(n, wrong=rng.choice([0, 0, 1, 2, 3, 4, n // 2, n]),
+             gap=rng.choice([3.0, 15.0, 30.0, 45.0]), missing=rng.choice([0.0, 0.0, 0.1, 0.6]))
+    # On the line: 3 of 20 is 15%, which is not more than 15%; 4 of 20 is.
+    for wrong in (3, 4, 3, 4):
+        case(20, wrong=wrong, gap=45.0, missing=0.0)
+    out["sides"] = sides
+
+    # 5. A drawn picture: brown and black pieces, and a model that calls
+    # every one of them black.
+    img, pieces = drawn_pieces(seed)
+    name = "colour_pieces.png"
+    cv2.imwrite(str(FIXTURES / name), img)
+    kinds = ["king", "queen", "rook", "bishop", "knight", "pawn"]
+    detections = [Detection(f"black_{kinds[k % 6]}", 0.9 - 0.01 * k, bbox)
+                  for k, (_, bbox) in enumerate(pieces)]
+    # one box beside the picture: no colour, its side stays as the model said
+    detections.append(Detection("black_pawn", 0.4, (500.0, 100.0, 540.0, 180.0)))
+    cols = piece_colours(FIXTURES / name, detections)
+    result = sides_from_colour(detections, cols)
+    assert [d.cls.split("_")[0] for d in result[:-1]] == [side for side, _ in pieces]
+    assert cols[-1] is None and result[-1].cls == "black_pawn"
+    out["picture"] = dict(
+        file=name,
+        detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
+        colours=[None if c is None else list(c) for c in cols],
+        sides=[d.cls for d in result])
+
+    # 6. A photo: the colours of boxes spread over a fixture (a JPEG: the two
+    # decoders differ by a grey level here and there, the medians hardly).
+    photo = "test_000000.jpg"
+    height, width = cv2.imread(str(FIXTURES / photo)).shape[:2]
+    boxes = []
+    for _ in range(24):
+        x, y = rng.uniform(0.15, 0.75) * width, rng.uniform(0.15, 0.7) * height
+        boxes.append(Detection("white_pawn", 0.9, (x, y, x + rng.uniform(0.03, 0.07) * width,
+                                                   y + rng.uniform(0.06, 0.14) * height)))
+    out["photo"] = dict(file=photo, boxes=[list(d.bbox) for d in boxes],
+                        colours=[list(c) for c in piece_colours(FIXTURES / photo, boxes)])
+
+    path = FIXTURES / "colour_cases.json"
+    path.write_text(json.dumps(out, separators=(",", ":")) + "\n")
+    print(f"written to {path} ({path.stat().st_size // 1024} kB) and {name}: "
+          f"{len(out['lab'])} colours, {len(patches)} patches "
+          f"({sum(p['patch'] is None for p in patches)} empty), {len(groups)} sets of points "
+          f"({sum(g['group'] is None for g in groups)} without a split), "
+          f"{len(sides)} sets of detections {tally}, "
+          f"{len(pieces)} drawn pieces ({sum(s == 'white' for s, _ in pieces)} brown)")
+
+
 def grid_reference(list_path, out_path, limit):
     import cv2
     from grid_corners import find_grid
@@ -423,14 +615,69 @@ def compare(python_path, swift_path):
             print(f"  {name}: {sq:.4f} squares ({px:.2f} px)")
 
 
+def compare_colours(swift_path, list_path):
+    """The colour step of the same photos and boxes in Python and in Swift."""
+    from evaluate import piece_colours
+    sw = json.loads(Path(swift_path).read_text())
+    base = Path(list_path).resolve().parent if list_path else Path.cwd()
+    photos = pieces = no_colour_differs = side_differs = final_differs = 0
+    fired_py = fired_sw = photos_side_differs = photos_final_differs = split_differs = 0
+    off = []
+    for photo in sorted(sw):
+        found = sw[photo]
+        src = Path(photo) if Path(photo).is_absolute() else base / photo
+        detections = [Detection(d["cls"], d["confidence"], tuple(d["box"])) for d in found]
+        cols = piece_colours(src, detections)
+        final = [d.cls for d in sides_from_colour(detections, cols)]
+        # the side by colour alone, as sides_from_colour works it out
+        idx = [k for k, c in enumerate(cols) if c is not None]
+        by_colour = [None] * len(detections)
+        split = two_groups([(cols[k][0], 4.0 * cols[k][1], 4.0 * cols[k][2]) for k in idx])
+        if split is not None and len(set(split[0])) == 2:
+            white = 0 if split[1][0][0] >= split[1][1][0] else 1
+            for k, g in zip(idx, split[0]):
+                by_colour[k] = "white" if g == white else "black"
+        photos += 1
+        pieces += len(detections)
+        sides_here = finals_here = 0
+        split_differs += (split is None or len(set(split[0])) < 2) != all(d["colour_side"] is None for d in found) \
+            if idx else 0
+        for d, c, side, cls in zip(found, cols, by_colour, final):
+            if (c is None) != (d["colour"] is None):
+                no_colour_differs += 1
+            elif c is not None:
+                off.append(max(abs(a - b) for a, b in zip(c, d["colour"])))
+            sides_here += side != d["colour_side"]
+            finals_here += cls != d["final"]
+        side_differs += sides_here
+        final_differs += finals_here
+        photos_side_differs += sides_here > 0
+        photos_final_differs += finals_here > 0
+        fired_py += any(cls != d["cls"] for cls, d in zip(final, found))
+        fired_sw += any(d["final"] != d["cls"] for d in found)
+        if sides_here or finals_here:
+            print(f"  {Path(photo).name}: {len(detections)} pieces, side by colour differs for "
+                  f"{sides_here}, final class for {finals_here}")
+    off = np.array(off) if off else np.zeros(1)
+    print(f"{photos} photos, {pieces} pieces found by the app's piece model")
+    print(f"colours, Swift against Python, largest of L*, a*, b*: median {np.median(off):.3f}, "
+          f"p95 {np.percentile(off, 95):.3f}, max {off.max():.3f}; "
+          f"a colour in one and none in the other: {no_colour_differs}")
+    print(f"side by colour alone differs: {side_differs} pieces on {photos_side_differs} photos "
+          f"(split in one and none in the other: {split_differs} photos)")
+    print(f"the step changed a side: Python on {fired_py} photos, Swift on {fired_sw}; "
+          f"final classes differ: {final_differs} pieces on {photos_final_differs} photos")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=["orientation", "grid-cases", "grid", "compare"])
+    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "grid", "compare", "colours"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
     ap.add_argument("--python", help="compare: file written by `grid`")
-    ap.add_argument("--swift", help="compare: file written by `app_check --grid`")
+    ap.add_argument("--swift", help="compare: file written by `app_check --grid`; "
+                                    "colours: file written by `app_check --colours`")
     ap.add_argument("--count", type=int, default=120)
     ap.add_argument("--seed", type=int, default=20261113)
     args = ap.parse_args()
@@ -443,8 +690,12 @@ def main():
               f"rotations chosen: {[turns.count(k) for k in range(4)]}; {counts}")
     elif args.what == "grid-cases":
         grid_cases()
+    elif args.what == "colour-cases":
+        colour_cases(args.seed)
     elif args.what == "grid":
         grid_reference(args.list, args.out, args.limit)
+    elif args.what == "colours":
+        compare_colours(args.swift, args.list)
     else:
         compare(args.python, args.swift)
 
