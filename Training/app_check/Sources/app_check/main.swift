@@ -16,6 +16,9 @@
 //                   for non-square photos, at 1280), then recognise that.
 //   --portrait      first put each photo on a 3:4 grey canvas, as
 //                   EndToEndFixtureTests.testRecognizesFixturesAsPortraitPhotos does.
+//   --a1-prior P    how much the corner model's choice of a1 counts against
+//                   the pieces (BoardOrientation; the app's default is 6), or
+//                   "off" to keep the corner model's a1 as it is.
 //   --verbose       one line per photo, not only the wrong ones.
 //
 // Needs only the Command Line Tools (no Xcode, no XCTest).
@@ -36,6 +39,8 @@ var listPath: String?
 var redraw: Int?
 var portrait = false
 var verbose = false
+var a1Prior: Double? = 6
+var a1PriorGiven = false
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
     let flag = arguments.removeFirst()
@@ -44,12 +49,22 @@ while !arguments.isEmpty {
     case "--list": listPath = arguments.isEmpty ? nil : arguments.removeFirst()
     case "--redraw": redraw = arguments.isEmpty ? nil : Int(arguments.removeFirst())
     case "--portrait": portrait = true
+    case "--a1-prior":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        if value == "off" {
+            a1Prior = nil
+        } else if let number = Double(value) {
+            a1Prior = number
+        } else {
+            fail("--a1-prior takes a number or off")
+        }
+        a1PriorGiven = true
     case "--verbose": verbose = true
     default: fail("unknown argument \(flag)")
     }
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--verbose]")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--verbose]")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -98,7 +113,9 @@ do {
     let pieces = try MLModel(
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
-    recognizer = try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces)
+    recognizer = a1PriorGiven
+        ? try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior)
+        : try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -165,7 +182,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))

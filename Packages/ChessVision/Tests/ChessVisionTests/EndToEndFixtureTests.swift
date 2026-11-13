@@ -1,7 +1,8 @@
 import ChessKit
 import CoreML
 import ImageIO
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessVision
 
@@ -11,7 +12,7 @@ import XCTest
 /// Skips when the exported models aren't present (`Models/*.mlpackage` at the
 /// repo root — produced by `Training/export_coreml.py`), so `swift test`
 /// stays green on a fresh clone.
-final class EndToEndFixtureTests: XCTestCase {
+@Suite(.serialized) struct EndToEndFixtureTests {
 
     /// Repo root, derived from this file's location.
     private static var repoRoot: URL {
@@ -23,49 +24,48 @@ final class EndToEndFixtureTests: XCTestCase {
             .deletingLastPathComponent()  // repo root
     }
 
-    private static var recognizer: CoreMLBoardRecognizer?
-    private static var setupDone = false
+    private static var modelPackages: (corners: URL, pieces: URL) {
+        let models = repoRoot.appending(path: "Models")
+        return (models.appending(path: "BoardCorners.mlpackage"),
+                models.appending(path: "Pieces.mlpackage"))
+    }
 
-    private func makeRecognizer() throws -> CoreMLBoardRecognizer {
-        if Self.setupDone {
-            guard let r = Self.recognizer else {
-                throw XCTSkip("Models/*.mlpackage not present — run Training/export_coreml.py")
-            }
-            return r
-        }
-        Self.setupDone = true
+    /// Whether the exported models are there. The tests below are skipped,
+    /// not failed, when they are not.
+    static var modelsPresent: Bool {
+        let packages = modelPackages
+        return FileManager.default.fileExists(atPath: packages.corners.path)
+            && FileManager.default.fileExists(atPath: packages.pieces.path)
+    }
 
-        let models = Self.repoRoot.appending(path: "Models")
-        let cornersPkg = models.appending(path: "BoardCorners.mlpackage")
-        let piecesPkg = models.appending(path: "Pieces.mlpackage")
-        guard FileManager.default.fileExists(atPath: cornersPkg.path),
-              FileManager.default.fileExists(atPath: piecesPkg.path)
-        else {
-            throw XCTSkip("Models/*.mlpackage not present — run Training/export_coreml.py")
-        }
-
+    /// Compiled and loaded once for all tests (a static is initialised once,
+    /// even when tests run in parallel).
+    private static let recognizer = Result { () throws -> CoreMLBoardRecognizer in
         // .mlpackage must be compiled before loading (Xcode normally does this
         // at build time; tests do it at runtime).
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
+        let packages = modelPackages
         let corners = try MLModel(
-            contentsOf: MLModel.compileModel(at: cornersPkg), configuration: config)
+            contentsOf: MLModel.compileModel(at: packages.corners), configuration: config)
         let pieces = try MLModel(
-            contentsOf: MLModel.compileModel(at: piecesPkg), configuration: config)
-        let recognizer = try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces)
-        Self.recognizer = recognizer
-        return recognizer
+            contentsOf: MLModel.compileModel(at: packages.pieces), configuration: config)
+        return try CoreMLBoardRecognizer(cornerModel: corners, pieceModel: pieces)
     }
 
+    private func makeRecognizer() throws -> CoreMLBoardRecognizer {
+        try Self.recognizer.get()
+    }
+
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testRecognizesFixturePositions() async throws {
         let recognizer = try makeRecognizer()
 
-        let fixtures = try XCTUnwrap(
-            Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
             [String: String].self,
             from: Data(contentsOf: fixtures.appending(path: "expected.json")))
-        XCTAssertFalse(manifest.isEmpty)
+        #expect(!manifest.isEmpty)
 
         var totalCorrect = 0
         var totalSquares = 0
@@ -76,14 +76,13 @@ final class EndToEndFixtureTests: XCTestCase {
                 let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
                 let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else {
-                XCTFail("could not load \(file)")
+                Issue.record("could not load \(file)")
                 continue
             }
 
             let result = try await recognizer.recognize(image)
             let got = result.pieces.mapValues(\.piece)
-            let expected = try XCTUnwrap(
-                FENBuilder.pieces(fromPlacement: expectedPlacement), file: #filePath)
+            let expected = try #require(FENBuilder.pieces(fromPlacement: expectedPlacement))
 
             var correct = 0
             for rank in 1...8 {
@@ -100,13 +99,22 @@ final class EndToEndFixtureTests: XCTestCase {
 
             // Per-board floor: recognition quality on known test images should
             // never regress below ~90% per-square.
-            XCTAssertGreaterThanOrEqual(correct, 58, "\(file) regressed: \(correct)/64")
+            //
+            // test_004005.jpg is a weak guard for which corner is a1. Its
+            // position (7Q/8/1k3p2/4p3/8/p3K3/8/8) points the wrong way: it
+            // scores only +2.5 the right way up (BoardOrientation), less than
+            // the prior of 6 for the corner model's choice. With a corner
+            // model that puts a1 at the wrong end (exp3, 2026-11) it passes
+            // only while imprecise corners lose two of the six pieces; read
+            // in full it would stay turned and fail here. See
+            // docs/RECOGNITION.md.
+            #expect(correct >= 58, "\(file) regressed: \(correct)/64")
         }
 
         // Aggregate floor mirrors the Python eval (~98% per-square on test).
         let accuracy = Double(totalCorrect) / Double(totalSquares)
         print(String(format: "fixture aggregate: %.1f%% per-square", accuracy * 100))
-        XCTAssertGreaterThanOrEqual(accuracy, 0.94)
+        #expect(accuracy >= 0.94)
     }
 
     /// Phone photos are 3:4, the fixtures are square. Each fixture is turned
@@ -114,10 +122,10 @@ final class EndToEndFixtureTests: XCTestCase {
     /// still be read: the recognizer letterboxes it rather than stretching it.
     /// The same photos stretched to a square, which is what the app used to
     /// do, are scored alongside for comparison.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testRecognizesFixturesAsPortraitPhotos() async throws {
         let recognizer = try makeRecognizer()
-        let fixtures = try XCTUnwrap(
-            Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
             [String: String].self,
             from: Data(contentsOf: fixtures.appending(path: "expected.json")))
@@ -131,15 +139,13 @@ final class EndToEndFixtureTests: XCTestCase {
                     fixtures.appending(path: file) as CFURL, nil),
                 let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else {
-                XCTFail("could not load \(file)")
+                Issue.record("could not load \(file)")
                 continue
             }
-            let expected = try XCTUnwrap(FENBuilder.pieces(fromPlacement: expectedPlacement))
-            let portrait = try XCTUnwrap(
-                Self.redraw(image, width: image.width, height: image.width * 4 / 3, stretch: false))
-            XCTAssertEqual(portrait.height * 3, portrait.width * 4)
-            let squashed = try XCTUnwrap(
-                Self.redraw(portrait, width: image.width, height: image.width, stretch: true))
+            let expected = try #require(FENBuilder.pieces(fromPlacement: expectedPlacement))
+            let portrait = try #require(Self.redraw(image, width: image.width, height: image.width * 4 / 3, stretch: false))
+            #expect(portrait.height * 3 == portrait.width * 4)
+            let squashed = try #require(Self.redraw(portrait, width: image.width, height: image.width, stretch: true))
 
             let good = Self.correctSquares(
                 try await recognizer.recognize(portrait).pieces.mapValues(\.piece), expected)
@@ -155,7 +161,7 @@ final class EndToEndFixtureTests: XCTestCase {
         print(String(
             format: "portrait aggregate: letterboxed %.1f%%, stretched %.1f%% per-square",
             accuracy * 100, Double(stretched) / Double(totalSquares) * 100))
-        XCTAssertGreaterThanOrEqual(accuracy, 0.90)
+        #expect(accuracy >= 0.90)
     }
 
     private static func correctSquares(_ got: [Square: Piece], _ expected: [Square: Piece]) -> Int {

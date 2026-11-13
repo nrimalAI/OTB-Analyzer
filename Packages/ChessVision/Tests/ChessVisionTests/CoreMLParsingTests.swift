@@ -1,11 +1,12 @@
 import ChessKit
 import CoreGraphics
 import CoreML
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessVision
 
-final class CoreMLParsingTests: XCTestCase {
+struct CoreMLParsingTests {
 
     /// Builds a synthetic [1, 17, anchors] pose tensor with one hot anchor.
     private func poseTensor(
@@ -24,7 +25,7 @@ final class CoreMLParsingTests: XCTestCase {
         return array
     }
 
-    func testParseCornersMapsThroughLetterbox() throws {
+    @Test func testParseCornersMapsThroughLetterbox() throws {
         // A 1280×640 photo letterboxed into the 640 model input fills the full
         // width and the rows 160..<480. Keypoints are in 640-space.
         let tensor = try poseTensor(keypoints: [(100, 400), (100, 200), (500, 200), (500, 400)])
@@ -32,65 +33,60 @@ final class CoreMLParsingTests: XCTestCase {
             from: tensor,
             letterbox: Letterbox(imageSize: CGSize(width: 1280, height: 640)),
             scoreThreshold: 0.25)
-        XCTAssertEqual(corners.count, 4)
-        XCTAssertEqual(corners[0].x, 200, accuracy: 1e-6)   // a1: x doubles
-        XCTAssertEqual(corners[0].y, 480, accuracy: 1e-6)   // (400 - 160) × 2
-        XCTAssertEqual(corners[2].x, 1000, accuracy: 1e-6)  // h8
-        XCTAssertEqual(corners[2].y, 80, accuracy: 1e-6)    // (200 - 160) × 2
+        #expect(corners.count == 4)
+        #expect(abs(corners[0].x - 200) <= 1e-6)   // a1: x doubles
+        #expect(abs(corners[0].y - 480) <= 1e-6)   // (400 - 160) × 2
+        #expect(abs(corners[2].x - 1000) <= 1e-6)  // h8
+        #expect(abs(corners[2].y - 80) <= 1e-6)    // (200 - 160) × 2
     }
 
-    func testParseCornersSquareImageIsPlainScaling() throws {
+    @Test func testParseCornersSquareImageIsPlainScaling() throws {
         let tensor = try poseTensor(keypoints: [(100, 500), (100, 100), (500, 100), (500, 500)])
         let corners = try CoreMLBoardRecognizer.parseCorners(
             from: tensor,
             letterbox: Letterbox(imageSize: CGSize(width: 1280, height: 1280)),
             scoreThreshold: 0.25)
-        XCTAssertEqual(corners[0].x, 200, accuracy: 1e-6)
-        XCTAssertEqual(corners[0].y, 1000, accuracy: 1e-6)
+        #expect(abs(corners[0].x - 200) <= 1e-6)
+        #expect(abs(corners[0].y - 1000) <= 1e-6)
     }
 
-    func testParseCornersRespectsThreshold() throws {
+    @Test func testParseCornersRespectsThreshold() throws {
         let tensor = try poseTensor(score: 0.1, keypoints: [(0, 0), (0, 0), (0, 0), (0, 0)])
-        XCTAssertThrowsError(
+        #expect(throws: RecognitionError.boardNotFound) {
             try CoreMLBoardRecognizer.parseCorners(
                 from: tensor, letterbox: Letterbox(imageSize: CGSize(width: 640, height: 640)),
                 scoreThreshold: 0.25)
-        ) { error in
-            XCTAssertEqual(error as? RecognitionError, .boardNotFound)
         }
     }
 
-    func testParseCornersRejectsWrongShape() throws {
+    @Test func testParseCornersRejectsWrongShape() throws {
         let bad = try MLMultiArray(shape: [1, 5, 10], dataType: .float32)
-        XCTAssertThrowsError(
+        #expect(throws: RecognitionError.modelUnavailable) {
             try CoreMLBoardRecognizer.parseCorners(
                 from: bad, letterbox: Letterbox(imageSize: CGSize(width: 640, height: 640)),
-                scoreThreshold: 0.25))
+                scoreThreshold: 0.25)
+        }
     }
 
-    func testPieceClassParsing() {
-        XCTAssertTrue(CoreMLBoardRecognizer.pieceClass(fromLabel: "white_pawn")! == (.pawn, .white))
-        XCTAssertTrue(CoreMLBoardRecognizer.pieceClass(fromLabel: "black_king")! == (.king, .black))
-        XCTAssertTrue(CoreMLBoardRecognizer.pieceClass(fromLabel: "white_knight")! == (.knight, .white))
-        XCTAssertNil(CoreMLBoardRecognizer.pieceClass(fromLabel: "empty"))
-        XCTAssertNil(CoreMLBoardRecognizer.pieceClass(fromLabel: "purple_wizard"))
-        XCTAssertNil(CoreMLBoardRecognizer.pieceClass(fromLabel: "pawn"))
+    @Test func testPieceClassParsing() {
+        #expect(CoreMLBoardRecognizer.pieceClass(fromLabel: "white_pawn")! == (.pawn, .white))
+        #expect(CoreMLBoardRecognizer.pieceClass(fromLabel: "black_king")! == (.king, .black))
+        #expect(CoreMLBoardRecognizer.pieceClass(fromLabel: "white_knight")! == (.knight, .white))
+        #expect(CoreMLBoardRecognizer.pieceClass(fromLabel: "empty") == nil)
+        #expect(CoreMLBoardRecognizer.pieceClass(fromLabel: "purple_wizard") == nil)
+        #expect(CoreMLBoardRecognizer.pieceClass(fromLabel: "pawn") == nil)
     }
 
-    func testOrientationGuess() {
+    @Test func testOrientationGuess() {
         // a1 lower than a8 → camera on White's side.
-        XCTAssertEqual(
-            CoreMLBoardRecognizer.orientationGuess(corners: [
+        #expect(CoreMLBoardRecognizer.orientationGuess(corners: [
                 CGPoint(x: 0, y: 800), CGPoint(x: 0, y: 100),
                 CGPoint(x: 800, y: 100), CGPoint(x: 800, y: 800),
-            ]),
-            .whiteBottom)
+            ]) == .whiteBottom)
         // a1 higher than a8 → camera on Black's side.
-        XCTAssertEqual(
-            CoreMLBoardRecognizer.orientationGuess(corners: [
+        #expect(CoreMLBoardRecognizer.orientationGuess(corners: [
                 CGPoint(x: 800, y: 100), CGPoint(x: 800, y: 800),
                 CGPoint(x: 0, y: 800), CGPoint(x: 0, y: 100),
-            ]),
-            .blackBottom)
+            ]) == .blackBottom)
     }
 }
