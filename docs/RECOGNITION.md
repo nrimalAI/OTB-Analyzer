@@ -130,8 +130,9 @@ photos by itself.
   2^24 colours; L* comes out 0.09 too low on average). On the median of a
   patch of a photo that is about as much as the two JPEG decoders add (0.09
   against 0.04 on average, 0.15 against 0.43 at most, on the 24 patches of a
-  fixture), and the two groups are tens of units apart, so the table was not
-  copied.
+  fixture). The two groups are usually tens of units apart, so the table was
+  not copied; a piece that lies between the two groups can fall the other
+  way (2 pieces of 23,523 on the test sets, below).
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
   lists) and prints what `evaluate.py` prints. It needs no Xcode.
@@ -249,9 +250,16 @@ rendered boards, exported for this measurement only, with the corner model in
   move, but a sparse position whose pieces the model had right could be made
   worse.
 - On the same boxes the Swift and the Python agree on the side of every
-  piece: 11,749 pieces on the 692 photos of the three sets, the step changing
-  a side on the same photos in both (38, 4, 0 with the model in `Models/`).
-  Cost: 0.07 s a photo with 32 pieces in a release build, about 1 s in a
+  piece with the model in `Models/`: 11,749 pieces on the 692 photos of the
+  three sets, the step changing a side on the same photos in both (38, 4, 0).
+  On `pieces_s_render1`'s boxes they agree on 11,772 of 11,774: one board B
+  photo with four near-black pieces and one Fenit A photo each have a piece
+  about as far from one group as from the other (54.3 against 55.6 on the
+  second), and it falls the other way; on board B that changes the class of
+  one piece. Both are OpenCV's Lab table: with the formula on OpenCV's own
+  pixels the Python gives the Swift's groups. The JPEG decoders changed no
+  side on any of the 1,384 readings.
+- Cost: 0.07 s a photo with 32 pieces in a release build, about 1 s in a
   debug build; like the grid fit it reads the photo's pixels once more (the
   rectangle that holds all the pieces).
 
