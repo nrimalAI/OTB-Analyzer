@@ -792,10 +792,6 @@ def main():
     ap.add_argument("--dump", help="write per-photo results to this json")
     args = ap.parse_args()
     args.procs = min(args.procs, 4)
-    manifest = Path(args.positions).with_name("manifest.json")
-    if manifest.exists() and json.loads(manifest.read_text()).get("test_only"):
-        print("NOTE: these photos are a test-only set (see sources.yaml). Report the "
-              "result; change no threshold here because of it.")
     OUT.mkdir(parents=True, exist_ok=True)
 
     rows = _rows(args)
