@@ -452,6 +452,8 @@ was in `Models/`, and why it was taken out again.
   - Rendered data (`render_boards.py`) teaches the piece type on a set the
     model has not seen: on board B pawns are read right 88% of the time (65%
     before), bishops 90% (60%), rooks 92% (82%).
+  - (**Read this with the second test set's table: the step below does not
+    generalise and is off by default.**)
   - `chess_pipeline.sides_from_colour`: with rendered data the model calls
     board B's brown "white" pieces black. Whether brown is White depends on
     the set (it is Black in a boxwood and rosewood set), so the step splits
@@ -697,6 +699,30 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `chesscog_real` | 29 | 52.9% | 49.4% / 0% | 50.1% / 0% | 78.3% / 0% | 78.3% / 0% |
 | `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 54.1% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
 | `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 54.2% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
+
+**`pieces_s_render1` and the colour step on this set, 2026-11-13 evening**
+(test only; in Python with `main`'s corner model, `--copies
+--one-piece-per-spot 0.7 --grid-corners --a1-from-pieces 6`;
+`runs/scores/heldout2_steps_*.txt`). Squares right / boards exact:
+
+| Part | Photos | Baseline pieces | `pieces_s_render1` | render1 + `--sides-from-colour` |
+|---|---|---|---|---|
+| `chessq` | 50 | 66.8% / 2% | 70.6% / 8% | 68.6% / 8% |
+| `ylichess`, `wood180` | 102 | 57.1% / 0% | 75.2% / 0% | **51.9%** / 0% |
+| `ylichess`, `wood180-layout` | 98 | 83.1% / 1% | 75.4% / 0% | 74.3% / 0% |
+| `chesscog_real` | 29 | 78.3% / 0% | 93.7% / 0% | 93.7% / 0% |
+| `samryan` | 500 | 64.6% / 0% | 79.5% / 2% | 79.2% / 2% |
+| `chesscv_games` | 840 | 81.5% / 0% | 89.1% / 0.5% | 89.1% / 0.5% |
+| all | 1,619 | 74.3%, 2 exact | **84.0%, 18 exact** | 82.4%, 18 exact |
+
+Two verdicts. The piece model trained with rendered data is better on boards
+nobody trained on: ten points of squares, and worse only on the Y-LIChess
+layouts. And **`sides_from_colour` does not hold up**: it gains nothing here
+and loses 23 points on the Y-LIChess game positions. Its colour weight and
+15% threshold were chosen on board B, where it turns 1 exact board into 17;
+that gain was fitted, not found. The step is to be off by default until a
+version developed on the training sources (many piece sets with labelled
+boxes) passes this table.
 
 **Through the app's own code, 2026-11-13** (`app_check`, the exported models
 in `Models/` at b546e6a: `main`'s corner model and the piece export with NMS
