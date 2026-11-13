@@ -148,6 +148,9 @@ scores the original photos.
   that have positions but no boxes — see `pseudo_label.py`. It only adds piece
   data for the same board, so it is the least valuable source.
 - `datasets/merged/manifest.json` records what went in and what was skipped.
+- Five more sources in `sources.yaml` are `test_only`: the second held-out
+  test set. `merge` leaves them out of every training folder; see "Second
+  held-out test set" below.
 
 `evaluate.py` on ChessReD's test split is unchanged, so those numbers stay
 comparable (baseline: 97.9% per-square, 73.5% boards exact). To score whole
@@ -444,6 +447,160 @@ request #4.
 fetch more Roboflow projects: `export ROBOFLOW_API_KEY=...`). Roboflow
 Universe's website refuses pages from this network until about 05:50 UTC on
 2026-11-13 (a search used up its quota); the API is unaffected.
+
+## Second held-out test set (2026-11): `datasets/heldout2`
+
+Fenit's board B is 100 photos of one board, and settings have been chosen on
+it (the grid fit's thresholds, the a1 prior). This is a second test set that
+nothing has been trained or tuned on: 1,617 real photos of 19 boards and
+piece sets that are in no training source (not ChessReD's, not Fenit's, none
+of the Roboflow projects), each with its full position, from five public
+sources that need no account or key.
+
+**The rule.** Never train on it, and never choose a threshold, a prior, an
+epoch or a model on it. Score finished candidates and report the number. A
+setting kept because it scored better here turns it into one more tuning set.
+`build_dataset.py merge` enforces what it can: sources marked `test_only` in
+`sources.yaml` are left out unless named, cannot be merged together with a
+training source, every photo is split `test`, and they go into a folder of
+their own, so the scripts that read `datasets/merged*/` never see them.
+
+```sh
+python build_dataset.py fetch chessq ylichess chesscog_real samryan chesscv_games   # 2.6 GB
+python build_dataset.py merge --out datasets/heldout2 \
+    --sources chessq ylichess chesscog_real samryan chesscv_games
+python preview_labels.py --merged datasets/heldout2 --per-source 12   # look at the labels
+./score_heldout2.sh <tag> <corners model> <pieces model> [evaluate.py arguments]
+```
+
+`chesscv_games` needs python-chess (`pip install chess`; it is in
+`requirements.txt`). `score_heldout2.sh` runs `evaluate.py` on each part on
+the CPU and writes `runs/scores/heldout2_<tag>.txt`.
+
+| Source | Photos | Boards | Camera | Position from | Licence |
+|---|---|---|---|---|---|
+| `chessq` ([ChessQ Test](https://huggingface.co/datasets/joelseytre/chessq-test)) | 50 | 15 kinds of set, at most 5 photos each | phones, oblique, 768x1024 to 3072x4080 | `metadata.jsonl`, reviewed by hand by its author | CC BY-NC 4.0 |
+| `ylichess` ([Y-LIChess](https://github.com/GibranBenitez/Y-LIChess), light-wood board) | 198: 102 game positions, 96 layouts | 1 folding wooden board | fixed webcam, high oblique, 1920x1080 | derived from its piece boxes and board outline; also gives boxes and corners | CC BY 4.0 |
+| `chesscog_real` ([chesscog](https://github.com/georg-wolflein/chesscog) transfer set) | 29 | 1 black-bordered wooden board | iPhone, low, from a player's seat, 1200x900 | one JSON per photo | none stated |
+| `samryan` ([samryan18/chess-dataset](https://github.com/samryan18/chess-dataset)) | 500 (476 positions) | 1 green vinyl mat on the floor | straight down, 6000x4000 | the file name | MIT |
+| `chesscv_games` ([Rizo-R/chess-cv](https://github.com/Rizo-R/chess-cv)) | 840 (405 positions) | 1 folding brown and cream board | phone in the hand, oblique, 2048x1536 | 8 games replayed; photo N is the game after ply N | none stated |
+
+What each is worth:
+
+- **`chessq` is the one that answers "does it read a board it has never
+  seen":** 15 different sets, phone photos, cluttered tables. It is only 50
+  photos, so the interval on boards exact is wide (about +-13 points
+  mid-range). The models published with it score 6% to 76% of boards exact.
+- `ylichess`, `chesscog_real` and `chesscv_games` are one board each: many
+  photos, one more unseen board apiece. Do not pool the five into one number;
+  840 photos of one board would drown 50 photos of 15. Report per source.
+- `chesscv_games` is 8 games photographed after every move from both sides:
+  neighbouring photos differ by one piece, so it is far fewer than 840
+  independent boards and its interval is too narrow as printed.
+- `samryan` is taken from straight above, where a piece shows only its top.
+  It measures that view, not a photo from a player's seat.
+
+What to know about the labels:
+
+- **a1 follows the pieces, not the print on the board.** In ChessQ, in
+  `chesscv_games`' `rev/` photos and in the second half of `ylichess` the
+  position is set up against the coordinates printed on the board (White's
+  pieces on the printed 7th and 8th ranks). The label is the position as a
+  player reads it from the pieces. `evaluate.py` also prints "exact once
+  turned 180 degrees", which does not depend on this.
+- **`ylichess` has no position file.** Each photo has piece boxes and the
+  outline of the playing area; the position is where the boxes stand
+  (`load_ylichess`). A photo is left out unless every box lands on a square
+  of its own and stays there for anchor pulls from 0.15 to 0.45 (4 of 204
+  left out); 2 more are left out because the pieces contradict the a1 rule.
+  Which corner is a1 is not recorded: the camera and board never move, photos
+  numbered up to 100 have White on the far side (a1 top right, as the
+  stickers on the board's frame say) and the rest are set up the other way
+  round. 96 photos are piece layouts made to cover the board (two knights; a
+  king and queen; all 32 pieces packed into four ranks), where a1 is only
+  that convention: they are the group `wood180-layout`, the 102 positions
+  that could come from a game are `wood180`. Score layouts by "exact once
+  turned 180 degrees".
+- **Only one of Y-LIChess's four boards is used.** On the other three
+  (`plastic_bw`, `wood_dark`, `mat_green`, 615 photos) the boxes are a
+  detector's output, not labels: pieces without a box, kings labelled queen,
+  two boxes on one piece. The four boards show the same positions, but the
+  numbering differs between the labelled board and the others, and matching
+  them through the noisy boxes was reliable for only 42 of 205 positions.
+- `chesscv_games`: `orig/` is seen from White's side, `rev/` from Black's
+  (the groups `white-side` and `black-side`).
+- `chessq` is CC BY-NC and two sources state no licence: fine for scoring
+  here, and nothing from this set is trained on or redistributed anyway.
+
+Checked 2026-11-13: 18 photos compared with their position square by square
+(ChessQ 4, `chesscv_games` 6 including the last position of four games from
+both sides, `ylichess` 4, `samryan` 2, `chesscog_real` 2): all right. ChessQ's
+two label fields agree on all 50 photos. No test photo is a copy of a
+training photo: against the 16,358 images of `merged_v2`, `merged_rf` and
+`merged_synth`, the closest 32x32 thumbnail has a correlation of 0.82 (a copy
+gives 0.98 or more).
+
+**Scores, 2026-11-13** (`runs/scores/heldout2_*.txt`). Per-square / boards
+exact; "empty" is what predicting an empty board scores per square, so a
+figure below it is worse than nothing. Scored with the `.pt` weights on the
+CPU, letterboxed. "Now" is what is in `Models/` since 2026-11-13: exp3's
+corners and the baseline piece weights with `--one-piece-per-spot 0.7`, which
+stands in for the export's NMS across classes.
+
+| Part | Photos | Empty | Baseline (`baseline/*_yolo11n_chessred2k.pt`) | Now (`corners_yolo11s_exp3.pt` + baseline pieces) | Now + `--a1-from-pieces 6` |
+|---|---|---|---|---|---|
+| `chessq` | 50 | 68.9% | 37.4% / 0%, board not found in 18 | 74.5% / 0% | 74.5% / 0% |
+| `ylichess`, `wood180` | 102 | 57.5% | 0% / 0%, board not found in 102 | 69.9% / 0% | 65.1% / 0% |
+| `ylichess`, `wood180-layout` | 96 | 89.8% | 0% / 0%, board not found in 96 | 88.0% / 1.0% | 86.8% / 1.0% |
+| `chesscog_real` | 29 | 52.9% | 49.4% / 0% | 78.3% / 0% | 78.3% / 0% |
+| `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
+| `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
+
+- **Neither pair reads one game position fully right on any of the 19
+  boards** (one layout photo of 96 comes out right). Counting a board turned
+  180 degrees as right changes nothing. The target is 85% of boards exact.
+- The new corner model finds the board in all 1,617 photos; the baseline
+  misses it in 292, among them every photo of the Y-LIChess board.
+- **Which model fails**, on the one source that has boxes and corners
+  (`ylichess`, `wood180`, 102 game positions): exp3's corners with the
+  labelled boxes give 99.6% / **97.1% exact** (interval 92-99%), so on this
+  board the corner model is precise and has a1 right; the piece model with
+  the labelled corners gives 70.1% / 0%. The piece model is what fails, as on
+  board B. On the layouts the corners with labelled boxes give 32% exact,
+  44% counting a turn: a1 cannot be told there.
+- `--a1-from-pieces 6` (what the app does since pull request #5) does not
+  help here and costs 5 points per square on `wood180`: with pieces misread,
+  it turns boards the corner model had the right way round. This is a
+  measurement, not a reason to pick another prior on these photos.
+- `samryan` (straight down) and the layouts score below an empty board.
+
+**Looked at and not taken** (2026-11-13; searched: Hugging Face, GitHub,
+OSF, Zenodo, Mendeley Data, 4TU, figshare, Dataverse, papers on board
+recognition):
+
+- CVChess "Multiviews3" (352 iPhone photos, one green vinyl board, four
+  viewpoints; images in a Google Drive folder, corrected labels in
+  `JSeytre/chessqueries`): usable, a sixth source if one is wanted. Left out
+  for now: no licence, the published labels are one ply ahead (the corrected
+  copy fixes it), the photos carry GPS tags, and 352 single-file downloads.
+- OpenChessRobot (4TU, CC BY 4.0, 160 photos): positions are coverage
+  layouts with 63 pieces and several kings; one fixed robot camera.
+- `OliverButlerSU/Realtime-Chess-Digitizer` (about 1,300 webcam frames of 20
+  games): near top-down, heavily compressed, labels are move lists with an
+  undocumented rotation code; also on Kaggle.
+- LiveChess2FEN `TestImages.zip`: 5 photos with a position.
+- `dopaul/chess-pieces-dominique` (Hugging Face): boxes and a board polygon,
+  no position, 164 photos of which 71 are the start position; a Roboflow export.
+- `Deinigu/TFG-Diego`: 130 video frames with boxes, no corners, no position.
+- `youyexie/Dataset-Of-Chessboards`, `neural-chessboard`, `jayhack/CVChess`,
+  `jialinding/ChessVision`: no positions (or piece type without colour).
+- Pre-rectified boards (`felixfabricius/robot-chess-commentator-squares`,
+  `roni-hershko/chess_data`): the board is already cut out and warped.
+- Copies of data already in use: `ehcalabres/chess-rfdetr-coco`,
+  `acapitani/chesspiece-detection-yolo`, `smallchess/knight-vision-datasets`,
+  `tranmh/pgnize` (ChessReD); `Enzo2806/RecogniChess` (the samryan photos);
+  figshare "FENiT Data" (Fenit); several copies of Joseph Nelson's set.
+- Kaggle and Roboflow Universe need an account or a key; IEEE DataPort a login.
 
 ## Baseline on other boards (2026-11)
 

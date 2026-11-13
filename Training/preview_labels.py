@@ -10,6 +10,10 @@ yellow, black in blue), the board outline with the corner names, the square
 grid those corners imply, and the squares a1 and h8 named. Where the position
 is known (positions.json) it is printed above the picture.
 
+A photo that has a position and no boxes or corners (most of the test-only
+sources) is shown beside two diagrams of that position, one as White sees the
+board and one as Black does, to compare with the photo by eye.
+
 --check maps every labelled box through the labelled corners and counts how
 many land on a square that holds that piece in the known position. Low numbers
 mean wrong corners, wrong corner order, or a position that is not the photo's.
@@ -137,6 +141,63 @@ def draw(entry, stem, placement, width):
     return np.vstack([bar, img])
 
 
+def diagram(placement, side, from_black=False):
+    """The position as a square picture `side` pixels wide: white pieces are
+    light discs, black pieces dark ones, each with its letter."""
+    cell = side // 9
+    img = np.full((side, side, 3), 40, np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    board = fen_placement_to_board(placement)
+    for f in range(8):
+        for r in range(8):
+            col, row = (7 - f, r) if from_black else (f, 7 - r)
+            x, y = cell // 2 + col * cell, row * cell
+            light = (f + r) % 2 == 1
+            cv2.rectangle(img, (x, y), (x + cell, y + cell),
+                          (200, 220, 235) if light else (95, 135, 170), -1)
+            letter = board.get((f, r))
+            if letter:
+                white = letter.isupper()
+                centre = (x + cell // 2, y + cell // 2)
+                cv2.circle(img, centre, int(cell * 0.38), (255, 255, 255) if white else (0, 0, 0), -1)
+                cv2.circle(img, centre, int(cell * 0.38), (0, 0, 0) if white else (255, 255, 255), 1)
+                size = cell / 55
+                (tw, th), _ = cv2.getTextSize(letter.upper(), font, size, 2)
+                cv2.putText(img, letter.upper(), (centre[0] - tw // 2, centre[1] + th // 2), font,
+                            size, (0, 0, 0) if white else (255, 255, 255), 2, cv2.LINE_AA)
+    for i in range(8):
+        file, rank = ("hgfedcba" if from_black else "abcdefgh")[i], (i + 1 if from_black else 8 - i)
+        cv2.putText(img, file, (cell // 2 + i * cell + cell // 3, 8 * cell + cell // 2), font,
+                    cell / 80, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(img, str(rank), (cell // 8, i * cell + cell * 2 // 3), font,
+                    cell / 80, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, "from Black's side" if from_black else "from White's side",
+                (cell // 2, side - cell // 8), font, cell / 90, (160, 255, 160), 1, cv2.LINE_AA)
+    return img
+
+
+def draw_position_only(row, width):
+    """The photo with its position drawn beside it from both sides."""
+    img = cv2.imread(str(row.get("original") or row["image"]))
+    h0, w0 = img.shape[:2]
+    photo_w = width * 2 // 3
+    img = cv2.resize(img, (photo_w, round(h0 * photo_w / w0)), interpolation=cv2.INTER_AREA)
+    side = width - photo_w
+    panel = np.vstack([diagram(row["placement"], side), diagram(row["placement"], side, True)])
+    height = max(img.shape[0], panel.shape[0])
+    canvas = np.zeros((height, width, 3), np.uint8)
+    canvas[:img.shape[0], :photo_w] = img
+    canvas[:panel.shape[0], photo_w:] = panel
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    bar = np.zeros((66, width, 3), np.uint8)
+    cv2.putText(bar, row["id"][:110], (6, 20), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(bar, f"{row['split']}  position only" + (f"  group={row['group']}" if row.get("group") else ""),
+                (6, 40), font, 0.5, (160, 255, 160), 1, cv2.LINE_AA)
+    cv2.putText(bar, f"position: {row['placement']}", (6, 60), font, 0.5,
+                (160, 200, 255), 1, cv2.LINE_AA)
+    return np.vstack([bar, canvas])
+
+
 def check(by_source, placements):
     for source, entries in sorted(by_source.items()):
         total = boxes_n = hits_n = both = low = 0
@@ -178,10 +239,17 @@ def main():
 
     merged = (HERE / args.merged).resolve()
     by_source = collect(merged)
-    placements = {Path(r["image"]).stem: r["placement"]
-                  for r in json.loads((merged / "positions.json").read_text())}
+    rows = json.loads((merged / "positions.json").read_text())
+    placements = {Path(r["image"]).stem: r["placement"] for r in rows}
+    # Photos with a position and no label files: nothing to draw on them.
+    position_only = defaultdict(dict)
+    for r in rows:
+        r.setdefault("id", f"{r['source']}__{Path(r['image']).stem}")
+        if Path(r["image"]).stem not in by_source.get(r["source"], {}):
+            position_only[r["source"]][r["id"]] = r
     if args.sources:
         by_source = {k: v for k, v in by_source.items() if k in args.sources}
+        position_only = {k: v for k, v in position_only.items() if k in args.sources}
     if args.check:
         check(by_source, placements)
         return
@@ -200,6 +268,16 @@ def main():
                         draw(entries[stem], stem, placements.get(stem), args.width),
                         [cv2.IMWRITE_JPEG_QUALITY, 85])
         print(f"{source}: wrote {len(picked)} previews")
+    for source, entries in sorted(position_only.items()):
+        stems = sorted(entries)
+        if args.stems:
+            picked = [s for s in stems if s in args.stems]
+        else:
+            picked = rng.sample(stems, min(args.per_source, len(stems)))
+        for stem in picked:
+            cv2.imwrite(str(out / f"{stem}.jpg"), draw_position_only(entries[stem], args.width),
+                        [cv2.IMWRITE_JPEG_QUALITY, 85])
+        print(f"{source}: wrote {len(picked)} previews (position only)")
     print(f"-> {out}")
 
 
