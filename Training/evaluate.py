@@ -90,6 +90,23 @@ def detect_corners(model, src, imgsz=640, two_pass=False):
     return [[p[0] + x1, p[1] + y1] for p in second]
 
 
+def one_per_spot(detections, max_iou):
+    """Detections without the ones that overlap a more confident detection
+    (of any class) by more than max_iou."""
+    def iou(a, b):
+        w = min(a[2], b[2]) - max(a[0], b[0])
+        h = min(a[3], b[3]) - max(a[1], b[1])
+        if w <= 0 or h <= 0:
+            return 0.0
+        inter = w * h
+        return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    kept = []
+    for det in sorted(detections, key=lambda d: -d.confidence):
+        if all(iou(det.bbox, k.bbox) <= max_iou for k in kept):
+            kept.append(det)
+    return kept
+
+
 def stretched(src, side=640):
     """The photo as the app hands it to the models: scaled to side x side
     without keeping its shape (Vision's .scaleFill). Returns the image and the
@@ -215,6 +232,10 @@ def main():
                     help="use the labelled corners instead of the corner model")
     ap.add_argument("--gt-boxes", action="store_true",
                     help="use the labelled piece boxes instead of the piece model")
+    ap.add_argument("--one-piece-per-spot", type=float, default=None, metavar="IOU",
+                    help="drop a detected box that overlaps a more confident one of "
+                         "any class by more than IOU (the piece model's own NMS is "
+                         "per class, so one piece can come back as two classes)")
     ap.add_argument("--grid-corners", action="store_true",
                     help="replace the corners by the classical grid fit "
                          "(grid_corners.py) where it accepts its own result; the "
@@ -299,6 +320,8 @@ def main():
                     detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
                                                 (x1 * sx, y1 * sy, x2 * sx, y2 * sy)))
 
+        if args.one_piece_per_spot is not None and not args.gt_boxes:
+            detections = one_per_spot(detections, args.one_piece_per_spot)
         if args.a1_from_pieces is not None:
             H = homography(orient_by_pieces(kpts, detections, args.pull,
                                             prior=args.a1_from_pieces))
