@@ -8,6 +8,11 @@ The recognition pipeline:
   4. conflict resolution: one piece per square, highest confidence wins;
      the loser is demoted to its next-nearest square if empty, else dropped.
 
+Two optional steps around it (evaluate.py options of the same names):
+  - sides_from_colour: White and Black from the colours of the pieces in the
+    photo, where the model's own answer does not fit them (before step 3);
+  - orient_by_pieces: which corner is a1, from where the pieces stand.
+
 The Swift port in ChessVision (Phase 2) must match this file's behavior;
 evaluate.py is the executable spec.
 """
@@ -133,6 +138,101 @@ def assign_detections(H, detections, pull=0.30):
             board[candidates[0][1]] = det
         # else: dropped
     return board
+
+
+# --------------------------------------------------------------------------
+# Which side a piece belongs to, from the colours of the pieces in the photo
+
+# Where in a piece's box its colour is measured: the middle, as fractions of
+# the box (left, right, top, bottom). The body of the piece, not the square
+# behind its head or the board in front of its foot.
+COLOUR_PATCH = (0.3, 0.7, 0.2, 0.85)
+# How much more a* and b* (the colour) count than L* (the lightness) when the
+# pieces are split in two: a brown piece and a black one under a lamp can be
+# equally light, but only one of them is brown.
+CHROMA_WEIGHT = 4.0
+# The model's own answer stands unless the colours contradict it for more
+# than this share of the pieces.
+SIDE_DISAGREEMENT = 0.15
+
+
+def colour_patch(bbox, width, height):
+    """Pixel rectangle (x0, y0, x1, y1), end exclusive, of the part of a
+    piece's box whose colour is measured; None when it is empty."""
+    x1, y1, x2, y2 = bbox
+    w, h = x2 - x1, y2 - y1
+    l, r, t, b = COLOUR_PATCH
+    xa, xb = int(x1 + l * w), int(x1 + r * w) + 1
+    ya, yb = int(y1 + t * h), int(y1 + b * h) + 1
+    xa, ya, xb, yb = max(xa, 0), max(ya, 0), min(xb, width), min(yb, height)
+    return (xa, ya, xb, yb) if xb > xa and yb > ya else None
+
+
+def two_groups(points):
+    """Split points (rows of numbers) in two by 2-means, started from the two
+    points farthest apart (the first such pair). Returns a list of 0/1, the
+    group of each point, and the two group means; None when there are fewer
+    than two points or they are all the same."""
+    pts = np.asarray(points, dtype=float)
+    n = len(pts)
+    if n < 2:
+        return None
+    d = ((pts[:, None] - pts[None]) ** 2).sum(axis=2)
+    i, j = divmod(int(np.argmax(d)), n)
+    if d[i, j] <= 0:
+        return None
+    centres = np.stack([pts[i], pts[j]])
+    group = None
+    for _ in range(50):
+        dist = ((pts[:, None] - centres[None]) ** 2).sum(axis=2)
+        new = [0 if dist[k, 0] <= dist[k, 1] else 1 for k in range(n)]
+        if new == group:
+            break
+        group = new
+        for g in (0, 1):
+            members = [pts[k] for k in range(n) if group[k] == g]
+            if members:
+                centres[g] = np.mean(members, axis=0)
+    return group, centres
+
+
+def sides_from_colour(detections, colours, chroma=CHROMA_WEIGHT,
+                      disagreement=SIDE_DISAGREEMENT):
+    """The detections with White and Black decided by the pieces' colours
+    where the model's own answer does not fit them.
+
+    `colours` holds, for each detection, the median (L*, a*, b*) of its
+    colour_patch (CIE Lab, L* 0-100), or None when the patch is empty. The
+    pieces that have a colour are split in two groups by colour (two_groups
+    on (L*, chroma a*, chroma b*)); the lighter group is White. A piece set
+    the model has not seen (brown "white" pieces, say) is still two groups of
+    one colour each, which the model's class scores alone do not use.
+
+    The split can be wrong for a few pieces (a shadow, a glint), so on boards
+    the model reads well it would cost more than it gains. It is therefore
+    used only when it contradicts the model for more than `disagreement` of
+    the pieces: then every piece with a colour takes its group's side. A
+    piece keeps its kind and confidence either way."""
+    idx = [k for k, c in enumerate(colours) if c is not None]
+    if len(idx) < 2:
+        return list(detections)
+    split = two_groups([(colours[k][0], chroma * colours[k][1], chroma * colours[k][2])
+                        for k in idx])
+    if split is None:
+        return list(detections)
+    group, centres = split
+    if len(set(group)) < 2:
+        return list(detections)
+    white = 0 if centres[0][0] >= centres[1][0] else 1
+    side = ["white" if g == white else "black" for g in group]
+    differ = sum(1 for k, s_ in zip(idx, side) if not detections[k].cls.startswith(s_))
+    if differ <= disagreement * len(idx):
+        return list(detections)
+    out = list(detections)
+    for k, s_ in zip(idx, side):
+        det = detections[k]
+        out[k] = Detection(s_ + "_" + det.cls.split("_", 1)[1], det.confidence, det.bbox)
+    return out
 
 
 def white_side_score(board):

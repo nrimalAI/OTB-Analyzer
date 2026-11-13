@@ -31,7 +31,8 @@ from pathlib import Path
 
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
-    assign_squares, fen_placement_to_board, homography, orient_by_pieces,
+    assign_squares, colour_patch, fen_placement_to_board, homography, orient_by_pieces,
+    sides_from_colour,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -67,6 +68,27 @@ def placement_of(board):
             empty = 0
         rows.append(row + (str(empty) if empty else ""))
     return "/".join(rows)
+
+
+def piece_colours(src, detections):
+    """Median CIE Lab of the middle of each detection's box in the photo
+    (chess_pipeline.colour_patch), or None for an empty patch."""
+    import cv2
+    import numpy as np
+    img = cv2.imread(str(src))
+    if img is None:
+        return [None] * len(detections)
+    lab = cv2.cvtColor(img.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)
+    h, w = lab.shape[:2]
+    out = []
+    for det in detections:
+        patch = colour_patch(det.bbox, w, h)
+        if patch is None:
+            out.append(None)
+            continue
+        xa, ya, xb, yb = patch
+        out.append(tuple(float(v) for v in np.median(lab[ya:yb, xa:xb].reshape(-1, 3), axis=0)))
+    return out
 
 
 def detect_corners(model, src, imgsz=640, two_pass=False, device=None):
@@ -255,6 +277,10 @@ def main():
                     help="drop a detected box that overlaps a more confident one of "
                          "any class by more than IOU (the piece model's own NMS is "
                          "per class, so one piece can come back as two classes)")
+    ap.add_argument("--sides-from-colour", action="store_true",
+                    help="decide White and Black from the colours of the detected "
+                         "pieces where the model's answer does not fit them "
+                         "(chess_pipeline.sides_from_colour)")
     ap.add_argument("--grid-corners", action="store_true",
                     help="replace the corners by the classical grid fit "
                          "(grid_corners.py) where it accepts its own result; the "
@@ -319,7 +345,7 @@ def main():
 
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
-    exact_or_flipped = grid_rejected = grid_alone = 0
+    exact_or_flipped = grid_rejected = grid_alone = sides_changed = 0
     confusion = Counter()
 
     for src, gt, gt_kpts, gt_boxes in items:
@@ -379,6 +405,10 @@ def main():
 
         if args.one_piece_per_spot is not None and not args.gt_boxes:
             detections = one_per_spot(detections, args.one_piece_per_spot)
+        if args.sides_from_colour and not args.gt_boxes:
+            before = [d.cls for d in detections]
+            detections = sides_from_colour(detections, piece_colours(src, detections))
+            sides_changed += any(d.cls != c for d, c in zip(detections, before))
         if not model_found:
             # No model opinion on a1 to weigh against the pieces.
             H = homography(orient_by_pieces(kpts, detections, args.pull, prior=0.0))
@@ -440,6 +470,8 @@ def main():
     if args.grid_corners:
         print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
         print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
+    if args.sides_from_colour:
+        print(f"sides taken from the pieces' colours on: {sides_changed} boards")
     print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):
