@@ -53,11 +53,35 @@ import Testing
         return (corners, pieces)
     }
 
-    /// The recognizer as the app builds it, or with the grid fit switched off.
-    private func makeRecognizer(gridFit: Bool = true) throws -> CoreMLBoardRecognizer {
+    /// The recognizer as the app builds it (every default left alone), or
+    /// with the grid fit switched off, or with the colour step switched on.
+    private func makeRecognizer(
+        gridFit: Bool? = nil, sidesFromColour: Bool? = nil
+    ) throws -> CoreMLBoardRecognizer {
         let models = try Self.models.get()
-        return try CoreMLBoardRecognizer(
-            cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
+        switch (gridFit, sidesFromColour) {
+        case (nil, nil):
+            return try CoreMLBoardRecognizer(cornerModel: models.corners, pieceModel: models.pieces)
+        case let (gridFit?, nil):
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
+        case let (nil, sides?):
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, sidesFromColour: sides)
+        case let (gridFit?, sides?):
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit,
+                sidesFromColour: sides)
+        }
+    }
+
+    /// The colour step is off unless asked for (`docs/RECOGNITION.md`, "What
+    /// the colour step is worth"). Switching it on by default is a decision
+    /// to take with scores on a set nothing was tuned on, not in passing.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testColourStepIsOffByDefault() throws {
+        #expect(try makeRecognizer().sidesFromColour == false)
+        #expect(try makeRecognizer(sidesFromColour: true).sidesFromColour == true)
     }
 
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
@@ -73,6 +97,14 @@ import Testing
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testCornerModelAloneReadsTheFixtures() async throws {
         try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")
+    }
+
+    /// The colour step is off in the app. Switched on, it must leave boards
+    /// the piece model reads well as they are.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testSidesFromColourSwitchedOnLeavesTheFixturesRight() async throws {
+        try await expectFixturesRead(
+            by: try makeRecognizer(sidesFromColour: true), label: "fixture, sides from colour")
     }
 
     /// The colour step on the fixtures: every piece the model finds has a

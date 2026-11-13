@@ -7,8 +7,8 @@ import Testing
 @testable import ChessVision
 
 /// `PieceSides` against `Training/chess_pipeline.py` (`colour_patch`,
-/// `two_groups`, `sides_from_colour`) and `Training/evaluate.py`
-/// (`piece_colours`). The reference values are in
+/// `two_groups`, `colour_sides`, `sides_from_colour`) and
+/// `Training/evaluate.py` (`srgb_to_lab`, `piece_colours`). The reference values are in
 /// `Fixtures/colour_cases.json`, written by
 /// `Training/swift_reference.py colour-cases`; run that again after changing
 /// the Python, and a change in the JSON is a change the Swift must follow.
@@ -40,6 +40,7 @@ struct PieceSidesTests {
         struct Sides: Decodable {
             let detections: [Detection]
             let colours: [[Double]?]
+            let by_colour: [String?]?
             let sides: [String]
         }
         struct Picture: Decodable {
@@ -96,31 +97,27 @@ struct PieceSidesTests {
 
     // MARK: - Against Python
 
-    /// OpenCV does not compute Lab for float pixels, it interpolates in a
-    /// table: off by up to 0.19 in L*, 0.47 in a* and 0.33 in b* (measured
-    /// over all 2^24 colours; the worst is RGB (0, 36, 12)), 0.08 on average.
-    /// `PieceSides.lab` is the formula.
-    @Test func testLabIsOpenCVsToWithinItsTable() throws {
+    /// The same formula in the same double arithmetic (`evaluate.srgb_to_lab`):
+    /// what is left is the last bits of the power and the cube root.
+    @Test func testLabIsPythons() throws {
         let colours = try Self.recorded.get().lab
         #expect(colours.count >= 200)
-        var worst = 0.0, sum = 0.0
+        var worst = 0.0
         for colour in colours {
             let ours = PieceSides.lab(red: colour.rgb[0], green: colour.rgb[1], blue: colour.rgb[2])
             let off = Self.distance(ours, colour.lab)
             worst = max(worst, off)
-            sum += off
-            #expect(off < 0.5, "\(colour.rgb): \(ours) for \(colour.lab)")
+            #expect(off < 1e-9, "\(colour.rgb): \(ours) for \(colour.lab)")
         }
-        let mean = sum / Double(colours.count)
-        print("lab: difference from OpenCV, largest \(worst), mean \(mean)")
-        #expect(mean < 0.2)
+        print("lab: largest difference from Python \(worst)")
         let white = PieceSides.lab(red: 255, green: 255, blue: 255)
         #expect(abs(white.l - 100) < 1e-3 && abs(white.a) < 1e-3 && abs(white.b) < 1e-3)
         #expect(PieceSides.lab(red: 0, green: 0, blue: 0) == PieceSides.Lab(l: 0, a: 0, b: 0))
     }
 
-    /// The formula, against values worked out by hand from the CIE
-    /// definition with OpenCV's matrix and white point.
+    /// The formula, against values worked out separately from the CIE
+    /// definition with OpenCV's matrix and white point (so that the Swift
+    /// and the Python cannot be wrong together).
     @Test func testLabIsTheFormula() {
         func check(_ r: UInt8, _ g: UInt8, _ b: UInt8, _ expected: (Double, Double, Double)) {
             let ours = PieceSides.lab(red: r, green: g, blue: b)
@@ -198,23 +195,21 @@ struct PieceSidesTests {
         #expect(changed >= 20 && kept >= 20, "\(changed) changed, \(kept) kept")
     }
 
-    /// Every recorded case again with the step switched round: the same
-    /// sides must come out of `sidesByColour` wherever the Python changed
-    /// one, so that the two functions cannot drift apart.
-    @Test func testSidesByColourIsWhatTheStepApplies() throws {
+    /// The side of each piece by colour alone (`colour_sides`), which the
+    /// step then applies or not.
+    @Test func testSidesByColourIsPythons() throws {
+        var split = 0, none = 0
         for (index, recorded) in try Self.recorded.get().sides.enumerated() {
-            let detections = try recorded.detections.map(Self.detection)
-            let colours = recorded.colours.map(Self.lab)
-            let byColour = PieceSides.sidesByColour(colours)
-            guard recorded.sides != recorded.detections.map(\.cls) else { continue }
-            let sides = try #require(byColour, "detections \(index)")
-            for (piece, (side, final)) in zip(sides, recorded.sides).enumerated() {
-                let model = detections[piece].color
-                #expect((side ?? model) == (final.hasPrefix("white") ? .white : .black),
-                        "detections \(index), piece \(piece)")
-                #expect((side == nil) == (colours[piece] == nil), "detections \(index), piece \(piece)")
+            let ours = PieceSides.sidesByColour(recorded.colours.map(Self.lab))
+            let named = ours.map { $0.map { $0.map { $0 == .white ? "white" : "black" } } }
+            #expect(named == recorded.by_colour, "detections \(index)")
+            if recorded.by_colour == nil {
+                none += 1
+            } else {
+                split += 1
             }
         }
+        #expect(split >= 20 && none >= 10, "\(split) split, \(none) not")
     }
 
     /// The drawn picture: brown and black pieces that a model calls all
@@ -231,8 +226,8 @@ struct PieceSidesTests {
                 #expect(ours == nil && theirs == nil, "box \(index)")
                 continue
             }
-            // Same pixels (a PNG): what is left is OpenCV's table.
-            #expect(Self.distance(ours, theirs) < 0.3, "box \(index): \(ours) for \(theirs)")
+            // Same pixels (a PNG) and the same formula.
+            #expect(Self.distance(ours, theirs) < 1e-9, "box \(index): \(ours) for \(theirs)")
         }
 
         let sides = PieceSides.fromColour(detections, in: image)
