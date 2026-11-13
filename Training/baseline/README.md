@@ -37,7 +37,6 @@ results in `Models/`. The first row's piece model needs
 | before 2026-11 | `corners_yolo11n_chessred2k.pt` | `pieces_yolo11n_chessred2k.pt`, NMS per class | ChessReD2K | ChessReD test 97.86% / 74.2%; Fenit board B 24.2% / 0%: the board is not found in 66 of 100 photos, which count as all wrong; on the 34 found about 71% (the `.pt` files find 88 and give 58.0% / 0%) |
 | 2026-11-13 | `corners_yolo11s_exp3.pt` (run `corners_s_exp3`, FP16) | `pieces_yolo11n_chessred2k.pt` again, exported with NMS across classes (FP16) | corners: ChessReD2K, chesscog, Fenit board A, 3,000 synthetic boards; pieces: ChessReD2K | ChessReD test 99.47% / 87.6%; Fenit board B 67.7% / 0%, board found in all 100 |
 | 2026-11-13, later | `corners_yolo11n_chessred2k.pt` again (the file from `main`) | unchanged: `pieces_yolo11n_chessred2k.pt` with NMS across classes (FP16) | ChessReD2K | Through the app's code (`app_check`, a1 from the pieces), ChessReD test boards exact: 238 of 306 (77.8%; with `main`'s piece export 229), Fenit board B 46.6% of squares, board not found in 35 of 100 |
-
 The second row never reached `main`: exp3's corners turn three endgame photos
 of ChessReD game G033 by 180 degrees (one is the package's fixture
 `test_004005.jpg`), which `main`'s corner model gets right, so the tests fail
