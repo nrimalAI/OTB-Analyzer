@@ -10,23 +10,28 @@ and what they were measured to be worth. Training results are in
 ## The steps (`CoreMLBoardRecognizer.recognize`)
 
 1. The photo is letterboxed into a square (`Letterbox`) and given to both models.
-2. Corner model: four corners in (a1, a8, h8, h1) order. No board, no result.
+2. Corner model: four corners in (a1, a8, h8, h1) order, or no board.
 3. **Corners from the grid** (`GridCorners`, port of `Training/grid_corners.py`
    `find_grid`): a classical fit of the 8×8 grid to the photo itself. Where it
    accepts its own result, its corners replace the model's, turned to the
    rotation nearest the model's (the fit cannot know which corner is a1).
-   Where it rejects itself, the model's corners stay. It needs no training, so
-   it works on boards no model has seen, where learned corners are a square
-   or so off.
+   Where it rejects itself, the model's corners stay. Where the model found
+   no board and the fit accepts, the fit's corners are used alone. Only when
+   both fail is there no board. The fit needs no training, so it works on
+   boards no model has seen, where learned corners are a square or so off.
 4. Piece model: boxes with a class and a confidence.
 5. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
    `orient_by_pieces`): of the four rotations of the corners, the one whose
    board looks most like White at ranks 1-2 wins; the corner model's own
-   rotation gets a head start of 6 (`BoardOrientation.appPrior`).
+   rotation gets a head start of 6 (`BoardOrientation.appPrior`). When the
+   corners are the fit's alone there is no model opinion, and the pieces
+   decide without a head start.
 6. Each box's bottom centre goes through the corner homography to a square
    (`Homography`, `SquareAssignment`); one piece per square.
 
 Steps 3 and 5 can be switched off (`CoreMLBoardRecognizer(gridFit:a1Prior:)`).
+How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
+and it is what `Training/evaluate.py --grid-corners` does.
 
 ### The grid fit in a paragraph
 
@@ -110,39 +115,48 @@ or, for small negative indices, a wrap to the other side); see
 ## What the two steps are worth
 
 Through `app_check` (the app's own code, Vision doing the resize) on the Mac
-mini, 2026-11-13. "Steps off" is `--a1-prior off --grid-fit off`, "both" is the
+mini, 2026-11-13. "Off" is `--a1-prior off --grid-fit off`, "both" is the
 app's default (grid fit on, prior 6). Boards exact, and in brackets boards
 that are exact once turned by 180 degrees (one tap in the app).
 
-| Models | Steps | ChessReD test, 306 | Fenit board B, 100 (unseen) | Fenit A, 286 |
+**The models in `Models/` (b546e6a: `main`'s corner model, the baseline piece
+weights exported with NMS across classes):**
+
+| Steps | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
+|---|---|---|---|
+| off | 238 = 77.8% | 0; 46.6% of squares; no board in 35 | 0; 73.6% of squares |
+| a1 from the pieces only | 238 | 0; 46.6% of squares; no board in 35 | 0; 74.0% of squares |
+| **both** | **280 = 91.5%** (280) | 0 (1); **82.3%** of squares; no board in 6 | 15 (17); **91.4%** of squares |
+
+**Other corner models, for comparison** (rows marked * were scored before the
+fit was used alone; that changes nothing for exp3 and exp4, which find every
+board):
+
+| Models | Steps | ChessReD test, 306 | Fenit board B, 100 | Fenit A, 286 |
 |---|---|---|---|---|
-| `main` (yolo11n, 2026-10) | off | 229 = 74.8% | 0; 45.5% of squares; no board in 35 | 0; 72.8% of squares |
-| `main` | both | **267 = 87.3%** (267) | 0 (1); 53.7% of squares; no board in 35 | 4 (5); 89.1% of squares |
-| exp3 corners (pull request #4) | off | 272 = 88.9% (273) | 0; 70.1% of squares | 21; 95.1% of squares |
-| exp3 | a1 from the pieces only | 272 (273) | 0 (1); 78.1% of squares | 20 (21); 93.5% of squares |
-| exp3 | both | **282 = 92.2%** (285) | 0 (1); **86.3%** of squares | 20 (21); 93.5% of squares |
-| exp4 corners | both | 281 = 91.8% (284) | 0 (1); 86.5% of squares | 20 (21); 93.5% of squares |
+| `main`'s two models as on `main` | off | 229 = 74.8% | 0; 45.5% of squares; no board in 35 | 0; 72.8% of squares |
+| `main`'s two models * | both, fit not used alone | 267 = 87.3% (267) | 0 (1); 53.7% of squares; no board in 35 | 4 (5); 89.1% of squares |
+| exp3 corners | off | 272 = 88.9% (273) | 0; 70.1% of squares | 21; 95.1% of squares |
+| exp3 corners | a1 from the pieces only | 272 (273) | 0 (1); 78.1% of squares | 20 (21); 93.5% of squares |
+| exp3 corners * | both | 282 = 92.2% (285) | 0 (1); 86.3% of squares | 20 (21); 93.5% of squares |
+| exp4 corners * | both | 281 = 91.8% (284) | 0 (1); 86.5% of squares | 20 (21); 93.5% of squares |
 
 What this says:
 
-- The grid fit is worth 10 boards in 306 on ChessReD with exp3's corners and
-  38 with `main`'s, whose corners are less precise; on the unseen board it
-  adds 8 points of squares. With `main`'s models and both steps all four test
-  fixtures are read 64/64.
+- With the models in `Models/`, the two steps take ChessReD from 238 to 280
+  boards exact and the unseen board from 47% to 82% of squares. Most of that
+  is the grid fit: exact corners where the model's were imprecise, and, on
+  board B, a board at all in 29 of the 35 photos where the corner model found
+  none.
 - No board B photo is fully right with any of these: the piece model misreads
   types and colours there (`Training/README.md`). The corners no longer hold
   it back.
-- `main`'s corner model finds no board in 35 of the 100 board B photos, and
-  then nothing is read: the grid fit is only used once the model has found a
-  board, as in `evaluate.py --grid-corners`. The fit alone accepts 93 of the 100.
-  Using it when the model finds nothing (a1 from the pieces alone) would be a
-  change to the reference first.
-- a1 from the pieces helps where the corner model does not know a1 (board B:
-  +8 points of squares) and costs a little where it does (Fenit A, a board
-  the model was trained on: -1.6 points; ChessReD: nothing). With the grid
-  fit on, priors 0 / 3 / 6 give 280 / 282 / 282 boards on ChessReD, 86.4 /
-  86.4 / 86.3% of squares on board B and 92.7 / 93.1 / 93.5% on Fenit A, so 6
-  stays.
+- a1 from the pieces helps where the corner model does not know a1 (exp3 on
+  board B: +8 points of squares) and costs a little where it does (exp3 on
+  Fenit A, a board it was trained on: -1.6 points; ChessReD: nothing). With
+  the grid fit on and exp3's corners, priors 0 / 3 / 6 give 280 / 282 / 282
+  boards on ChessReD, 86.4 / 86.4 / 86.3% of squares on board B and 92.7 /
+  93.1 / 93.5% on Fenit A, so 6 stays.
 
 ## Known weak spot: endgames that point the wrong way
 
@@ -157,5 +171,5 @@ grid fit the fixture is read perfectly but turned (52/64), and
 in the table. Without the grid fit exp3 passed it only by accident: its
 imprecise corners lost two of the six pieces, which made the pieces' vote
 lopsided enough (7.75 against -1.75). `main`'s corner model gets a1 right
-there. A corner model that knows a1 on these photos is the fix; the app's
-flip button is the user's.
+there, which is why it is the one in `Models/` (b546e6a): a new corner model
+has to pass this test, and the app's flip button is the user's.
