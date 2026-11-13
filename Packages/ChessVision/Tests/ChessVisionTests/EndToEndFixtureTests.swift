@@ -94,6 +94,10 @@ import Testing
     /// would go unnoticed here, because the fit reads these photos by itself
     /// (and the pieces alone happen to put a1 right on them). This is the
     /// test that a corner model has to pass on its own corners and its own a1.
+    /// (The corner model in `Models/` reads `test_000000.jpg` at 58 of 64 this
+    /// way, on the floor: two pieces of the back rank land a square off with
+    /// its corners. It was 60 before each photo was decoded once, when Vision
+    /// was handed the undecoded JPEG; a new corner model should clear it.)
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testCornerModelAloneReadsTheFixtures() async throws {
         try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")

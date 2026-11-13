@@ -136,12 +136,12 @@ photos by itself.
   On a photo the colours still differ by what the two JPEG decoders differ
   (ImageIO's full decode against OpenCV's): nothing at the median, 0.2 at
   the 95th percentile, 0.8 at most, on the medians of 23,510 patches
-  (`app_check --colours` decoding each photo once).
+  (`app_check --colours`, each photo decoded once).
 - `Training/app_check` runs the app's recognizer from the command line over a
   list of photos with known positions (`evaluate.py --dump-list` writes the
   lists) and prints what `evaluate.py` prints. It needs no Xcode.
-- **`app_check` decodes each photo once into memory before recognising it**
-  (`decoded` in its `main.swift`), and so measures that path only. An image
+- **Every stage reads one decode of the photo** (`DecodedImage.once`, at the
+  entry of the recognizer, of the grid fit and of the colours). An image
   straight from a JPEG file is decoded again each time it is drawn, and how
   it is drawn decides which pixels come out. Against one full decode, the
   letterboxed square differs in about 20% of its bytes (by up to 25 levels
@@ -153,15 +153,12 @@ photos by itself.
   Y-LIChess photos went from "no board" to a board and back between
   identical runs. The grid fit itself gives the same answer for the same
   pixels every time. With the copy every stage reads the pixels of one full
-  decode, the nearest to what `cv2.imread` gives the Python. The app does
-  the same for every photo it redraws upright (`normalizedUprightCGImage`:
-  anything turned or larger than 3072 px, so nearly every camera photo).
-  Not on that path yet: the package's own tests, the app's self-test, and
-  the app for a photo that is already upright and small; they pass the
-  image undecoded. Making the copy inside the recognizer would put all of
-  them on one path; that is the next change.
-  `--a1-prior P|off`, `--grid-fit on|off` and `--sides-from-colour on|off`
-  switch the steps.
+  decode, the nearest to what `cv2.imread` gives the Python, in the app, in
+  the package's tests and in `app_check` alike. A photo that is a bitmap
+  already is not copied: that is what the app passes for every photo it
+  redraws upright (`normalizedUprightCGImage`: anything turned or larger
+  than 3072 px, so nearly every camera photo). `DecodedImageTests` checks
+  the copy.
 - For any list of photos, Python against Swift:
   `swift_reference.py grid --list L.json --out py.json`,
   `app_check --list L.json --grid sw.json`,
@@ -196,33 +193,31 @@ the other side); see `GridWindow.choose`.
 
 ## What the two steps are worth
 
-**These tables were measured before `app_check` decoded each photo once**
-(see above): the models and the grid fit then read other pixels of the same
-photos, so the old and the new numbers are two paths, not one path with
-noise. With the models in `Models/` and both steps, the three sets come out
-now as: ChessReD test 279 of 306 boards exact (was 280), 99.52% of squares;
-Fenit board B 84.6% of squares (was 82.3%), no board in 4 photos (was 6), 0
-boards exact (1 counting a turn); Fenit A 91.4% of squares, 16 boards exact
-(was 15), 19 counting a turn. Compare a model with another only through the
-same binary. The tables are being re-measured.
-
 Through `app_check` (the app's own code, Vision doing the resize) on the Mac
-mini, 2026-11-13. "Off" is `--a1-prior off --grid-fit off`, "both" is the
-app's default (grid fit on, prior 6). Boards exact, and in brackets boards
-that are exact once turned by 180 degrees (one tap in the app).
+mini, 2026-11-13, each photo decoded once (`DecodedImage`). "Off" is
+`--a1-prior off --grid-fit off`, "both" is the app's default (grid fit on,
+prior 6, colour step off). Boards exact, and in brackets boards that are
+exact once turned by 180 degrees (one tap in the app).
 
 **The models in `Models/` (b546e6a: `main`'s corner model, the baseline piece
 weights exported with NMS across classes):**
 
 | Steps | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
 |---|---|---|---|
-| off | 238 = 77.8% | 0; 46.6% of squares; no board in 35 | 0; 73.6% of squares |
-| a1 from the pieces only | 238 | 0; 46.6% of squares; no board in 35 | 0; 74.0% of squares |
-| **both** | **280 = 91.5%** (280) | 0 (1); **82.3%** of squares; no board in 6 | 15 (17); **91.4%** of squares |
+| off | 239 = 78.1% | 0; 46.0% of squares; no board in 36 | 0; 73.6% of squares |
+| a1 from the pieces only | 239 | 0; 45.9% of squares; no board in 36 | 0; 73.8% of squares |
+| **both** | **279 = 91.2%** (279) | 0 (1); **84.6%** of squares; no board in 4 | 16 (19); **91.4%** of squares |
 
-**Other corner models, for comparison** (rows marked * were scored before the
-fit was used alone; that changes nothing for exp3 and exp4, which find every
-board):
+**Other corner models, for comparison. This table is older: it was measured
+before each photo was decoded once**, when the letterbox, the grid fit's two
+passes and the colours each got their own decode of the JPEG (see "How the
+Swift is checked against the Python"). The models and the grid fit then read
+other pixels of the same photos, so these rows are another path, not this
+one with noise: the pair in `Models/` with both steps scored 280 of 306, 82.3%
+of board B's squares with no board in 6 photos, and 15 (17) on Fenit A that
+way. Compare a model with another only through the same binary. (Rows marked
+* were scored before the fit was used alone; that changes nothing for exp3
+and exp4, which find every board.)
 
 | Models | Steps | ChessReD test, 306 | Fenit board B, 100 | Fenit A, 286 |
 |---|---|---|---|---|
@@ -235,36 +230,36 @@ board):
 
 What this says:
 
-- With the models in `Models/`, the two steps take ChessReD from 238 to 280
-  boards exact and the unseen board from 47% to 82% of squares. Most of that
+- With the models in `Models/`, the two steps take ChessReD from 239 to 279
+  boards exact and the unseen board from 46% to 85% of squares. Most of that
   is the grid fit: exact corners where the model's were imprecise, and, on
-  board B, a board at all in 29 of the 35 photos where the corner model found
+  board B, a board at all in 32 of the 36 photos where the corner model found
   none.
 - No board B photo is fully right with any of these: the piece model misreads
   types and colours there (`Training/README.md`). The corners no longer hold
   it back.
 - a1 from the pieces helps where the corner model does not know a1 (exp3 on
   board B: +8 points of squares) and costs a little where it does (exp3 on
-  Fenit A, a board it was trained on: -1.6 points; ChessReD: nothing). With
-  the grid fit on and exp3's corners, priors 0 / 3 / 6 give 280 / 282 / 282
+  Fenit A, a board it was trained on: -1.6 points; ChessReD: nothing; these
+  and the next are from the older table's path). With the grid fit on and
+  exp3's corners, priors 0 / 3 / 6 give 280 / 282 / 282
   boards on ChessReD, 86.4 / 86.4 / 86.3% of squares on board B and 92.7 /
   93.1 / 93.5% on Fenit A, so 6 stays.
 
 ## What the colour step is worth
 
 Through `app_check` on the Mac mini, 2026-11-13, grid fit on and prior 6,
-`--sides-from-colour off` against `on` (the table: before `app_check`
-decoded each photo once, like the tables above). Boards exact (in brackets: once
-turned by 180 degrees) and squares right. **The step is off in the app**
+`--sides-from-colour off` against `on`, each photo decoded once. Boards
+exact (in brackets: once turned by 180 degrees) and squares right. **The step is off in the app**
 (`CoreMLBoardRecognizer(sidesFromColour:)` defaults to false): what follows
 is why it was written and why it is off.
 
 | Piece model | Step | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
 |---|---|---|---|---|
-| in `Models/` | off | 280 (280); 99.53% | 0 (1); 82.28% | 15 (17); 91.44% |
-| in `Models/` | **on** | 280 (280); 99.53% | **2 (3); 83.81%** | 15 (17); 91.44% |
-| `pieces_s_render1` (not in `Models/`) | off | 286 (286); 99.64% | 1 (1); 82.47% | 184 (200); 95.34% |
-| `pieces_s_render1` (not in `Models/`) | **on** | 286 (286); 99.64% | **11 (14); 87.08%** | 184 (200); 95.34% |
+| in `Models/` | off | 279 (279); 99.52% | 0 (1); 84.58% | 16 (19); 91.38% |
+| in `Models/` | **on** | 279 (279); 99.52% | **2 (3); 85.50%** | 16 (19); 91.38% |
+| `pieces_s_render1` (not in `Models/`) | off | 285 (285); 99.64% | 1 (1); 84.27% | 185 (202); 95.29% |
+| `pieces_s_render1` (not in `Models/`) | **on** | 285 (285); 99.64% | **11 (13); 88.80%** | 185 (202); 95.29% |
 
 (`pieces_s_render1` is the training session's piece model trained with
 rendered boards, exported for this measurement only, with the corner model in
@@ -276,8 +271,8 @@ rendered boards, exported for this measurement only, with the corner model in
   clean 1280-px copies with its own grid fit, the app the photos through
   Vision.
 - On these three sets it costs nothing: no ChessReD test photo changes with
-  either model. With the model in `Models/` it changes a side on 38 board B
-  photos (+1.5 points of squares), on 4 Fenit A photos and on no ChessReD
+  either model. With the model in `Models/` it changes a side on 36 board B
+  photos (+0.9 points of squares), on 3 Fenit A photos and on no ChessReD
   photo.
 - **But its weight (4) and its share (15%) were chosen on board B, and on the
   second held-out set, which nothing is tuned on, it loses.** The training
@@ -288,7 +283,7 @@ rendered boards, exported for this measurement only, with the corner model in
   and chess-cv unchanged; boards exact unchanged everywhere. So the step is
   off by default until the reference has a rule that holds on boards it was
   not tuned on (the training session reworks it on the training sources).
-  Through `app_check` (decoding each photo once), squares right without ->
+  Through `app_check`, squares right without ->
   with the step: with `pieces_s_render1`, the model the step was made for,
   the app shows the same loss, 78.0% -> 65.5% on the 200 Y-LIChess photos,
   ChessQ 69.7% -> 68.5%, chesscog 92.7% -> 92.7%. With the model in
@@ -297,8 +292,8 @@ rendered boards, exported for this measurement only, with the corner model in
   it is off because it fails with the piece model that is to replace the
   one in `Models/`, and is worth little with the one that is there.
 - The rule has no smallest distance between the two groups, and with six
-  pieces or fewer one disagreement is already over 15%. The four Fenit A
-  photos are such positions (2, 4, 6 and 9 pieces found): on one, two black
+  pieces or fewer one disagreement is already over 15%. The Fenit A photos
+  it acts on are such positions (2 to 9 pieces found): on one, two black
   pieces are split into a "white" and a black one. Asking for two
   disagreeing pieces was tried in the Python and is no better (board B has
   many sparse endgames where the one brown king is what needs correcting).
@@ -309,9 +304,9 @@ rendered boards, exported for this measurement only, with the corner model in
   By colour alone they differ on 2 of the 23,510, on two Fenit A photos with
   `pieces_s_render1`'s boxes where the step does not act: pieces between the
   groups, moved by the JPEG decoders. (Measured with `app_check --colours`
-  decoding each photo once, against the reference's Lab formula. With the
-  old binary, whose patches were cropped reads of the undecoded photo, it
-  was 23,523 of 23,523.)
+  against the reference's Lab formula. Before each photo was decoded once,
+  when the patches were cropped reads of the undecoded photo, it was 23,523
+  of 23,523.)
 - Cost when on: 0.07 s a photo with 32 pieces in a release build, about 1 s
   in a debug build; like the grid fit it reads the photo's pixels once more
   (the rectangle that holds all the pieces).

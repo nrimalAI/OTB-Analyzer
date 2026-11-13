@@ -23,6 +23,7 @@ import Vision
 /// does not fit them (`PieceSides`), is there but switched off: on boards
 /// nobody tuned its rule on, it fails with the piece model it was made for.
 ///
+/// The photo's pixels are decoded once for all of it (`DecodedImage`).
 /// Both models see the photo letterboxed into a square (`Letterbox`), as in
 /// training, never stretched. The square is passed to Vision with
 /// `.scaleFill`, which for a square only resizes; `Letterbox` maps the
@@ -107,7 +108,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     // MARK: - BoardRecognizer
 
-    public func recognize(_ image: CGImage) async throws -> RecognitionResult {
+    public func recognize(_ photo: CGImage) async throws -> RecognitionResult {
+        // One decode of the photo for the models, the grid fit and the colours.
+        let image = DecodedImage.once(photo)
         let letterbox = Letterbox(
             imageSize: CGSize(width: image.width, height: image.height))
         guard let square = letterbox.render(image) else {
@@ -170,7 +173,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     /// What the piece model finds in a photo and what the colour step
     /// (`PieceSides`) makes of it, whether or not the step is switched on:
     /// for checking it against the Python (`app_check --colours`).
-    public func diagnosePieceSides(_ image: CGImage) throws -> [PieceSideDiagnosis] {
+    public func diagnosePieceSides(_ photo: CGImage) throws -> [PieceSideDiagnosis] {
+        let image = DecodedImage.once(photo)
         let letterbox = Letterbox(
             imageSize: CGSize(width: image.width, height: image.height))
         guard let square = letterbox.render(image) else { return [] }

@@ -152,8 +152,10 @@ public enum GridCorners {
     /// `find_grid`: corners (nil when nothing was found), confidence (0 when
     /// a validity check failed) and the diagnostics of the pass that counts.
     static func findGrid(
-        _ image: CGImage, priorBox: CGRect?
+        _ photo: CGImage, priorBox: CGRect?
     ) -> (corners: [CGPoint]?, confidence: Double, info: Info) {
+        // Both passes read the same pixels (`DecodedImage`).
+        let image = DecodedImage.once(photo)
         var (corners, info) = detect(image, priorBox: priorBox)
         var conf = corners != nil ? confidence(info, withPrior: priorBox != nil) : 0
         if priorBox == nil, let first = corners {

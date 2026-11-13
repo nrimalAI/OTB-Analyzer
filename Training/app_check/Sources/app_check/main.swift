@@ -51,50 +51,6 @@ func fail(_ message: String) -> Never {
 /// what `cv2.imread` returns in the Python. Photos without a tag (all of the
 /// current test sets) are loaded as they are.
 func upright(_ url: URL) -> CGImage? {
-    lazy(url).map(decoded)
-}
-
-/// The image with its pixels decoded once, into memory.
-///
-/// An image straight from a JPEG file is decoded anew whenever it is drawn,
-/// and how it is drawn decides which pixels come out: scaled (the letterbox),
-/// cropped (the grid fit's second pass, the colours of the pieces) or whole,
-/// CoreGraphics returns bytes that differ from one full decode in 10-30% of
-/// places, by up to 40 levels in a few (measured for pull request #9). And a
-/// whole read after a scaled draw is not even the same from run to run: two
-/// of 200 Y-LIChess photos went from "no board" to a board and back between
-/// identical runs, because the grid fit follows its pixels.
-///
-/// With the copy every stage reads the same pixels, those of one full
-/// decode (the nearest to `cv2.imread`), in every run. That is what the app
-/// does for a photo it redraws upright (`normalizedUprightCGImage`); it is
-/// not what the package's own tests do, nor the app for a photo that is
-/// already upright and no larger than 3072 px: those still pass the image
-/// undecoded. So app_check measures the decoded path only.
-///
-/// Drawn 1:1 in the image's own colour space where that is an RGB one (sRGB
-/// otherwise, as `GrayImage.rgba` reads it). Transparency is drawn on black.
-/// If no bitmap can be made the image comes back as it was.
-func decoded(_ image: CGImage) -> CGImage {
-    let spaces = [
-        image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil },
-        CGColorSpace(name: CGColorSpace.sRGB),
-    ]
-    for case let space? in spaces {
-        guard let context = CGContext(
-            data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
-            bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { continue }
-        context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        if let copy = context.makeImage() {
-            return copy
-        }
-    }
-    return image
-}
-
-func lazy(_ url: URL) -> CGImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
     let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
     let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
