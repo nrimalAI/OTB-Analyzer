@@ -137,6 +137,11 @@ struct GridCornersTests {
         "inner_nodes", "n_line_pts", "convex",
     ]
 
+    /// (On `pieces` and `busy` one candidate x-corner never settles in the
+    /// sub-pixel step; OpenCV and Swift throw it back to its start alike
+    /// today. If the counts on those two ever differ on a new system with
+    /// nothing changed here, look there first.)
+    ///
     /// One fit against the Python's record of the same picture: how far it
     /// got, which pass counts, every number the validity checks look at, the
     /// confidence, and the corners to a thousandth of a square.
@@ -146,18 +151,22 @@ struct GridCornersTests {
         #expect(mine.stage == python.stage, "\(label)")
         #expect(mine.pass == python.pass, "\(label)")
         #expect(abs(mine.confidence - python.confidence) < 1e-6, "\(label)")
-        for (key, theirs) in python.values.sorted(by: { $0.key < $1.key }) {
-            // (not kept in Swift: how many windows were tried; `pass` is compared above.
-            // ox and oy are where the board starts on the lattice, whose origin is arbitrary.)
-            if ["n_cands", "pass", "ox", "oy"].contains(key) { continue }
-            guard let value = mine.values[key] else {
-                Issue.record("\(label): no \(key)")
-                continue
-            }
+        // Not compared: how many windows were tried (not kept in Swift);
+        // `pass` (compared above); ox and oy, where the board starts on the
+        // lattice, whose origin and axes depend on the order two equally
+        // strong x-corners come in (`testLatticeFitIsPythons` pins the basis
+        // where the points are given).
+        let skipped: Set<String> = ["n_cands", "pass", "ox", "oy"]
+        #expect(
+            Set(mine.values.keys).subtracting(skipped) == Set(python.values.keys).subtracting(skipped),
+            "\(label): the two do not report the same numbers")
+        for (key, theirs) in python.values.sorted(by: { $0.key < $1.key }) where !skipped.contains(key) {
+            guard let value = mine.values[key] else { continue }
             if counted.contains(key) {
                 #expect(value == theirs, "\(label): \(key)")
             } else {
-                #expect(abs(value - theirs) <= 1e-3 * max(1, abs(theirs)), "\(label): \(key)")
+                // a thousandth of the value itself, however small it is
+                #expect(abs(value - theirs) <= 1e-3 * abs(theirs) + 1e-9, "\(label): \(key)")
             }
         }
         #expect((mine.rawCorners == nil) == (python.raw == nil), "\(label)")
@@ -243,16 +252,18 @@ struct GridCornersTests {
         var good = GridCorners.Info()
         good.stage = .done
         good.convex = true
-        good.innerNodes = 30
-        good.firstLineNodes = 3
-        good.window = GridWindow.Choice(ox: 0, oy: 0, inside: 64, ring: 0, margin: 6, contrast: 100)
-        good.check = GridWindow.Check(inside: 0.9, ringMax: 0.25, edgeRowsMin: 0.25, contrast: 100)
+        // Every number sits exactly on its threshold, so that a check off by
+        // one comparison is caught.
+        good.innerNodes = 20
+        good.firstLineNodes = 2
+        good.window = GridWindow.Choice(ox: 0, oy: 0, inside: 64, ring: 0, margin: 1, contrast: 100)
+        good.check = GridWindow.Check(inside: 0.7, ringMax: 0.25, edgeRowsMin: 0.25, contrast: 100)
         good.stats = GridRefine.Stats(
             linePoints: 300, borderSupport: 0.16, shift: 0.45, lineRMS: 0.01, lineSupport: 0.6)
         good.boxIoU = 0.5
-        // 30/40 * 0.3 + 0.9 * 0.4 + 6/12 * 0.3
-        #expect(abs(GridCorners.confidence(good, withPrior: true) - 0.735) < 1e-12)
-        #expect(abs(GridCorners.confidence(good, withPrior: false) - 0.735) < 1e-12)
+        // 20/40 * 0.3 + 0.7 * 0.4 + 1/12 * 0.3
+        #expect(abs(GridCorners.confidence(good, withPrior: true) - 0.455) < 1e-12)
+        #expect(abs(GridCorners.confidence(good, withPrior: false) - 0.455) < 1e-12)
 
         func refused(_ change: (inout GridCorners.Info) -> Void, withPrior: Bool = true) -> Bool {
             var info = good
@@ -349,6 +360,14 @@ struct GridCornersTests {
         // Neither: no board.
         #expect(CoreMLBoardRecognizer.corners(model: nil, in: clutter, gridFit: true) == nil)
         #expect(CoreMLBoardRecognizer.corners(model: nil, in: boardImage, gridFit: false) == nil)
+
+        // Which corner is a1: the model's choice gets the configured head
+        // start, or no check at all; the fit's corners alone get none, and
+        // are always checked.
+        #expect(CoreMLBoardRecognizer.orientationPrior(fromModel: true, configured: 6) == 6)
+        #expect(CoreMLBoardRecognizer.orientationPrior(fromModel: true, configured: nil) == nil)
+        #expect(CoreMLBoardRecognizer.orientationPrior(fromModel: false, configured: 6) == 0)
+        #expect(CoreMLBoardRecognizer.orientationPrior(fromModel: false, configured: nil) == 0)
     }
 
     @Test func testTurnsTheFitToTheModelsCorners() {

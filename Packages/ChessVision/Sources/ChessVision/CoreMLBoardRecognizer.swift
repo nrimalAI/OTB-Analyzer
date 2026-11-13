@@ -115,15 +115,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         var corners = located.corners
 
         let detections = try detectPieces(in: square, letterbox: letterbox)
-        // Which corner is a1. Without the corner model there is no opinion to
-        // weigh against the pieces: they decide alone (prior 0), whatever
-        // `a1Prior` says, as in `evaluate.py`.
-        if !located.fromModel {
+        if let prior = Self.orientationPrior(fromModel: located.fromModel, configured: a1Prior) {
             corners = BoardOrientation.orient(
-                corners: corners, detections: detections, pull: pull, prior: 0)
-        } else if let a1Prior {
-            corners = BoardOrientation.orient(
-                corners: corners, detections: detections, pull: pull, prior: a1Prior)
+                corners: corners, detections: detections, pull: pull, prior: prior)
         }
         guard let homography = Homography(corners: corners) else {
             throw RecognitionError.boardNotFound
@@ -169,6 +163,14 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         }
     }
 
+    /// The head start the corners as given get when a1 is checked against the
+    /// pieces; nil for no check. Corners that are the grid fit's alone carry
+    /// no opinion on a1 to weigh against the pieces: they decide alone (0),
+    /// whatever was configured, as in `evaluate.py`. Internal for testing.
+    static func orientationPrior(fromModel: Bool, configured: Double?) -> Double? {
+        fromModel ? configured : 0
+    }
+
     // MARK: - Corner model
 
     /// `square` is the letterboxed photo; corners come back in pixels of the
@@ -183,7 +185,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
                 .compactMap({ $0 as? VNCoreMLFeatureValueObservation })
                 .first(where: { $0.featureValue.multiArrayValue != nil }),
             let array = observation.featureValue.multiArrayValue
-        else { throw RecognitionError.boardNotFound }
+        // Not "no board": the model did not answer in the form expected. It
+        // must not be mistaken for a photo without a board, which the grid
+        // fit may still read.
+        else { throw RecognitionError.modelUnavailable }
 
         return try Self.parseCorners(
             from: array,

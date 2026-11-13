@@ -63,6 +63,12 @@ Testing and not XCTest, which the Command Line Tools do not have. CI runs the
 same script (`.github/workflows/swift-test.yml`) and fails if the models are
 missing or the end-to-end tests did not run.
 
+`EndToEndFixtureTests` reads four ChessReD test photos with the models in
+`Models/`, twice: as the app does, and with the grid fit switched off. The
+second run is the corner model's own test. With the fit on, a corner model
+that found no board at all would go unnoticed, because the fit reads these
+photos by itself.
+
 ## How the Swift is checked against the Python
 
 - `Training/swift_reference.py orientation` writes
