@@ -62,10 +62,11 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     `Models/` (`docs/RECOGNITION.md`). It is kept for the reference's
     ///     next version of the rule.
     ///   - oneKing: exactly one king a side, from the scores the piece model
-    ///     gave each piece for every kind (`OneKingASide`). On: it gains a
-    ///     little on every development set with both piece models it was
-    ///     tried with, and the second held-out test set does not contradict
-    ///     that (`docs/RECOGNITION.md`, "What one king a side is worth").
+    ///     gave each piece for every kind (`OneKingASide`). On: no
+    ///     development set loses by it in total, with either piece model it
+    ///     was tried with, the pair in `Models/` gains on all three, and the
+    ///     second held-out test set does not contradict that
+    ///     (`docs/RECOGNITION.md`, "What one king a side is worth").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -319,17 +320,17 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             .compactMap { $0 as? VNRecognizedObjectObservation } ?? []
 
         return observations.compactMap { obs in
+            // (Vision's labels come sorted, the highest first.)
+            let scores = Self.classScores(
+                labels: obs.labels.map { ($0.identifier, $0.confidence) }, sum: obs.confidence)
             guard
-                let label = obs.labels.first,
-                let (kind, color) = Self.pieceClass(fromLabel: label.identifier)
+                let top = scores.first,
+                let (kind, color) = Self.pieceClass(fromLabel: top.identifier)
             else { return nil }
             // Vision boxes are fractions of the square with a lower-left origin.
             let bb = obs.boundingBox
             let rect = letterbox.imageRect(fromSquare: CGRect(
                 x: bb.minX, y: 1 - bb.maxY, width: bb.width, height: bb.height))
-            let scores = Self.classScores(
-                labels: obs.labels.map { ($0.identifier, $0.confidence) }, sum: obs.confidence)
-            guard let top = scores.first else { return nil }
             return PieceDetection(
                 piece: kind, color: color,
                 // The model's score, as in the Python. (Vision's own number
@@ -346,10 +347,19 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     /// of it: Vision divides the scores of a box by their sum, so that its
     /// labels' confidences add up to 1, and gives the sum as the confidence
     /// of the observation. Internal for testing.
+    ///
+    /// Vision does not document this; it is checked on macOS
+    /// (`EndToEndFixtureTests.testPieceScoresAreTheModelsOwn`), not on iOS.
+    /// So labels that do not add up to 1 are taken to be the scores
+    /// themselves and are left as they are.
     static func classScores(
         labels: [(identifier: String, confidence: Float)], sum: Float
     ) -> [(identifier: String, score: Float)] {
-        labels.map { ($0.identifier, $0.confidence * sum) }
+        let total = labels.reduce(Float(0)) { $0 + $1.confidence }
+        guard abs(total - 1) <= 1e-3 else {
+            return labels.map { ($0.identifier, $0.confidence) }
+        }
+        return labels.map { ($0.identifier, $0.confidence * sum) }
     }
 
     /// The scores of one box by kind, the larger of the two colours

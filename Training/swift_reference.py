@@ -600,7 +600,7 @@ def colour_cases(seed):
 def king_cases(seed):
     rng = random.Random(seed)
     cases = []
-    tally = {"two kings, left alone": 0, "a king given": 0, "no piece scored a king": 0,
+    tally = {"two kings, left alone": 0, "a king given": 0, "fewer than two kings, none given": 0,
              "kings taken away": 0, "other": 0}
 
     def piece(side, kind, scores, k):
@@ -622,7 +622,7 @@ def king_cases(seed):
             assert all(b.endswith("_king") for _, b in changed)
             tally["a king given"] += 1
         elif kings < 2:
-            tally["no piece scored a king"] += 1
+            tally["fewer than two kings, none given"] += 1
         elif changed:
             assert all(a.endswith("_king") and not b.endswith("_king") for a, b in changed)
             tally["kings taken away"] += 1

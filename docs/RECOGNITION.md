@@ -34,16 +34,19 @@ and what they were measured to be worth. Training results are in
    colours contradict them for more than 15% of the pieces that have a colour
    (a box whose middle lies outside the photo has none); then each of those
    takes its group's side. Kinds and confidences are never changed.
-6. **One king a side** (`OneKingASide`, port of `one_king_a_side`): every
-   position has exactly two kings, and a king read as a queen, or a third
-   "king", is what a piece model gets wrong on a set it has not seen. A
+6. **One king a side** (`OneKingASide`, port of `one_king_a_side`): a
+   position from a game has exactly two kings, and a king read as a queen,
+   or a third "king", is what a piece model gets wrong on a set it has not
+   seen. A
    board with exactly two kings is left alone, also when both are on one
    side (that is a wrong side, not a wrong kind). With fewer than two, a
    side that has pieces and no king gets one: its piece with the highest
    score for "king", if the model gave it at least 0.02. With more than two,
    a side with several kings keeps the one with the highest score for "king"
    and each of the others becomes its best-scoring other kind, a queen when
-   it has none. Sides, confidences and boxes are never changed.
+   it has none. Sides, confidences and boxes are never changed; a piece
+   whose kind the rule changed is shown to the user with the model's score
+   for the kind it became, so that the app marks it.
 7. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
    `orient_by_pieces`): of the four rotations of the corners, the one whose
    board looks most like White at ranks 1-2 wins; the corner model's own
@@ -71,14 +74,26 @@ confidence is the sum. A label's confidence times the observation's is the
 score as the model gave it (`CoreMLBoardRecognizer.classScores`). Nothing in
 Vision's documentation says so; `EndToEndFixtureTests.testPieceScoresAreTheModelsOwn`
 holds it against the model run without Vision on the same pixels, and finds
-the two equal to four decimals for every piece of the four fixtures.
+the two equal to four decimals for every piece of the four fixtures. The
+reviewer of pull request #12 found the same on 479 photos of boards the
+models have not seen (5,853 boxes: labels add up to 1, the observation's
+confidence is the sum, also where the sum is over 1).
+
+**This is checked on macOS only** (the Mac mini and CI), not on iOS, where
+the app runs. Labels that do not add up to 1 are taken to be the scores
+themselves and left as they are, so a Vision that handed out plain scores
+would be read right as well. To check on iOS: run the package's tests with
+an iPhone simulator as the destination; `testPieceScoresAreTheModelsOwn`
+fails if Vision does it another way there.
 
 Two things are read from the scores:
 
 - **The confidence of a piece is the model's score for the class it is taken
   for**, as in the Python. Until pull request #12 it was Vision's label
   confidence, the share: about 1.0 for nearly every box, also for one the
-  model gave 0.3, since few boxes have a second class with any score at all.
+  model gave 0.3, since a second class seldom has a score near the first's
+  (on the fixtures 1 box of 57 has a second score of 0.02 or more; on boards
+  the models have not seen about a fifth have, most of them small).
   The confidence decides which of two pieces on one square stays, and it is
   what the app shows: a piece under 0.85 is marked for the user to check
   (`AppModel.lowConfidenceThreshold`). See "What the confidence marks".
@@ -378,17 +393,29 @@ against the default. Squares right; boards exact.
 | chess-cv games (840) | 80.55%; 0 -> 80.62%; 0 | 89.31%; 9 -> 89.62%; 16 |
 | **all (1,619)** | **75.98%; 3 -> 76.06%; 3** | **86.34%; 45 -> 86.57%; 63** |
 
-- **On by default.** The three development sets say so for both piece
-  models: nothing lost on any of them, Fenit A's boards exact doubled with
-  the pair in `Models/` (16 to 32: boards whose only mistake was a king read
-as a queen or a bishop, or a queen read as a second king). The
-  second held-out set was not used to choose; it agrees, by 0.1 points of
-  squares with the pair in `Models/` and 0.2 with `pieces_s_render1`, where
-  18 more boards come out fully right (45 to 63 of 1,619).
-- It is a small step, as it must be: it can change two pieces of a board at
-  most. It pays in boards fully right, and only once the rest of the board
-  is right, which is why it shows with `pieces_s_render1` and not with the
-  pair in `Models/` on boards nobody has seen.
+- **On by default.** The three development sets say so: no set loses in
+  total with either piece model, and the pair in `Models/` gains on all
+  three, Fenit A's boards exact doubling (16 to 32: boards whose only
+  mistake was a king read as a queen or a bishop, or a queen read as a
+  second king). With `pieces_s_render1` the development sets hardly move
+  (no photo of ChessReD test changes, board B gains seven squares and loses
+  six, Fenit A's 185 boards exact are two gained and two lost). The second held-out set was
+  not used to choose; it agrees, by 0.1 points of squares with the pair in
+  `Models/` and 0.2 with `pieces_s_render1`, where 18 more boards come out
+  fully right (45 to 63 of 1,619).
+- Single photos do lose: with the pair in `Models/` ten Fenit A photos lose
+  11 squares between them while fifty gain 56.
+- **Positions without two kings lose.** The rule takes every position to
+  have one king a side. 13 of Fenit A's 286 positions and 50 of Y-LIChess's
+  200 are set up without (pieces laid out, not games), and there the rule
+  can only do harm: the three boards that were exact and are not any more
+  (two on Fenit A, one on Y-LIChess, all with `pieces_s_render1`) are such
+  positions. The app is for positions from games.
+- It is a small step: it changes a piece or two of a board (more only where
+  the model saw four or more kings). It pays in boards fully right, and only
+  once the rest of the board is right, which is why it shows with
+  `pieces_s_render1` and not with the pair in `Models/` on boards nobody has
+  seen.
 - **One part goes the other way**: Y-LIChess with the pair in `Models/`,
   72.57% -> 72.49%. Ten photos gain a square each, three lose one, and one
   loses 17 (`wood_0060.jpg`: the model takes nearly every piece for White
@@ -428,17 +455,51 @@ square or of a wrong class and among the right ones:
 | Fenit A | 18% -> 64% | 4.7% -> 23% | 3.5% -> 23% | 0.2% -> 12% |
 | second held-out set | 15% -> 78% | 5.5% -> 47% | 18% -> 46% | 3.2% -> 11% |
 
+(The "share" halves of both tables cannot be measured with the code as it
+is now: their board scores are those of the commit before pull request #12,
+their marks came from a build with a temporary switch back to the share.)
+
 - With the share, the mark said next to nothing: it left more than four in
-  five of the wrong pieces on an unseen board unmarked, because a model that is unsure whether
-  a piece is there at all is seldom split between two classes.
+  five of the wrong pieces of the second held-out set unmarked (three in
+  four on board B), because a model that is unsure whether a piece is there
+  at all is seldom split between two classes.
 - With the score, the mark follows what the model knows. On a board like the
   ones it was trained on, one right piece in a hundred is marked and half of
   the few wrong ones. On a board it has not seen, the pair in `Models/`
   marks nearly half of the right pieces too: there it puts 13,000 pieces
   wrong and 16,500 right, and its scores say as much.
-- The threshold of 0.85 was set when the number under it was another one.
-  It is the owner's to move; `app_check --flag-below C` counts the same for
-  any other value. Not tried in the app on a phone.
+- A piece whose kind the rule for the kings changed is shown with the
+  model's score for the kind it became (a queen at 0.93 that became a king
+  on a king score of 0.05 is shown at 0.05), so it is marked. The board
+  read is the same either way.
+- **The threshold of 0.85 was set when the number under it was another
+  one, and it is the owner's to move.** With it, the pair in `Models/` now
+  marks 11 squares a photo on the second held-out set where it marked 2,
+  and the app's line under the board will say "N squares to double-check"
+  on most photos of an unfamiliar board. What other thresholds would mark,
+  on the app's default path (rule for the kings on); wrong pieces marked /
+  right pieces marked / squares marked a photo
+  (`app_check --flag-below 0.5,0.7,0.85`):
+
+| Set | Under 0.5 | Under 0.7 | Under 0.85 (as now) |
+|---|---|---|---|
+| *pair in `Models/`:* | | | |
+| ChessReD test | 27% / 0.1% / 0.08 | 44% / 0.3% / 0.15 | 53% / 1.1% / 0.33 |
+| Fenit board B | 25% / 8.2% / 2.2 | 53% / 19% / 4.7 | 77% / 40% / 8.1 |
+| Fenit A | 18% / 5.6% / 1.2 | 40% / 12% / 2.6 | 63% / 24% / 4.5 |
+| second held-out set | 32% / 9.8% / 3.6 | 55% / 23% / 6.9 | 78% / 47% / 11.2 |
+| *`pieces_s_render1`:* | | | |
+| ChessReD test | 15% / 0.05% / 0.03 | 30% / 0.3% / 0.10 | 39% / 1.1% / 0.27 |
+| Fenit board B | 15% / 2.2% / 1.1 | 32% / 10% / 2.9 | 62% / 28% / 6.4 |
+| Fenit A | 4.0% / 0.1% / 0.07 | 10% / 1.2% / 0.29 | 23% / 12% / 1.7 |
+| second held-out set | 9.7% / 1.9% / 0.70 | 25% / 4.9% / 1.8 | 46% / 12% / 3.8 |
+
+  With the share at 0.85 the same sets had 0.03, 1.9, 1.1 and 1.8 squares
+  marked a photo with the pair in `Models/`, and 0.03, 1.3, 0.08 and 1.3
+  with `pieces_s_render1`. No threshold marks most of the wrong pieces and
+  few of the right ones: on a board the model has not seen, its scores for
+  right and wrong pieces overlap. Nothing of this was tried in the app on a
+  phone.
 
 ## What the colour step is worth
 

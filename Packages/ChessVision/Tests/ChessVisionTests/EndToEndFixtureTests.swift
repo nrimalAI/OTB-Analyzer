@@ -159,6 +159,10 @@ import Testing
         }
         print("piece scores: \(pieces) pieces, \(secondScores) scores for a kind other than the piece's own")
         #expect(pieces >= 40)
+        // At least one score beside a piece's own was compared (a king that
+        // might be a queen, on test_004005.jpg with the models at hand).
+        // Without one, only the top score of each box has been checked.
+        #expect(secondScores >= 1)
     }
 
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))

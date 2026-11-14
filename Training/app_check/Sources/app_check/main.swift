@@ -27,10 +27,10 @@
 //   --one-king on|off  exactly one king a side, from the scores the piece
 //                   model gave each piece for every kind (the app's default:
 //                   on).
-//   --flag-below C  the app marks a square for the user to check when its
-//                   piece's confidence is under 0.85 (AppModel); count how
-//                   many of the right and of the wrong pieces that marks
-//                   (default 0.85).
+//   --flag-below C[,C...]  the app marks a square for the user to check
+//                   when its piece's confidence is under 0.85 (AppModel);
+//                   count how many of the right and of the wrong pieces that
+//                   marks, for each threshold given (default 0.85).
 //   --colours FILE  score nothing: write, for each photo, what the piece model
 //                   finds, the colour of each piece and the sides the colour
 //                   step gives, for `swift_reference.py colours` to compare
@@ -90,7 +90,7 @@ var gridFitGiven = false
 var sidesFromColour = false
 var sidesFromColourGiven = false
 var oneKing: Bool?
-var flagBelow: Float = 0.85
+var flagBelow: [Float] = [0.85]
 var coloursPath: String?
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
@@ -117,9 +117,11 @@ while !arguments.isEmpty {
         guard value == "on" || value == "off" else { fail("--one-king takes on or off") }
         oneKing = value == "on"
     case "--flag-below":
-        guard let value = arguments.isEmpty ? nil : Float(arguments.removeFirst())
-        else { fail("--flag-below takes a number") }
-        flagBelow = value
+        let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Float($0) }
+        guard !values.isEmpty, values.allSatisfy({ $0 != nil }) else {
+            fail("--flag-below takes a number, or several with commas between them")
+        }
+        flagBelow = values.compactMap { $0 }
     case "--a1-prior":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         if value == "off" {
@@ -287,9 +289,10 @@ var squaresRight = 0
 var exact = 0
 var exactTurned = 0  // right once the board is turned 180 degrees
 var notFound = 0
-// Pieces the app would mark for the user to check, and not: [right, wrong].
-var marked = [0, 0]
-var unmarked = [0, 0]
+// Pieces the app would mark for the user to check, for each threshold:
+// [right, wrong]; and all pieces put on a square: [right, wrong].
+var marked = [[Int]](repeating: [0, 0], count: flagBelow.count)
+var placed = [0, 0]
 for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
     let url = path.hasPrefix("/")
         ? URL(fileURLWithPath: path)
@@ -328,10 +331,9 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
             // `squares` runs from a8 to h1.
             let index = (8 - square.rank.value) * 8 + square.file.number - 1
             let wrong = have[index] == want[index] ? 0 : 1
-            if piece.confidence < flagBelow {
-                marked[wrong] += 1
-            } else {
-                unmarked[wrong] += 1
+            placed[wrong] += 1
+            for (k, threshold) in flagBelow.enumerated() where piece.confidence < threshold {
+                marked[k][wrong] += 1
             }
         }
     } catch RecognitionError.boardNotFound {
@@ -360,5 +362,12 @@ print("""
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
       board not found: \(notFound)
-      marked for the user to check (confidence under \(flagBelow)): \(marked[1]) of \(marked[1] + unmarked[1]) wrong pieces (\(percent(marked[1], marked[1] + unmarked[1]))), \(marked[0]) of \(marked[0] + unmarked[0]) right pieces (\(percent(marked[0], marked[0] + unmarked[0])))
     """)
+for (k, threshold) in flagBelow.enumerated() {
+    print(String(
+        format: "  marked for the user to check (confidence under %@): %d of %d wrong pieces (%@), "
+            + "%d of %d right pieces (%@), %.2f a photo",
+        "\(threshold)", marked[k][1], placed[1], percent(marked[k][1], placed[1]),
+        marked[k][0], placed[0], percent(marked[k][0], placed[0]),
+        Double(marked[k][0] + marked[k][1]) / Double(max(photos, 1))))
+}

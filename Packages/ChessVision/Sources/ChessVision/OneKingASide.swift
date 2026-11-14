@@ -28,7 +28,12 @@ enum OneKingASide {
     /// the one with the highest "king" score and each of the others becomes
     /// its best-scoring other kind (a queen when it has no other score).
     /// Equal scores: the earlier piece, the earlier kind in `kinds`.
-    /// A piece keeps its side, confidence, box and scores.
+    /// A piece keeps its side, confidence, box and scores. (What the app
+    /// shows for a piece changed here is the model's score for the kind it
+    /// became: `PieceDetection.shownConfidence`.)
+    ///
+    /// The rule takes every position to have two kings. A position set up
+    /// without one (a few in the test sets are) can only lose by it.
     static func apply(_ detections: [PieceDetection], floor: Double = kingFloor) -> [PieceDetection] {
         var out = detections
         let total = out.filter { $0.piece == .king }.count
@@ -67,8 +72,8 @@ enum OneKingASide {
         return out
     }
 
-    /// The model's score for a kind; none, and one that is not a number,
-    /// count as 0.
+    /// The model's score for a kind; none, and one that is not finite (not a
+    /// number, or infinite), count as 0. The recognizer hands in neither.
     static func score(of kind: Piece.Kind, for detection: PieceDetection) -> Double {
         guard let score = detection.kindScores[kind], score.isFinite else { return 0 }
         return score

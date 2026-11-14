@@ -70,6 +70,9 @@ struct OneKingASideTests {
                 #expect(after.confidence == before.confidence, "case \(number)")
                 #expect(after.boundingBox == before.boundingBox, "case \(number)")
                 #expect(after.kindScores == before.kindScores, "case \(number)")
+                // Shown with the score of the kind it became, if it changed.
+                #expect(after.shownConfidence == (after.piece == before.piece
+                    ? nil : Float(before.kindScores[after.piece] ?? 0)), "case \(number)")
             }
             let kings = detections.filter { $0.piece == .king }.count
             let changed = Self.labels(detections) != recorded.out
@@ -180,6 +183,66 @@ struct OneKingASideTests {
         for (have, want) in zip(scores.map(\.score), [0.48, 0.3, 0.02] as [Float]) {
             #expect(abs(have - want) < 1e-6)
         }
+        // A sum over 1 is not cut down (two classes the model scored high).
+        let over = CoreMLBoardRecognizer.classScores(
+            labels: [("white_queen", 0.56), ("white_king", 0.44)], sum: 1.25)
+        #expect(abs(over[0].score - 0.7) < 1e-6)
+        #expect(abs(over[1].score - 0.55) < 1e-6)
+    }
+
+    /// Labels that do not add up to 1 are not what Vision is known to hand
+    /// out: they are taken for the scores themselves.
+    @Test func testLabelsThatDoNotAddUpToOneAreLeftAsTheyAre() {
+        let scores = CoreMLBoardRecognizer.classScores(
+            labels: [("white_queen", 0.48), ("white_king", 0.3)], sum: 0.8)
+        #expect(scores.map(\.score) == [0.48, 0.3])
+        #expect(CoreMLBoardRecognizer.classScores(labels: [], sum: 0.8).isEmpty)
+    }
+
+    // MARK: - What the user is shown
+
+    /// A piece the rule took for another kind is shown with the model's
+    /// score for that kind, so that the app marks it; which of two pieces on
+    /// a square stays still goes by the model's score for its first choice.
+    @Test func testAPieceTheRuleChangedIsShownWithTheScoreOfWhatItBecame() throws {
+        let corners = Self.rightWayUp
+        let homography = try #require(Homography(corners: corners))
+        let queen = PieceDetection(
+            piece: .queen, color: .white, confidence: 0.93, boundingBox: Self.box(file: 3, rank: 1),
+            kindScores: [.queen: 0.93, .king: 0.05])
+        // A weaker box on the same square: it must still lose to the queen
+        // that became a king, and is moved to a square beside it.
+        let rook = PieceDetection(
+            piece: .rook, color: .white, confidence: 0.5, boundingBox: Self.box(file: 3, rank: 1))
+        let blackKing = PieceDetection(
+            piece: .king, color: .black, confidence: 0.9, boundingBox: Self.box(file: 4, rank: 8),
+            kindScores: [.king: 0.9])
+        let result = OneKingASide.apply([rook, queen, blackKing])
+        #expect(Self.labels(result) == ["white_rook", "white_king", "black_king"])
+        #expect(result[1].confidence == 0.93)
+        #expect(result[1].shownConfidence == 0.05)
+        #expect(result[0].shownConfidence == nil)
+        #expect(result[2].shownConfidence == nil)
+
+        let board = SquareAssignment.assign(detections: result, homography: homography)
+        let d1 = try #require(FENBuilder.square(file: 4, rank: 1))
+        let e8 = try #require(FENBuilder.square(file: 5, rank: 8))
+        #expect(board[d1]?.piece.kind == .king)
+        #expect(board[d1]?.confidence == 0.05)   // under the app's 0.85: marked
+        #expect(board[e8]?.confidence == 0.9)
+        #expect(board.count == 3)
+
+        // A king taken away with no other score becomes a queen shown at 0.
+        let kings = (0..<3).map {
+            PieceDetection(
+                piece: .king, color: .white, confidence: 0.9, boundingBox: Self.box(file: $0, rank: 1),
+                kindScores: [.king: 0.9 - 0.1 * Double($0)])
+        }
+        let trimmed = OneKingASide.apply(kings)
+        #expect(Self.labels(trimmed) == ["white_king", "white_queen", "white_queen"])
+        #expect(trimmed.map(\.shownConfidence) == [nil, 0, 0])
+        // Taken for another side only, a piece is shown as before.
+        #expect(queen.taken(color: .black).shownConfidence == nil)
     }
 
     @Test func testKindScoresAreTheLargerOfTheTwoColours() {
