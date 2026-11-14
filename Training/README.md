@@ -340,6 +340,7 @@ pair in `Models/` against candidate:
 | Second test set, all 1,619 | 75.5%, 2 exact | 85.4%, 31 exact |
 | Second test set, with `EDGE_MARGIN` 0.25 (pull request #11) | 75.9%, 3 exact | 86.3%, 45 exact |
 | Second test set, with the two-kings rule as well (pull request #12; what the branch does now) | 76.1%, 3 exact | 86.6%, 63 exact |
+| The same with the chess-cv photos read from one full decode (pull request #14; they carry an EXIF orientation and had gone through a thumbnail path) | 76.1%, 3 exact | 86.6%, 68 exact |
 
 (The first four rows are with the rim tolerance of half a square; with a
 quarter the three development sets do not move, and on the second test set
@@ -844,6 +845,9 @@ out). Through the app, off -> on: the pair in `Models/` ChessReD test 279 ->
 280 boards exact, Fenit B 0 -> 1, Fenit A 16 -> 32 of 286, this set 75.98%
 -> 76.06% of squares (3 exact both); with `pieces_s_render1` this set
 86.34% -> 86.57% and 45 -> 63 boards exact (`runs/app_check/one_king/`).
+(Those totals read the 840 chess-cv photos through a thumbnail path; from
+one full decode, pull request #14, they are 76.01% -> 76.08% and 86.40% ->
+86.62%, 49 -> 68 boards exact: `runs/app_check/exif_full_decode/`.)
 Where it loses: a board set up without a king on a side is not a game
 position (13 of Fenit A's 286, 50 of Y-LIChess's 200), and there the rule
 crowns the best candidate; the three boards that were exact without it and
