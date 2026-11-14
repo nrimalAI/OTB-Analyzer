@@ -271,14 +271,16 @@ Two runs at once only slow each other down on 16 GB.
 the model knows, so `best.pt` is not chosen on what matters):
 
 ```sh
+# bash, not zsh: zsh passes $POS and $ONE as one word each (or write ${=POS})
 C=runs/pose/<name>/weights/last.pt;  P=runs/detect/<name>/weights/last.pt
-POS="--positions datasets/merged/positions.json --source fenit"
+POS="--positions datasets/merged/positions.json --source fenit --device cpu"
+ONE="--copies --one-piece-per-spot 0.7"    # wherever a piece model runs
 python corner_error.py --corners-model $C --source fenit                      # boards A and B
 python corner_error.py --corners-model $C --source chessred2k --split test
-python evaluate.py --corners-model $C --pieces-model $P $POS --split test     # board B: the number
+python evaluate.py --corners-model $C --pieces-model $P $POS $ONE --split test   # board B: the number
 python evaluate.py --corners-model $C --pieces-model $P --split test \
     --annotations datasets/chessred2k/annotations.json --images datasets/chessred2k/images
-python evaluate.py --pieces-model $P --gt-corners $POS --group B              # pieces alone
+python evaluate.py --pieces-model $P --gt-corners $POS $ONE --group B         # pieces alone
 python evaluate.py --corners-model $C --gt-boxes  $POS --group B              # corners alone
 ```
 
@@ -288,8 +290,9 @@ which the numbers are far too low (see "Piece scores" below).
 
 Until a new corner model exists, score piece models with `--gt-corners`; until
 a new piece model exists, corner models with `--gt-boxes`. `corner_error.py`
-runs on the CPU and can be used next to a training job; `evaluate.py` uses the
-GPU and slows it a little.
+runs on the CPU; give `evaluate.py` `--device cpu` while a training run has
+the GPU (the machine has 16 GB and swaps). The ChessReD line above scores the
+full-size photos; for a piece model trained on the copies use `score.sh`.
 
 **Runs so far.**
 
@@ -300,7 +303,7 @@ GPU and slows it a little.
 | `corners_s_exp4` | continues exp3 `last.pt`, `--kpt-sigma 0.1`, 20 epochs, on `merged_rf` (4,946 Roboflow photos with derived corners added) | Finished. `last.pt` (better than `best.pt`): ChessReD test **0.19**, 97.1% exact with labelled boxes, but 4 of 306 turned 180 degrees (exp3: 2); Fenit A 0.15; **board B 0.91**, order right 29 of 93, 8.6% exact with labelled boxes. More boards with corners did not help on B: see "why learned corners fail" below. Through the app's code with the baseline pieces: ChessReD test 91.2% exact |
 | `pieces_s_rf` | yolo11s, 30 epochs, `merged_v2` (8 Roboflow projects; rebuilt without the ChessReD copies, see below) | Killed at epoch 19 (exit 137; the machine was deep in swap); to be continued from epoch 18 with batch 12. At epoch 18 (`score.sh`, see "Piece scores" below): board B 91.3% / 1%, Fenit A 99.4% / 74%, ChessReD test 99.85% / 94.1% |
 | `pieces_s_norf` | yolo11s, 30 epochs, `merged_norf` | Finished 2026-11-13. `last.pt` (`best.pt` is a little worse): board B 90.4% / 1%, Fenit A 99.6% / 86% (mostly photos it trained on), ChessReD test 99.90% / **96.1%** (baseline 94.4%) |
-| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | Finished 2026-11-13 16:45. `last.pt`: board B 91.5% / 1%, Fenit A 99.8% / 90%, ChessReD test 99.93% / **96.7%**. On board B the piece type is much better (pawns right 88%, 65% before) and the side worse; with `--sides-from-colour` board B is 95.0% / **17 of 98 exact**, ChessReD unchanged |
+| `pieces_s_render1` | continues norf's `last.pt`, 12 epochs, `merged_render` (labelled boards + 4,000 renders) | Finished 2026-11-13 16:45. `last.pt`: board B 91.5% / 1%, Fenit A (trained on) 99.8% / 90%, ChessReD test 99.93% / **96.7%**. On board B the piece kind is much better (pawns right 88%, 65% before) and the side worse. Through the app it is the candidate described below: equal on board B, better on every part of the second test set |
 | `pieces_s_render2` | continues render1's `last.pt`, 12 epochs, `merged_all` (every piece source incl. Roboflow + 8,000 renders, 15,438 photos) | running since 16:45 on 2026-11-13 |
 | `pieces_s_crop1` | continues render1's `last.pt`, 12 epochs, `merged_all_crop` (`crop_boards.py`: the 7,370 photos of `merged_all` with a corner label, cut down to the board) | queued; score with `--crop-board` |
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | queued |
@@ -308,17 +311,27 @@ GPU and slows it a little.
 
 **A candidate that is not in `Models/`: the piece model `pieces_s_render1`**
 (branch `model/pieces-render1`, commit 773e729, has it as
-`Models/Pieces.mlpackage` with its weights; exports in `runs/export_render1/`).
-It was put in and taken out again on 2026-11-13 because it does not meet
-the rule for replacing a model: on board B it changes nothing (through
-`app_check`, colour step off: 82.5% against 82.3% of squares, 1 against 0
-boards exact; photo by photo more squares right on 44 photos and fewer on
-31), and on ChessReD test it is not shown better (286 against 280 boards
-exact: 14 gained, 8 lost). What speaks for it is the second test set, where
-it reads clearly more squares on five of six parts (table there); whether
-that is enough is the owner's call (the notes, "Needs the owner"). Fenit A,
-184 against 15 of 286 boards exact, is no evidence: it trained on those
-photos.
+`Models/Pieces.mlpackage` with its weights; exports in `runs/export_render1/`,
+with `main`'s corner model in `runs/app_check/models_render1/`). It was put in
+and taken out again on 2026-11-13 because it does not meet the rule for
+replacing a model as `CLAUDE.md` words it: on the held-out board B it changes
+nothing, and on ChessReD test it is not shown better. Through `app_check`
+(the decode-once binary, app defaults, colour step off; measured by the
+app-side session, per-photo outputs in `runs/app_check/decode_once/`),
+pair in `Models/` against candidate:
+
+| | Pair in `Models/` | With `pieces_s_render1` |
+|---|---|---|
+| ChessReD test (306), boards exact | 279 | 285 |
+| Fenit board B (100) | 84.6% of squares, 0 exact | 84.3%, 1 exact |
+| Fenit A (286; render1 trained on these photos) | 91.4%, 16 exact | 95.3%, 185 exact |
+| Second test set, all 1,619 | 75.5%, 2 exact | 85.4%, 31 exact |
+
+What speaks for it is the second test set, where it is better on every part
+(table in that section). Whether that is enough is the owner's call (the
+notes, "Needs the owner"). An INT8 export of it is half the size (9.3 MB
+against 18 MB); it was compared only with the old `app_check` (285 against
+286 ChessReD boards) and the outputs were not kept.
 
 **In `Models/` now (2026-11-13, since midday):** `main`'s corner model again, and
 the baseline piece weights exported with NMS across classes. exp3's corners
@@ -328,13 +341,18 @@ degrees, one of them a fixture of the package's tests, and `main`'s corner
 model does not.
 
 **What a new corner model has to beat** (through `app_check` with the app's
-defaults, i.e. grid fit on and a1 prior 6; table in `docs/RECOGNITION.md`):
-ChessReD test 280 of 306 boards exact (91.5%), none turned; Fenit board B
-82.3% of squares, board not found in 6 of 100; Fenit A 91.4% of squares. And
-it has to pass both fixture tests of `./Scripts/swift-test.sh`: the four
-fixtures with the app's pipeline, and with the grid fit off, where a wrong a1
-or a board that is not found shows (with the grid fit off the pair in
-`Models/` reads 238 of 306).
+defaults, i.e. grid fit on, a1 prior 6, colour step off, each photo decoded
+once (the binary since pull request #9); tables in `docs/RECOGNITION.md`):
+ChessReD test 279 of 306 boards exact, none turned; Fenit board B 84.6% of
+squares, board not found in 4 of 100; Fenit A 91.4% of squares. Compare two
+models only through the same build of `app_check`: before #9 it read
+different pixels (280, 82.3%, 6 not found for the same pair). And the model
+has to pass the fixture tests of `./Scripts/swift-test.sh`: the four fixtures
+with the app's pipeline, and the corner model's own test with the grid fit
+off, where a wrong a1 or a board that is not found shows (read
+`EndToEndFixtureTests.swift` for what it asks; pull request #10 changes it
+from a floor of 58 squares a photo to "each corner within one square of the
+grid fit's, and 94% of squares over the four photos").
 
 **The piece export with NMS across classes against `main`'s** (same weights;
 both with `main`'s corner model and the app's defaults, photo by photo,
@@ -458,32 +476,32 @@ was in `Models/`, and why it was taken out again.
   Earlier scores of piece models in this file and in `runs/scores/originals`
   and `runs/scores/per_class_nms` were made without one or both and are too
   low; the final word on a model is its export through `app_check`.
-- **Board B, 2026-11-13 evening: 15 of 100 boards exact end to end** (17
-  counting a board turned 180 degrees; 88.5% of squares), from 0. In Python
-  on the copies: `main`'s corner model, `--grid-corners --a1-from-pieces 6`,
-  `pieces_s_render1`, `--one-piece-per-spot 0.7 --sides-from-colour`
-  (`runs/scores/endtoend_render1_last_B.txt`). Two things did it:
-  - Rendered data (`render_boards.py`) teaches the piece type on a set the
-    model has not seen: on board B pawns are read right 88% of the time (65%
-    before), bishops 90% (60%), rooks 92% (82%).
-  - (**Read this with the second test set's table: the step below does not
-    generalise and is off by default.**)
-  - `chess_pipeline.sides_from_colour`: with rendered data the model calls
-    board B's brown "white" pieces black. Whether brown is White depends on
-    the set (it is Black in a boxwood and rosewood set), so the step splits
-    the pieces of one photo in two colour groups and calls the lighter one
-    White, and overrides the model only where they disagree on more than 15%
-    of the pieces (so it is used on no ChessReD test board). The colour
-    weight and the 15% were chosen with board B in view.
-  What is still wrong on board B (`pieces_s_render1`, 1,597 pieces): 104
-  pawns (34 read as knights, 34 as rooks, 18 as bishops, 16 missed), 47 of
-  196 kings read as queens, 14 queens as kings, 11 rooks as queens: nearly
-  all glossy black pieces seen from above. Tried or queued for that:
+- **Rendered data teaches the piece kind on a set the model has not seen**
+  (`pieces_s_render1`, 2026-11-13). On board B with labelled corners pawns
+  are read right 88% of the time (65% before), bishops 90% (60%), rooks 92%
+  (82%). It does not show in boards: through the app board B stays at 1 of
+  100 fully right, because the same model calls board B's brown "white"
+  pieces black (whether brown is White depends on the set) and because of
+  what is still wrong, of 1,597 pieces: 104 pawns (34 read as knights, 34 as
+  rooks, 18 as bishops, 16 missed), 47 of 196 kings read as queens, 14 queens
+  as kings, 11 rooks as queens, nearly all glossy black pieces seen from
+  above.
+- **A step fitted to one board: `sides_from_colour`.** Splitting the pieces
+  of a photo in two colour groups and calling the lighter one White, where
+  that contradicts the model on more than 15% of the pieces, turns board B
+  from 1 into 17 of 98 boards exact with labelled corners, and 15 of 100 end
+  to end. The colour weight and the 15% were chosen on board B. On the
+  second test set the step gains nothing and loses 12 points of squares on
+  Y-LIChess (through the app: 78.0% -> 65.5%). It is off by default in the
+  app and in `evaluate.py`; the 15 of 100 is not a result.
+- Tried or queued for the remaining errors:
   - "Exactly one king a side" from every class score of each box (scratch
-    prototype, not in the repo): board B 17 -> 21 of 98, ChessReD unchanged.
+    prototype, not in the repo): board B 17 -> 21 of 98 with the colour step
+    on, ChessReD unchanged.
   - The piece model looking at the board only (`board_crop`, `crop_boards.py`,
     `--crop-board`): `pieces_s_crop1` is queued. A model not trained on
-    crops gains nothing from them (16 of 98).
+    crops gains nothing from them (16 of 98 on board B with the colour step
+    on, against 17 without the crop).
   - More renders and all real sources: `pieces_s_render2`, running.
 - **The piece model is what stops board B.** With the labelled corners, one
   board B photo of 98 is read fully right by any of the three. Square by
@@ -714,10 +732,33 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `samryan` | 500 | 70.1% | 53.8% / 0%, board not found in 66 | 54.1% / 0%, board not found in 66 | 68.4% / 0% | 67.4% / 0% |
 | `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 54.2% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
 
-**`pieces_s_render1` and the colour step on this set, 2026-11-13 evening**
-(test only; in Python with `main`'s corner model, `--copies
---one-piece-per-spot 0.7 --grid-corners --a1-from-pieces 6`;
-`runs/scores/heldout2_steps_*.txt`). Squares right / boards exact:
+**`pieces_s_render1` on this set, through the app's own code** (2026-11-13
+evening; test only. `app_check` decoding each photo once, the app's defaults,
+colour step off; the pair in `Models/` against the same corner model with the
+candidate piece model; measured by the app-side session, per-photo outputs
+in `runs/app_check/decode_once/`). Squares right; boards exact; photos with
+no board found:
+
+| Part | Photos | Pair in `Models/` | With `pieces_s_render1` | Photo by photo |
+|---|---|---|---|---|
+| `ylichess` | 200 | 70.1%; 1; 6 | 78.0%; 0; 6 | more squares right on 95, fewer on 97 |
+| `chessq` | 50 | 64.6%; 1; 10 | 69.7%; 6; 10 | 25 against 12 (p = 0.05) |
+| `chesscog_real` | 29 | 73.3%; 0; 0 | 92.7%; 0; 0 | 29 against 0 |
+| `samryan` | 500 | 70.4%; 0; 16 | 82.9%; 16; 16 | 359 against 80 |
+| `chesscv_games` | 840 | 80.5%; 0; 12 | 89.3%; 9; 12 | not computed (file names repeat) |
+
+Better in squares on every part, by 5 to 19 points; on Y-LIChess as many
+photos lose squares as gain them. Boards fully right: 31 of 1,619 against 2,
+so about 2% where the target is 85%. (Pooled, which this section warns
+against because `chesscv_games` is half the photos: 85.4% against 75.5%.)
+
+The same comparison in Python (`.pt` weights, `main`'s corner model,
+`--one-piece-per-spot 0.7 --grid-corners --a1-from-pieces 6`), **on the
+full-size photos**: `heldout2` has no 1280-px copies, so `--copies` did
+nothing there and ultralytics shrank the photos without smoothing, which
+understates a model trained on copies (`runs/scores/heldout2_steps_*.txt`;
+a re-score with `--max-side 1280` is in `runs/scores/heldout2_1280_*.txt`).
+Squares right / boards exact:
 
 | Part | Photos | Baseline pieces | `pieces_s_render1` | render1 + `--sides-from-colour` |
 |---|---|---|---|---|
@@ -727,18 +768,21 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `chesscog_real` | 29 | 78.3% / 0% | 93.7% / 0% | 93.7% / 0% |
 | `samryan` | 500 | 64.6% / 0% | 79.5% / 2% | 79.2% / 2% |
 | `chesscv_games` | 840 | 81.5% / 0% | 89.1% / 0.5% | 89.1% / 0.5% |
-| all | 1,619 | 74.3%, 2 exact | **84.0%, 18 exact** | 82.3%, 18 exact |
 
-Two verdicts. The piece model trained with rendered data is better on boards
-nobody trained on: ten points of squares, and worse only on the Y-LIChess
-layouts. And **`sides_from_colour` does not hold up**: it gains nothing here
-and loses 23 points on the Y-LIChess game positions. Its colour weight and
-15% threshold were chosen on board B, where it turns 1 exact board into 17;
-that gain was fitted, not found. The step is to be off by default until a
-version developed on the training sources (many piece sets with labelled
-boxes) passes this table.
+Two things to take from it. **`sides_from_colour` does not hold up**: it
+gains nothing here and loses 23 points on the Y-LIChess game positions (the
+colour-step files were made before the reference computed Lab by the
+formula; the difference is two pieces in 23,523). Its colour weight and 15%
+threshold were chosen on board B, where it turns 1 exact board into 17; that
+gain was fitted, not found. And on the Y-LIChess layouts the candidate is
+below the baseline and both are below what an empty board scores there
+(89.7%): with labelled corners nearly all the pieces it sees on empty
+squares are pieces standing beside the board, which `board_square` takes in
+from up to half a square outside (see `EDGE_MARGIN` in `chess_pipeline.py`).
 
-**Through the app's own code, 2026-11-13** (`app_check`, the exported models
+**The app-side steps on this set, through the app's own code, 2026-11-13 midday** (measured with
+`app_check` before it decoded each photo once; with the later binary the two
+totals are 46.2% and 75.5%, 340 and 44 photos without a board. `app_check`, the exported models
 in `Models/` at b546e6a: `main`'s corner model and the piece export with NMS
 across classes; measured by the app-side session, nothing chosen on it).
 "Steps" are the two app-side steps, corners from the grid fit (used alone

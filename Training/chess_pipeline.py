@@ -98,14 +98,22 @@ def pulled_board_point(H, point, pull=0.30):
     return bx, by
 
 
+# How far outside the board, in squares, a piece's (pulled) foot may be and
+# still count as standing on the nearest rim square.
+EDGE_MARGIN = 0.5
+
+
 def board_square(H, point, pull=0.30):
     """Map an image point to a 0-indexed (file, rank) square, or None."""
     bx, by = pulled_board_point(H, point, pull)
     f, r = int(np.floor(bx)), int(np.floor(by))
     if 0 <= f < 8 and 0 <= r < 8:
         return f, r
-    # Clamp near-miss anchors (piece leaning over the board edge).
-    if -0.5 <= bx < 8.5 and -0.5 <= by < 8.5:
+    # A piece on a rim square can come out just over the edge (corners a
+    # little off, a piece leaning out): those are taken back in. Not further
+    # than EDGE_MARGIN, or pieces standing beside the board land on the rim.
+    m = EDGE_MARGIN
+    if -m <= bx < 8 + m and -m <= by < 8 + m:
         return min(max(f, 0), 7), min(max(r, 0), 7)
     return None
 
