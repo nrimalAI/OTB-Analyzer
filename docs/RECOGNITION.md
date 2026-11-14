@@ -39,7 +39,11 @@ and what they were measured to be worth. Training results are in
    corners are the fit's alone there is no model opinion, and the pieces
    decide without a head start.
 7. Each box's bottom centre goes through the corner homography to a square
-   (`Homography`, `SquareAssignment`); one piece per square.
+   (`Homography`, `SquareAssignment`); one piece per square. A foot that
+   falls up to a quarter of a square outside the board is taken back onto
+   the rim square (`SquareAssignment.edgeMargin`, the reference's
+   `EDGE_MARGIN`); further out it is a captured or spare piece standing
+   beside the board and gets no square.
 
 Steps 3 and 6 can be switched off and step 5 on
 (`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:)`).

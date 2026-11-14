@@ -49,7 +49,7 @@ from pathlib import Path
 import numpy as np
 
 from chess_pipeline import (
-    Detection, FEN_LETTER, PIECE_CLASSES, assign_detections, assign_squares, board_square,
+    Detection, EDGE_MARGIN, FEN_LETTER, PIECE_CLASSES, assign_detections, assign_squares, board_square,
     board_to_fen_placement, colour_patch, fen_placement_to_board, homography, orient_by_pieces,
     colour_sides, project, pulled_board_point, sides_from_colour, two_groups, white_side_score,
 )
@@ -74,7 +74,8 @@ PLACEMENTS = [
 def orientation_cases(count, seed):
     rng = random.Random(seed)
     cases = []
-    counts = {"boxes": 0, "moved to a neighbour": 0, "dropped": 0, "outside": 0}
+    counts = {"boxes": 0, "moved to a neighbour": 0, "dropped": 0, "outside": 0,
+              "taken back onto the rim": 0}
     while len(cases) < count:
         # a board seen in perspective: a square, squeezed towards the far side,
         # turned by any angle, with each corner nudged
@@ -114,9 +115,9 @@ def orientation_cases(count, seed):
                                       file + 0.5 + rng.uniform(-0.3, 0.3),
                                       rank + 0.5 + rng.uniform(-0.3, 0.3)))
         for _ in range(rng.choice([0, 0, 1, 2])):
-            # something beside the board: within half a square it is pulled
-            # onto the edge square, further out it is left out
-            along, out = rng.uniform(0.2, 7.8), rng.choice([-1, 1]) * rng.uniform(0.1, 0.9)
+            # something beside the board: within EDGE_MARGIN of a square it
+            # is taken back onto the rim square, further out it is left out
+            along, out = rng.uniform(0.2, 7.8), rng.choice([-1, 1]) * rng.uniform(0.05, 0.6)
             out = out if out < 0 else 8 + out
             detections.append(box(rng.choice("KQRBNPkqrbnp"),
                                   *((along, out) if rng.random() < 0.5 else (out, along))))
@@ -132,11 +133,12 @@ def orientation_cases(count, seed):
             scores.append(white_side_score(assign_squares(homography(turned), detections, pull))
                           + (prior if k == 0 else 0.0))
         # A piece sitting exactly on a line between two squares, or exactly
-        # half a square outside the board, would make the case a test of
+        # EDGE_MARGIN outside the board, would make the case a test of
         # rounding, not of the port. (Turning the corners turns the board
         # frame, so one rotation stands for all four.)
         def on_a_line(d):
-            return any(abs(b % 1 - 0.5) > 0.499 or abs(b + 0.5) < 0.001 or abs(b - 8.5) < 0.001
+            return any(abs(b % 1 - 0.5) > 0.499 or abs(b + EDGE_MARGIN) < 0.001
+                       or abs(b - 8 - EDGE_MARGIN) < 0.001
                        for b in pulled_board_point(homography(given), d.anchor, pull))
         if any(on_a_line(d) for d in detections):
             continue
@@ -149,6 +151,10 @@ def orientation_cases(count, seed):
         outside = sum(board_square(H, d.anchor, pull) is None for d in detections)
         moved = sum(board_square(H, d.anchor, pull) != sq for sq, d in placed.items())
         counts["outside"] += outside
+        counts["taken back onto the rim"] += sum(
+            board_square(H, d.anchor, pull) is not None
+            and not all(0 <= b < 8 for b in pulled_board_point(H, d.anchor, pull))
+            for d in detections)
         counts["moved to a neighbour"] += moved
         counts["dropped"] += len(detections) - outside - len(placed)
         counts["boxes"] += len(detections)
