@@ -35,7 +35,9 @@ import Vision
 public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     private let cornerModel: VNCoreMLModel
-    private let pieceModel: VNCoreMLModel
+    /// Internal for testing (a test lowers the model's own thresholds through
+    /// `VNCoreMLModel.featureProvider`, on a recognizer of its own).
+    let pieceModel: VNCoreMLModel
     private let cornerScoreThreshold: Float
     private let pull: Double
     private let a1Prior: Double?
@@ -312,35 +314,51 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     /// `square` is the letterboxed photo; boxes come back in pixels of the
     /// original photo. Internal for testing.
     func detectPieces(in square: CGImage, letterbox: Letterbox) throws -> [PieceDetection] {
+        try pieceObservations(in: square).compactMap { Self.piece(from: $0, letterbox: letterbox) }
+    }
+
+    /// One box of the piece model as Vision hands it out: the model's score
+    /// for every class, the highest first (`classScores`), and the box as
+    /// fractions of the square with a lower-left origin.
+    typealias PieceObservation = (scores: [(identifier: String, score: Float)], box: CGRect)
+
+    /// What the piece model finds in the letterboxed photo, before anything
+    /// is made of it. Internal for testing.
+    func pieceObservations(in square: CGImage) throws -> [PieceObservation] {
         let request = VNCoreMLRequest(model: pieceModel)
         request.imageCropAndScaleOption = .scaleFill  // square in, square out: resize only
         try VNImageRequestHandler(cgImage: square).perform([request])
 
         let observations = request.results?
             .compactMap { $0 as? VNRecognizedObjectObservation } ?? []
-
-        return observations.compactMap { obs in
+        return observations.map { obs in
             // (Vision's labels come sorted, the highest first.)
-            let scores = Self.classScores(
-                labels: obs.labels.map { ($0.identifier, $0.confidence) }, sum: obs.confidence)
-            guard
-                let top = scores.first,
-                let (kind, color) = Self.pieceClass(fromLabel: top.identifier)
-            else { return nil }
-            // Vision boxes are fractions of the square with a lower-left origin.
-            let bb = obs.boundingBox
-            let rect = letterbox.imageRect(fromSquare: CGRect(
-                x: bb.minX, y: 1 - bb.maxY, width: bb.width, height: bb.height))
-            return PieceDetection(
-                piece: kind, color: color,
-                // The model's score, as in the Python. (Vision's own number
-                // for the label is its share of the box's scores: near 1
-                // for a piece the model is unsure is there at all.)
-                confidence: top.score,
-                boundingBox: rect,
-                kindScores: Self.kindScores(scores)
-            )
+            (Self.classScores(
+                labels: obs.labels.map { ($0.identifier, $0.confidence) }, sum: obs.confidence),
+             obs.boundingBox)
         }
+    }
+
+    /// The piece an observation is taken for: the class with the highest
+    /// score, nil when that is no piece. Internal for testing.
+    static func piece(from observation: PieceObservation, letterbox: Letterbox) -> PieceDetection? {
+        guard
+            let top = observation.scores.first,
+            let (kind, color) = pieceClass(fromLabel: top.identifier)
+        else { return nil }
+        // Vision boxes are fractions of the square with a lower-left origin.
+        let bb = observation.box
+        let rect = letterbox.imageRect(fromSquare: CGRect(
+            x: bb.minX, y: 1 - bb.maxY, width: bb.width, height: bb.height))
+        return PieceDetection(
+            piece: kind, color: color,
+            // The model's score, as in the Python. (Vision's own number
+            // for the label is its share of the box's scores: near 1
+            // for a piece the model is unsure is there at all.)
+            confidence: top.score,
+            boundingBox: rect,
+            kindScores: kindScores(observation.scores)
+        )
     }
 
     /// The model's score for each class of one box, from what Vision makes

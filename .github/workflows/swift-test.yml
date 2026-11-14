@@ -38,6 +38,6 @@ jobs:
         run: ./Scripts/swift-test.sh 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
       - name: Fixture scores
         if: always()
-        run: grep -E "^fixture|^portrait|^grid|✘|➜|Test run|error:" "$RUNNER_TEMP/swift-test.log" || true
+        run: grep -E "^fixture|^portrait|^grid|^piece scores|✘|➜|Test run|error:" "$RUNNER_TEMP/swift-test.log" || true
       - name: The end-to-end tests ran
         run: grep -q "^fixture aggregate" "$RUNNER_TEMP/swift-test.log" && grep -q "^portrait aggregate" "$RUNNER_TEMP/swift-test.log"
