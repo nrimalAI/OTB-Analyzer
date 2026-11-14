@@ -80,10 +80,10 @@ of the size, the model's threshold at 0.01), because a box with a single
 score says nothing about what the scores are divided by, and a piece model
 that reads the fixtures without a doubt has no other on them. The two agree
 to five decimals on every score, and the boxes are the same in the same
-order: 105 boxes, 70 of them split between two classes, with the pair in
-`Models/`; 153 and 81 with `pieces_s_render3` (on the Mac mini's Neural
-Engine; a few more or fewer on the CPU, where the reviewer of pull request
-#16 ran them too). The
+order: 153 boxes, 81 of them split between two classes, with the pair in
+`Models/` (`pieces_s_render3`); 105 and 70 with the piece model before it
+(on the Mac mini's Neural Engine; a few more or fewer on the CPU, where
+the reviewer of pull request #16 ran them too). The
 reviewer of pull request #12 found the same on 479 photos of boards the
 models have not seen (5,853 boxes: labels add up to 1, the observation's
 confidence is the sum, also where the sum is over 1).
@@ -269,8 +269,8 @@ photos by itself.
   away from a full decode, while this file said no test set had such
   photos. Comparisons of one model or setting with another were not
   affected (both read the same pixels); the chess-cv figures were a little
-  off. Measured on today's defaults, thumbnail -> full decode: the pair in
-  `Models/` 80.62% -> 80.65% of chess-cv's squares, `pieces_s_render1`
+  off. Measured on today's defaults, thumbnail -> full decode: the first pair
+  (see below) 80.62% -> 80.65% of chess-cv's squares, `pieces_s_render1`
   89.62% -> 89.72% and 16 -> 21 boards exact, one more photo without a
   board (13, not 12); samryan to the square as before. The tables below
   say which of their chess-cv figures are from which path.
@@ -306,6 +306,80 @@ indexes a NumPy array with lattice coordinates that can fall outside it (an
 IndexError that rejects the photo, or, for small negative indices, a wrap to
 the other side); see `GridWindow.choose`.
 
+## What the app reads now
+
+The pair in `Models/` since pull request #15 (2026-11-14): `main`'s corner
+model as before, and the piece model `pieces_s_render3` (a YOLO11s, 18 MB;
+how it was trained and on what is in `Training/README.md`). Through
+`app_check` built from the same commit, each photo from one full decode.
+Squares right; boards exact; photos in which no board was found.
+
+| Set (photos) | Grid fit, a1 from the pieces and the rule for the kings off | Rule for the kings off | **As the app runs it** |
+|---|---|---|---|
+| ChessReD test (306) | 98.36%; 246 | 99.68%; 288 | **99.68%; 288** |
+| Fenit board B (100, a board nothing was trained on) | 46.88%; 0; no board in 36 | 88.45%; 5; 4 | **88.55%; 6; 4** |
+| Fenit A (286) | 74.39%; 0 | 95.37%; 184 | **95.32%; 183** |
+| *second held-out set:* | | | |
+| Y-LIChess (200) | 0%; 0; 200 | 85.60%; 34; 6 | **85.73%; 45; 6** |
+| ChessQ (50) | 28.44%; 0; 26 | 71.69%; 14; 10 | **71.66%; 14; 10** |
+| chesscog (29) | 32.97%; 0; 10 | 98.28%; 10; 0 | **98.44%; 10; 0** |
+| samryan (500) | 55.36%; 0; 72 | 84.72%; 43; 16 | **84.85%; 58; 16** |
+| chess-cv games (840) | 54.20%; 0; 33 | 91.74%; 117; 13 | **91.97%; 171; 13** |
+| **all (1,619)** | 46.69%; 0; 341 | 88.31%; 218; 45 | **88.49%; 298; 45** |
+
+(The first column is `--a1-prior off --grid-fit off --one-king off`, the
+second `--one-king off`. The second held-out set is test only: nothing was
+chosen on it. Counting boards that are right once turned by 180 degrees, one
+tap in the app: board B 7, Fenit A 201, the second held-out set 302.)
+
+- **Where this stands against the goal.** On boards nobody trained on, the
+  app reads 298 of 1,619 photos fully right (18%) and 6 of board B's 100;
+  the goal is 85% of unseen boards. With the pair before it (the first
+  pair, below) and the same code it was 3 of 1,619 and 1 of 100, and
+  ChessReD test 280 of 306, Fenit A 32 of 286.
+- **The grid fit and a1 from the pieces** are worth with this piece model
+  what they were with the first: ChessReD test 246 -> 288 boards, and on
+  unseen boards 47% -> 88% of squares, with a board found in all but 45
+  photos instead of all but 341. The corner model is the same one.
+- **The rule for the kings is worth more than it was**: 80 more boards
+  fully right on the second held-out set (218 -> 298), one more on board B,
+  none on ChessReD test. With the first pair it was none there: the rule
+  mends a board whose only mistake is a king, and such boards come with a
+  better piece model. It costs on positions set up without two kings, as
+  before: on Fenit A two boards are lost and one gained, 14 squares lost
+  and 5 gained, every loss on its 13 such positions, and the three boards
+  Y-LIChess loses are among its 50. No board with two kings in its position was lost
+  on any set.
+- **What the app marks for the user to check** (a piece whose confidence is
+  under 0.85, `AppModel.lowConfidenceThreshold`), and what 0.5 and 0.7 would
+  mark: wrong pieces marked / right pieces marked / squares marked a photo.
+
+| Set | Under 0.5 | Under 0.7 | Under 0.85 (as now) |
+|---|---|---|---|
+| ChessReD test | 22% / 0.02% / 0.03 | 35% / 0.2% / 0.08 | 38% / 0.7% / 0.20 |
+| Fenit board B | 6.6% / 1.7% / 0.44 | 24% / 6.0% / 1.6 | 54% / 22% / 4.6 |
+| Fenit A | 5.0% / 0.3% / 0.11 | 10% / 1.3% / 0.30 | 22% / 11% / 1.6 |
+| second held-out set | 7.8% / 1.3% / 0.45 | 20% / 3.3% / 1.1 | 40% / 8.8% / 2.7 |
+
+  The new model is surer of itself, right and wrong: on unseen boards the
+  mark now falls on 2.7 squares a photo where it fell on 11.3 with the
+  first pair, and catches 40% of the wrong pieces where it caught 79%. The
+  threshold is still the owner's to move ("What the confidence marks",
+  below, has the first pair's table). Nothing of this was tried on a phone.
+
+## The older measurements: the first pair
+
+Everything from here to the end of this file was measured before pull
+request #15, with the pair that was in `Models/` until then. It is called
+**the first pair** below: `main`'s corner model, which is still the one in
+`Models/`, and the first piece model (a YOLO11n, the baseline weights).
+`pieces_s_render1` was a candidate piece model that never went in;
+`pieces_s_render3`, two generations on, is the piece model in `Models/`
+now, and what the app reads with it is in the section above. The steps are
+the same code for both; what they are worth depends on the piece model, so
+the sections below say how each step was chosen, and the section above
+says what stands today.
+
 ## What the two steps are worth
 
 (Measured before pull request #12, with Vision's share as a piece's
@@ -320,7 +394,7 @@ mini, 2026-11-13, each photo decoded once (`DecodedImage`). "Off" is
 prior 6, colour step off). Boards exact, and in brackets boards that are
 exact once turned by 180 degrees (one tap in the app).
 
-**The models in `Models/` (b546e6a: `main`'s corner model, the baseline piece
+**The first pair (b546e6a: `main`'s corner model, the baseline piece
 weights exported with NMS across classes):**
 
 | Steps | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
@@ -334,7 +408,7 @@ before each photo was decoded once**, when the letterbox, the grid fit's two
 passes and the colours each got their own decode of the JPEG (see "How the
 Swift is checked against the Python"). The models and the grid fit then read
 other pixels of the same photos, so these rows are another path, not this
-one with noise: the pair in `Models/` with both steps scored 280 of 306, 82.3%
+one with noise: the first pair with both steps scored 280 of 306, 82.3%
 of board B's squares with no board in 6 photos, and 15 (17) on Fenit A that
 way. Compare a model with another only through the same binary. (Rows marked
 * were scored before the fit was used alone; that changes nothing for exp3
@@ -351,7 +425,7 @@ and exp4, which find every board.)
 
 What this says:
 
-- With the models in `Models/`, the two steps take ChessReD from 239 to 279
+- With the first pair, the two steps take ChessReD from 239 to 279
   boards exact and the unseen board from 46% to 85% of squares. Most of that
   is the grid fit: exact corners where the model's were imprecise, and, on
   board B, a board at all in 32 of the 36 photos where the corner model found
@@ -375,7 +449,7 @@ only: no step, weight or default here was chosen on it. Through `app_check`,
 2026-11-13, each photo decoded once; squares right, boards exact, and photos
 in which no board was found.
 
-| Source (photos) | Pair in `Models/`, steps off | Pair in `Models/`, both steps | `pieces_s_render1`, both steps |
+| Source (photos) | First pair, steps off | First pair, both steps | `pieces_s_render1`, both steps |
 |---|---|---|---|
 | Y-LIChess (200) | 0%; 0; no board in 200 | 72.4%; 2; 6 | 84.8%; 14; 6 |
 | ChessQ (50) | 28.3%; 0; 26 | 64.6%; 1; 10 | 69.8%; 6; 10 |
@@ -394,7 +468,7 @@ photo without a board (44 is 45 from the full decode), going by what the
 change of path does to today's defaults. The current figures are in "What
 one king a side is worth".)
 
-- The two app-side steps take the pair in `Models/` from 46% to 76% of
+- The two app-side steps take the first pair from 46% to 76% of
   squares on boards nobody has seen, and from no board in 340 photos to 44.
 - `pieces_s_render1` (the training session's piece model trained with
   rendered boards, not in `Models/`; same corner model) reads ten points more
@@ -405,14 +479,12 @@ one king a side is worth".)
   the "steps off" column was measured with half a square. With half a square
   the same two columns were 75.5%; 2 and 85.4%; 31: captured pieces standing
   next to the board were read as pieces on the rim. The change is nearly all
-  Y-LIChess, whose photos have such pieces: 70.1% -> 72.4% with the pair in
-  `Models/`, 78.0% -> 84.8% and 0 -> 14 boards exact with
+  Y-LIChess, whose photos have such pieces: 70.1% -> 72.4% with the first pair, 78.0% -> 84.8% and 0 -> 14 boards exact with
   `pieces_s_render1`. On the three development sets it changes next to
-  nothing (pair in `Models/`: ChessReD test 279 of 306 and board B 84.58%
+  nothing (first pair: ChessReD test 279 of 306 and board B 84.58%
   as before, Fenit A 91.38% -> 91.43%), which is why half a square went
   unnoticed there.
-- With the colour step on (measured with the margin at half a square), the
-  pair in `Models/` stays at 75.5% (1 board exact) and `pieces_s_render1`
+- With the colour step on (measured with the margin at half a square), the first pair stays at 75.5% (1 board exact) and `pieces_s_render1`
   drops from 85.4% to 82.6% (27): Y-LIChess 78.0% -> 65.5%, samryan 82.9% ->
   79.0%, ChessQ 69.7% -> 68.5%, the other two unchanged. See the next
   section.
@@ -423,7 +495,7 @@ Through `app_check`, 2026-11-13, both steps on, colour step off, margin a
 quarter of a square, a piece's confidence the model's score; `--one-king off`
 against the default. Squares right; boards exact.
 
-| Set (photos) | Pair in `Models/`: off -> on | `pieces_s_render1`: off -> on |
+| Set (photos) | First pair: off -> on | `pieces_s_render1`: off -> on |
 |---|---|---|
 | ChessReD test (306) | 99.53%; 279 -> 99.54%; 280 | 99.64%; 285 -> 99.64%; 285 |
 | Fenit board B (100) | 84.58%; 0 -> 84.67%; 1 | 84.31%; 1 -> 84.33%; 1 |
@@ -447,16 +519,15 @@ for every photo are kept outside the repository, on the Mac mini, in
 `Training/runs/app_check/one_king/` and `exif_full_decode/`.)
 
 - **On by default.** The three development sets say so: no set loses in
-  total with either piece model, and the pair in `Models/` gains on all
+  total with either piece model, and the first pair gains on all
   three, Fenit A's boards exact doubling (16 to 32: boards whose only
   mistake was a king read as a queen or a bishop, or a queen read as a
   second king). With `pieces_s_render1` the development sets hardly move
   (no photo of ChessReD test changes, board B gains seven squares and loses
   six, Fenit A's 185 boards exact are two gained and two lost). The second held-out set was
-  not used to choose; it agrees, by 0.1 points of squares with the pair in
-  `Models/` and 0.2 with `pieces_s_render1`, where 19 more boards come out
+  not used to choose; it agrees, by 0.1 points of squares with the first pair and 0.2 with `pieces_s_render1`, where 19 more boards come out
   fully right (49 to 68 of 1,619).
-- Single photos do lose: with the pair in `Models/` ten Fenit A photos lose
+- Single photos do lose: with the first pair ten Fenit A photos lose
   11 squares between them while fifty gain 56.
 - **Positions without two kings lose.** The rule takes every position to
   have one king a side. 13 of Fenit A's 286 positions and 50 of Y-LIChess's
@@ -467,9 +538,9 @@ for every photo are kept outside the repository, on the Mac mini, in
 - It is a small step: it changes a piece or two of a board (more only where
   the model saw four or more kings). It pays in boards fully right, and only
   once the rest of the board is right, which is why it shows with
-  `pieces_s_render1` and not with the pair in `Models/` on boards nobody has
+  `pieces_s_render1` and not with the first pair on boards nobody has
   seen.
-- **One part goes the other way**: Y-LIChess with the pair in `Models/`,
+- **One part goes the other way**: Y-LIChess with the first pair,
   72.57% -> 72.49%. Ten photos gain a square each, three lose one, and one
   loses 17 (`wood_0060.jpg`: the model takes nearly every piece for White
   and sees four kings, three of them White; with two of those made something
@@ -488,7 +559,7 @@ Vision's share before ("The scores of a piece"). For the board that is read
 it changes next to nothing: only which of two pieces found on one square
 stays. Squares right; boards exact, without the rule for the kings:
 
-| Set | Pair in `Models/`: share -> score | `pieces_s_render1`: share -> score |
+| Set | First pair: share -> score | `pieces_s_render1`: share -> score |
 |---|---|---|
 | ChessReD test | 99.52%; 279 -> 99.53%; 279 | 99.64%; 285 -> 99.64%; 285 |
 | Fenit board B | 84.58%; 0 -> 84.58%; 0 | 84.28%; 1 -> 84.31%; 1 |
@@ -505,7 +576,7 @@ confidence is under 0.85 for the user to check
 many of the pieces it put on a square that marks, among those on a wrong
 square or of a wrong class and among the right ones:
 
-| Set | Pair in `Models/`: wrong pieces marked | right pieces marked | `pieces_s_render1`: wrong pieces marked | right pieces marked |
+| Set | First pair: wrong pieces marked | right pieces marked | `pieces_s_render1`: wrong pieces marked | right pieces marked |
 |---|---|---|---|---|
 | ChessReD test | 10% -> 55% (36 of 66) | 0.05% -> 1.0% | 13% -> 39% (18 of 46) | 0.06% -> 1.1% |
 | Fenit board B | 24% -> 76% | 6.5% -> 40% | 16% -> 60% | 3.8% -> 27% |
@@ -522,7 +593,7 @@ their marks came from a build with a temporary switch back to the share.)
   at all is seldom split between two classes.
 - With the score, the mark follows what the model knows. On a board like the
   ones it was trained on, one right piece in a hundred is marked and half of
-  the few wrong ones. On a board it has not seen, the pair in `Models/`
+  the few wrong ones. On a board it has not seen, the first pair
   marks nearly half of the right pieces too: there it puts 13,000 pieces
   wrong and 16,500 right, and its scores say as much.
 - A piece whose kind the rule for the kings changed is shown with the
@@ -530,7 +601,7 @@ their marks came from a build with a temporary switch back to the share.)
   on a king score of 0.05 is shown at 0.05), so it is marked. The board
   read is the same either way.
 - **The threshold of 0.85 was set when the number under it was another
-  one, and it is the owner's to move.** With it, the pair in `Models/` now
+  one, and it is the owner's to move.** With it, the first pair now
   marks 11 squares a photo on the second held-out set where it marked 2,
   and the app's line under the board will say "N squares to double-check"
   on most photos of an unfamiliar board. What other thresholds would mark,
@@ -540,7 +611,7 @@ their marks came from a build with a temporary switch back to the share.)
 
 | Set | Under 0.5 | Under 0.7 | Under 0.85 (as now) |
 |---|---|---|---|
-| *pair in `Models/`:* | | | |
+| *first pair:* | | | |
 | ChessReD test | 27% / 0.1% / 0.08 | 44% / 0.3% / 0.15 | 53% / 1.1% / 0.33 |
 | Fenit board B | 25% / 8.2% / 2.2 | 53% / 19% / 4.7 | 77% / 40% / 8.1 |
 | Fenit A | 18% / 5.6% / 1.2 | 40% / 12% / 2.6 | 63% / 24% / 4.5 |
@@ -552,7 +623,7 @@ their marks came from a build with a temporary switch back to the share.)
 | second held-out set | 9.8% / 1.9% / 0.70 | 25% / 4.9% / 1.8 | 46% / 12% / 3.8 |
 
   With the share at 0.85 the same sets had 0.03, 1.9, 1.1 and 1.8 squares
-  marked a photo with the pair in `Models/`, and 0.03, 1.3, 0.08 and 1.3
+  marked a photo with the first pair, and 0.03, 1.3, 0.08 and 1.3
   with `pieces_s_render1` (the last of each for the second held-out set
   with chess-cv through the thumbnail call). No threshold marks most of the wrong pieces and
   few of the right ones: on a board the model has not seen, its scores for
@@ -571,8 +642,8 @@ is why it was written and why it is off.
 
 | Piece model | Step | ChessReD test, 306 | Fenit board B, 100 (unseen board) | Fenit A, 286 |
 |---|---|---|---|---|
-| in `Models/` | off | 279 (279); 99.52% | 0 (1); 84.58% | 16 (19); 91.38% |
-| in `Models/` | **on** | 279 (279); 99.52% | **2 (3); 85.50%** | 16 (19); 91.38% |
+| first | off | 279 (279); 99.52% | 0 (1); 84.58% | 16 (19); 91.38% |
+| first | **on** | 279 (279); 99.52% | **2 (3); 85.50%** | 16 (19); 91.38% |
 | `pieces_s_render1` (not in `Models/`) | off | 285 (285); 99.64% | 1 (1); 84.27% | 185 (202); 95.29% |
 | `pieces_s_render1` (not in `Models/`) | **on** | 285 (285); 99.64% | **11 (13); 88.80%** | 185 (202); 95.29% |
 
@@ -586,7 +657,7 @@ rendered boards, exported for this measurement only, with the corner model in
   clean 1280-px copies with its own grid fit, the app the photos through
   Vision.
 - On these three sets it costs nothing: no ChessReD test photo changes with
-  either model. With the model in `Models/` it changes a side on 36 board B
+  either model. With the first piece model it changes a side on 36 board B
   photos (+0.9 points of squares), on 3 Fenit A photos and on no ChessReD
   photo.
 - **But its weight (4) and its share (15%) were chosen on board B, and on the
@@ -602,13 +673,13 @@ rendered boards, exported for this measurement only, with the corner model in
   with the step: with `pieces_s_render1`, the model the step was made for,
   the app shows the same loss, 78.0% -> 65.5% on the 200 Y-LIChess photos,
   ChessQ 69.7% -> 68.5%, samryan 82.9% -> 79.0%, chesscog and chess-cv
-  unchanged. With the model in `Models/` it gains on three parts and loses
+  unchanged. With the first piece model it gains on three parts and loses
   on one (Y-LIChess 70.1% -> 71.8%, ChessQ 64.6% -> 64.8%, chess-cv 80.5%
   -> 81.0%, chesscog unchanged, samryan 70.4% -> 68.8%), which comes to
   nothing over the whole set (75.5% both ways), and it loses one of that
   model's two exact boards. (All of these from before pull request #14:
   chess-cv through the thumbnail call.) So it is off because it fails with the piece
-  model that is to replace the one in `Models/`, and is worth nothing with
+  model that was to replace the first one, and is worth nothing with
   the one that is there.
 - The rule has no smallest distance between the two groups, and with six
   pieces or fewer one disagreement is already over 15%. The Fenit A photos
@@ -618,7 +689,7 @@ rendered boards, exported for this measurement only, with the corner model in
   many sparse endgames where the one brown king is what needs correcting).
 - On the same boxes the Swift and the Python give every piece the same
   final class: 23,510 pieces on the 692 photos of the three sets, found by
-  the model in `Models/` (11,737) and by `pieces_s_render1` (11,773), the
+  the first piece model (11,737) and by `pieces_s_render1` (11,773), the
   step changing a side on the same photos in both (36, 3, 0 and 61, 1, 0).
   By colour alone they differ on 2 of the 23,510, on two Fenit A photos with
   `pieces_s_render1`'s boxes where the step does not act: pieces between the
