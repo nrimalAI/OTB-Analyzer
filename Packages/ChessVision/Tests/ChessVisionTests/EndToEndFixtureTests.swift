@@ -303,11 +303,13 @@ import Testing
     /// test that a corner model has to pass on its own corners and its own a1.
     ///
     /// What it asks: each of the model's corners within one square of the
-    /// grid fit's (the corners themselves, a number that moves smoothly), and
-    /// 94% of the squares of the four photos together (one photo turned by
-    /// 180 degrees fails that). Not 58 squares a photo, as for the app's
-    /// pipeline: with corners up to 0.74 squares off, as the model in
-    /// `Models/` has them on `test_000000.jpg`, the pieces of the far rank
+    /// grid fit's (the corners themselves, a number that moves smoothly; the
+    /// fit's corners are turned to the nearest of the model's, so this says
+    /// nothing about a1), no photo that fits its position better turned by
+    /// 180 degrees (that is the check on a1), and 94% of the squares of the
+    /// four photos together. Not 58 squares a photo, as for the app's
+    /// pipeline: with corners up to 0.74 squares off, as the first corner
+    /// model has them on `test_000000.jpg`, the pieces of the far rank
     /// stand on the lines between squares, and each one that slips costs two
     /// squares. With the piece model before `pieces_s_render3` that photo
     /// read 58 of 64 on the Mac mini's Neural Engine and 60 on its CPU and
@@ -416,18 +418,17 @@ import Testing
             let got = result.pieces.mapValues(\.piece)
             let expected = try #require(FENBuilder.pieces(fromPlacement: expectedPlacement))
 
-            var correct = 0
-            for rank in 1...8 {
-                for fileNum in 1...8 {
-                    let sq = FENBuilder.square(file: fileNum, rank: rank)!
-                    let want = expected[sq].map { FENBuilder.fenLetter(for: $0) }
-                    let have = got[sq].map { FENBuilder.fenLetter(for: $0) }
-                    if want == have { correct += 1 }
-                }
-            }
+            let correct = Self.correctSquares(got, expected)
+            let turned = Self.correctSquares(Self.turnedHalfway(got), expected)
             totalCorrect += correct
             totalSquares += 64
-            print("\(label) \(file): \(correct)/64 squares  (expected \(expectedPlacement), got \(FENBuilder.placement(got)))")
+            print("\(label) \(file): \(correct)/64 squares\(turned > correct ? ", \(turned)/64 TURNED BY 180 DEGREES" : "")  (expected \(expectedPlacement), got \(FENBuilder.placement(got)))")
+
+            // Which corner is a1: no photo may fit its position better once
+            // the board read is turned by 180 degrees. A turned endgame
+            // loses only two squares a piece, which the floors below can
+            // miss (six pieces: 52 of 64, 95% of the four photos together).
+            #expect(correct >= turned, "\(file): read turned by 180 degrees (\(correct)/64 as read, \(turned)/64 turned back)")
 
             // Per-board floor: recognition quality on known test images should
             // never regress below ~90% per-square.
@@ -438,9 +439,12 @@ import Testing
             // prior of 6 for the corner model's choice, so the pieces cannot
             // overrule a corner model that puts a1 at the wrong end. With
             // exact corners (the grid fit) all six pieces are read: 64/64
-            // with a corner model that knows a1 here (main's), 52/64, the
-            // board turned by 180 degrees, with one that does not (exp3,
-            // exp4). See docs/RECOGNITION.md.
+            // with a corner model that knows a1 here (the first one, in
+            // `Models/` until pull request #19), 52/64, the board turned by
+            // 180 degrees, with one that does not (exp3, exp4;
+            // `corners_s_canon1` knows it on this photo and not on the same
+            // photo as 3:4, see testRecognizesFixturesAsPortraitPhotos).
+            // See docs/RECOGNITION.md.
             if let perPhotoFloor {
                 #expect(correct >= perPhotoFloor, "\(file) regressed: \(correct)/64")
             }
@@ -473,6 +477,16 @@ import Testing
     /// still be read: the recognizer letterboxes it rather than stretching it.
     /// The same photos stretched to a square, which is what the app used to
     /// do, are scored alongside for comparison.
+    ///
+    /// Asked: 90% of the squares of the four photos together, and no photo
+    /// that fits its position better turned by 180 degrees, with one known
+    /// exception. The corner model `corners_s_canon1` reads the endgame
+    /// `test_004005.jpg` turned when it is a 3:4 photo (and right as the
+    /// square photo it is): all six pieces on the squares they would be on
+    /// after half a turn. That is recorded as a known issue and does not
+    /// fail the test (`docs/RECOGNITION.md`, "Known weak spot"); anything
+    /// else does: another photo turned, or this one wrong in another way.
+    /// Take the exception out when a corner model reads it right.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testRecognizesFixturesAsPortraitPhotos() async throws {
         let recognizer = try makeRecognizer()
@@ -498,21 +512,43 @@ import Testing
             #expect(portrait.height * 3 == portrait.width * 4)
             let squashed = try #require(Self.redraw(portrait, width: image.width, height: image.width, stretch: true))
 
-            let good = Self.correctSquares(
-                try await recognizer.recognize(portrait).pieces.mapValues(\.piece), expected)
+            let read = try await recognizer.recognize(portrait).pieces.mapValues(\.piece)
+            let good = Self.correctSquares(read, expected)
             let bad = Self.correctSquares(
                 (try? await recognizer.recognize(squashed).pieces.mapValues(\.piece)) ?? [:],
                 expected)
             letterboxed += good
             stretched += bad
             totalSquares += 64
-            print("portrait \(file): letterboxed \(good)/64, stretched \(bad)/64")
+            let turned = Self.correctSquares(Self.turnedHalfway(read), expected)
+            print("portrait \(file): letterboxed \(good)/64\(turned > good ? " (\(turned)/64 TURNED BY 180 DEGREES)" : ""), stretched \(bad)/64")
+            if good < turned {
+                let what = Comment(rawValue:
+                    "\(file) as a 3:4 photo: read turned by 180 degrees (\(good)/64 as read, \(turned)/64 turned back)")
+                if file == "test_004005.jpg" && turned == 64 {
+                    withKnownIssue("corners_s_canon1 puts a1 at the wrong end of this endgame as a 3:4 photo") {
+                        Issue.record(what)
+                    }
+                } else {
+                    Issue.record(what)
+                }
+            }
         }
         let accuracy = Double(letterboxed) / Double(totalSquares)
         print(String(
             format: "portrait aggregate: letterboxed %.1f%%, stretched %.1f%% per-square",
             accuracy * 100, Double(stretched) / Double(totalSquares) * 100))
         #expect(accuracy >= 0.90)
+    }
+
+    /// A board read with a1 at the opposite corner: every piece on the
+    /// square it would be on after half a turn.
+    private static func turnedHalfway(_ got: [Square: Piece]) -> [Square: Piece] {
+        var turned: [Square: Piece] = [:]
+        for (square, piece) in got {
+            turned[FENBuilder.square(file: 9 - square.file.number, rank: 9 - square.rank.value)!] = piece
+        }
+        return turned
     }
 
     private static func correctSquares(_ got: [Square: Piece], _ expected: [Square: Piece]) -> Int {
