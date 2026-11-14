@@ -50,14 +50,83 @@ training() {
 }
 
 # The state of a run, from its last.pt.  resume: a checkpoint to continue
-# from;  done: it finished (the final checkpoint carries no optimizer);
-# fresh: the file does not load.
+# from;  final: the checkpoint of the last epoch, written before the run's
+# closing validation (ultralytics refuses to resume it: there is nothing
+# left to train);  done: the run finished (its final checkpoint carries no
+# optimizer);  fresh: the file does not load.
 state_of() {
   ./venv/bin/python - "$1" <<'EOF' 2>/dev/null || echo fresh
 import sys, torch
 c = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
-print("resume" if c.get("optimizer") is not None and c.get("epoch", -1) >= 0 else "done")
+if c.get("optimizer") is None or c.get("epoch", -1) < 0:
+    print("done")
+else:
+    epochs = (c.get("train_args") or {}).get("epochs")
+    print("final" if epochs and c["epoch"] + 1 >= epochs else "resume")
 EOF
+}
+
+# Training on Apple's GPU leaks: the process's memory (nearly all of it
+# compressed and swapped out) grows with every batch: on 15,000 photos by
+# 30 GB within one 26-minute epoch, so such a run is continued in a new
+# process after every epoch. Swap fills the disk, and in the end the system kills the
+# process (exit 137; pieces_s_rf on 2026-11-13) or the machine crawls. So a
+# run that holds more than MEM_LIMIT_GB is stopped just after its next epoch
+# has been saved and continued in a new process, as often as it takes.
+MEM_LIMIT_GB="${MEM_LIMIT_GB:-30}"
+
+# Memory of a process in whole GB as top reports it (resident + compressed).
+mem_gb() {
+  top -l 1 -pid "$1" -stats mem 2>/dev/null | tail -n 1 | awk '{
+    v = $1; sub(/[+-]$/, "", v); u = substr(v, length(v)); n = substr(v, 1, length(v) - 1) + 0
+    if (u == "G") print int(n); else if (u == "T") print int(n * 1024); else print 0 }'
+}
+
+# run_guarded <run name> <last.pt> <command...>: runs the command with its
+# output added to the run's log. Returns its exit code, or 99 when it was
+# stopped after an epoch because of its memory.
+run_guarded() {
+  local name="$1" last="$2"; shift 2
+  "$@" >> "runs/$name.log" 2>&1 &
+  local job=$! py="" over=0 stamp now state warned=0
+  while kill -0 "$job" 2>/dev/null; do
+    sleep 30
+    # The python process: with `caffeinate -i cmd &` that is the job itself
+    # (caffeinate becomes its child); if the job is something else, its child.
+    py="$job"
+    case "$(ps -o comm= -p "$job" 2>/dev/null)" in
+      *ython*) ;;
+      *) py="$(pgrep -P "$job" | head -n 1)"
+         case "$(ps -o comm= -p "${py:-0}" 2>/dev/null)" in *ython*) ;; *) py="" ;; esac ;;
+    esac
+    if [ -z "$py" ]; then
+      [ "$warned" = 0 ] && kill -0 "$job" 2>/dev/null \
+        && { log "$name: no python process found to watch; its memory is not guarded"; warned=1; }
+      continue
+    fi
+    if [ "$over" = 0 ]; then
+      if [ "$(mem_gb "$py")" -ge "$MEM_LIMIT_GB" ]; then
+        over=1
+        stamp="$(stat -f %m "$last" 2>/dev/null)"
+        log "$name holds more than $MEM_LIMIT_GB GB: to be continued in a new process after this epoch"
+      fi
+    elif [ "$over" = 1 ]; then
+      now="$(stat -f %m "$last" 2>/dev/null)"
+      if [ -n "$now" ] && [ "$now" != "$stamp" ]; then
+        # An epoch was saved. Wait until the file has been left alone for 20
+        # seconds (last.pt and best.pt are written one after the other), and
+        # stop the run only if the checkpoint is one that can be continued.
+        [ $(( $(date +%s) - now )) -lt 20 ] && continue
+        state="$(state_of "$last")"
+        case "$state" in
+          resume) kill "$py" 2>/dev/null; wait "$job" 2>/dev/null; return 99 ;;
+          final|done) over=2 ;;   # the run is ending by itself: leave it
+          *) ;;                   # not readable just now: look again next round
+        esac
+      fi
+    fi
+  done
+  wait "$job"
 }
 
 while true; do
@@ -79,7 +148,7 @@ while true; do
 
   state=fresh
   [ "$cut_off" = 1 ] && [ -f "$dir/weights/last.pt" ] && state="$(state_of "$dir/weights/last.pt")"
-  if [ "$state" = done ]; then
+  if [ "$state" = done ] || [ "$state" = final ]; then
     log "$name had already finished"
     rc=0
   elif [ "$state" = resume ]; then
@@ -87,8 +156,8 @@ while true; do
     # Through train.py, which sets up what the run needs beyond its saved
     # settings (canonical_corners.py). --name is not read there: it puts the
     # run's name on the command line, so pkill -f "name <run name>" finds it.
-    caffeinate -i ./venv/bin/python -u train.py resume --model "$dir/weights/last.pt" \
-      --name "$name" >> "runs/$name.log" 2>&1
+    run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py resume \
+      --model "$dir/weights/last.pt" --name "$name"
     rc=$?
   elif [ "$cut_off" = 0 ] && [ -d "$dir" ]; then
     # A run of that name already exists (and later lines may use its
@@ -101,9 +170,25 @@ while true; do
     [ -d "$dir" ] && mv "$dir" "$dir.cut-$(date +%s)"
     log "start $name: $args"
     # shellcheck disable=SC2086
-    caffeinate -i ./venv/bin/python -u train.py $args --device mps --name "$name" > "runs/$name.log" 2>&1
+    : > "runs/$name.log"
+    run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py $args \
+      --device mps --name "$name"
     rc=$?
   fi
+  # A run stopped for its memory goes on in a new process until it ends; so
+  # does one the system killed for memory (137), at most three times.
+  killed=0
+  while [ "$rc" = 99 ] || { [ "$rc" = 137 ] && [ "$killed" -lt 3 ]; }; do
+    [ "$rc" = 137 ] && killed=$((killed + 1))
+    state="$(state_of "$dir/weights/last.pt")"
+    [ "$state" = fresh ] && { sleep 30; state="$(state_of "$dir/weights/last.pt")"; }
+    if [ "$state" = done ] || [ "$state" = final ]; then rc=0; break; fi
+    [ "$state" = resume ] || break
+    log "continue $name in a new process (memory)"
+    run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py resume \
+      --model "$dir/weights/last.pt" --name "$name"
+    rc=$?
+  done
   log "end $name (exit $rc)"
   if [ "$rc" = 0 ]; then echo "$line" >> runs/queue.done; else echo "$line" >> runs/queue.failed; fi
   rm -f runs/queue.current

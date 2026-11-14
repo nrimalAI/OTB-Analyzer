@@ -53,11 +53,116 @@ import Testing
         return (corners, pieces)
     }
 
-    /// The recognizer as the app builds it, or with the grid fit switched off.
-    private func makeRecognizer(gridFit: Bool = true) throws -> CoreMLBoardRecognizer {
+    /// The recognizer as the app builds it (every default left alone), or
+    /// with the grid fit switched off, or with the colour step switched on.
+    private func makeRecognizer(
+        gridFit: Bool? = nil, sidesFromColour: Bool? = nil
+    ) throws -> CoreMLBoardRecognizer {
         let models = try Self.models.get()
-        return try CoreMLBoardRecognizer(
-            cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
+        switch (gridFit, sidesFromColour) {
+        case (nil, nil):
+            return try CoreMLBoardRecognizer(cornerModel: models.corners, pieceModel: models.pieces)
+        case let (gridFit?, nil):
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
+        case let (nil, sides?):
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, sidesFromColour: sides)
+        case let (gridFit?, sides?):
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit,
+                sidesFromColour: sides)
+        }
+    }
+
+    /// One king a side is on unless switched off (`docs/RECOGNITION.md`, "What
+    /// one king a side is worth").
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testOneKingASideIsOnByDefault() throws {
+        let models = try Self.models.get()
+        #expect(try makeRecognizer().oneKing == true)
+        #expect(try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oneKing: false).oneKing == false)
+    }
+
+    /// The colour step is off unless asked for (`docs/RECOGNITION.md`, "What
+    /// the colour step is worth"). Switching it on by default is a decision
+    /// to take with scores on a set nothing was tuned on, not in passing.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testColourStepIsOffByDefault() throws {
+        #expect(try makeRecognizer().sidesFromColour == false)
+        #expect(try makeRecognizer(sidesFromColour: true).sidesFromColour == true)
+    }
+
+    /// What the rule for the kings (`OneKingASide`) is given: the piece
+    /// model's own score for every class of each box. Vision hands them out
+    /// divided by their sum, with the sum as the observation's confidence
+    /// (`CoreMLBoardRecognizer.classScores`); nothing in its documentation
+    /// says so, so this holds it against the model run without Vision, on the
+    /// same pixels: the photo drawn at the model's input size, which neither
+    /// then has to resize.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testPieceScoresAreTheModelsOwn() throws {
+        let models = try Self.models.get()
+        let recognizer = try makeRecognizer()
+        let constraint = try #require(
+            models.pieces.modelDescription.inputDescriptionsByName["image"]?.imageConstraint)
+        let side = constraint.pixelsWide
+        #expect(side == constraint.pixelsHigh)
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self, from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+        var pieces = 0, secondScores = 0
+        for file in manifest.keys.sorted() {
+            let source = try #require(
+                CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
+            let photo = DecodedImage.once(try #require(CGImageSourceCreateImageAtIndex(source, 0, nil)))
+            let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+            let context = try #require(CGContext(
+                data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.interpolationQuality = .high
+            context.draw(photo, in: CGRect(x: 0, y: 0, width: side, height: side))
+            let square = try #require(context.makeImage())
+
+            let found = try recognizer.detectPieces(
+                in: square, letterbox: Letterbox(imageSize: CGSize(width: side, height: side)))
+            let output = try models.pieces.prediction(from: MLDictionaryFeatureProvider(
+                dictionary: ["image": MLFeatureValue(cgImage: square, constraint: constraint)]))
+            let rows = try #require(output.featureValue(for: "confidence")?.multiArrayValue)
+            #expect(rows.shape.count == 2)
+            #expect(rows.shape[0].intValue == found.count, "\(file)")
+            guard rows.shape[0].intValue == found.count, rows.shape[1].intValue >= 12 else { continue }
+            #expect(!found.isEmpty, "\(file)")
+
+            for (index, detection) in found.enumerated() {
+                // The classes in training order: white king, queen, rook,
+                // bishop, knight, pawn, then black's.
+                let row = (0..<12).map { rows[[index, $0] as [NSNumber]].doubleValue }
+                let top = try #require(row.max())
+                #expect(abs(Double(detection.confidence) - top) < 1e-4, "\(file) piece \(index)")
+                let topClass = try #require(row.firstIndex(of: top))
+                #expect(detection.piece == OneKingASide.kinds[topClass % 6], "\(file) piece \(index)")
+                #expect(detection.color == (topClass < 6 ? .white : .black), "\(file) piece \(index)")
+                for (k, kind) in OneKingASide.kinds.enumerated() {
+                    let score = max(row[k], row[k + 6])
+                    let have = detection.kindScores[kind]
+                    if score >= CoreMLBoardRecognizer.leastKindScore + 1e-4 {
+                        #expect(abs((have ?? -1) - score) < 1e-4, "\(file) piece \(index) \(kind)")
+                        if kind != detection.piece { secondScores += 1 }
+                    } else if score < CoreMLBoardRecognizer.leastKindScore - 1e-4 {
+                        #expect(have == nil, "\(file) piece \(index) \(kind)")
+                    }
+                }
+                pieces += 1
+            }
+        }
+        print("piece scores: \(pieces) pieces, \(secondScores) scores for a kind other than the piece's own")
+        #expect(pieces >= 40)
+        // At least one score beside a piece's own was compared (a king that
+        // might be a queen, on test_004005.jpg with the models at hand).
+        // Without one, only the top score of each box has been checked.
+        #expect(secondScores >= 1)
     }
 
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
@@ -70,12 +175,95 @@ import Testing
     /// would go unnoticed here, because the fit reads these photos by itself
     /// (and the pieces alone happen to put a1 right on them). This is the
     /// test that a corner model has to pass on its own corners and its own a1.
+    ///
+    /// What it asks: each of the model's corners within one square of the
+    /// grid fit's (the corners themselves, a number that moves smoothly), and
+    /// 94% of the squares of the four photos together (one photo turned by
+    /// 180 degrees fails that). Not 58 squares a photo, as for the app's
+    /// pipeline: with corners up to 0.74 squares off, as the model in
+    /// `Models/` has them on `test_000000.jpg`, the pieces of the far rank
+    /// stand on the lines between squares, and each one that slips costs two
+    /// squares. That photo reads 58 of 64 on the Mac mini's Neural Engine and
+    /// 60 on its CPU and on the CI runner, from the same pixels: a count on a
+    /// coin toss, not a measure of the corners.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testCornerModelAloneReadsTheFixtures() async throws {
-        try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")
+        try await expectFixturesRead(
+            by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone",
+            perPhotoFloor: nil, cornersWithinSquaresOfTheFit: 1.0)
     }
 
-    private func expectFixturesRead(by recognizer: CoreMLBoardRecognizer, label: String) async throws {
+    /// The recognizer decodes a photo that comes straight from a file once
+    /// (`DecodedImage`): handed the file's image or the decoded copy, it gives
+    /// the same corners and the same board. With the grid fit off and a
+    /// square photo this is the case where Vision would otherwise get the
+    /// undecoded image itself.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testRecognizerDecodesThePhotoItself() async throws {
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let source = try #require(
+            CGImageSourceCreateWithURL(fixtures.appending(path: "test_000000.jpg") as CFURL, nil))
+        let fromFile = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(fromFile.width == fromFile.height)
+        let copy = DecodedImage.once(fromFile)
+        #expect(copy !== fromFile)
+        for gridFit in [false, true] {
+            let recognizer = try makeRecognizer(gridFit: gridFit)
+            let a = try await recognizer.recognize(fromFile)
+            let b = try await recognizer.recognize(copy)
+            #expect(a.corners == b.corners, "grid fit \(gridFit)")
+            #expect(a.pieces == b.pieces, "grid fit \(gridFit)")
+            #expect(try recognizer.diagnosePieceSides(fromFile).map(\.colour)
+                == recognizer.diagnosePieceSides(copy).map(\.colour), "grid fit \(gridFit)")
+        }
+    }
+
+    /// The colour step is off in the app. Switched on, it must leave boards
+    /// the piece model reads well as they are.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testSidesFromColourSwitchedOnLeavesTheFixturesRight() async throws {
+        try await expectFixturesRead(
+            by: try makeRecognizer(sidesFromColour: true), label: "fixture, sides from colour")
+    }
+
+    /// The colour step on the fixtures: every piece the model finds has a
+    /// colour, the pieces split in two colours, and the split by colour alone
+    /// gives as many White and as many Black pieces as the position has. (Not
+    /// that the piece model's sides stand: a model that has one side wrong
+    /// here, which the colours then put right, is no failure. That the final
+    /// sides are right is what the two fixture tests above check.)
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testColoursSplitThePiecesOfTheFixturesAsThePositionsDo() throws {
+        let recognizer = try makeRecognizer()
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self,
+            from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+        for (file, placement) in manifest.sorted(by: { $0.key < $1.key }) {
+            let source = try #require(
+                CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
+            let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            let pieces = try recognizer.diagnosePieceSides(image)
+            let agree = pieces.filter { $0.colourSide.map($0.label.hasPrefix) == true }.count
+            print("colour \(file): \(pieces.count) pieces, the colours agree with the model on \(agree)")
+            #expect(pieces.allSatisfy { $0.colour != nil }, "\(file)")
+            #expect(pieces.allSatisfy { $0.colourSide != nil }, "\(file)")
+            #expect(pieces.filter { $0.colourSide == "white" }.count
+                == placement.filter { $0.isLetter && $0.isUppercase }.count, "\(file)")
+            #expect(pieces.filter { $0.colourSide == "black" }.count
+                == placement.filter { $0.isLetter && $0.isLowercase }.count, "\(file)")
+        }
+    }
+
+    /// - Parameters:
+    ///   - perPhotoFloor: squares that must be right on each photo; nil for
+    ///     no floor a photo.
+    ///   - cornersWithinSquaresOfTheFit: if given, each corner the recognizer
+    ///     returns must lie within so many squares of the grid fit's corner.
+    private func expectFixturesRead(
+        by recognizer: CoreMLBoardRecognizer, label: String,
+        perPhotoFloor: Int? = 58, cornersWithinSquaresOfTheFit: Double? = nil
+    ) async throws {
 
         let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
@@ -125,7 +313,25 @@ import Testing
             // with a corner model that knows a1 here (main's), 52/64, the
             // board turned by 180 degrees, with one that does not (exp3,
             // exp4). See docs/RECOGNITION.md.
-            #expect(correct >= 58, "\(file) regressed: \(correct)/64")
+            if let perPhotoFloor {
+                #expect(correct >= perPhotoFloor, "\(file) regressed: \(correct)/64")
+            }
+
+            if let bound = cornersWithinSquaresOfTheFit {
+                let fit = try #require(GridCorners.find(in: image), "\(file): the grid fit finds no board")
+                let fitted = GridCorners.turned(fit.corners, nearestTo: result.corners)
+                // The side of a square, from the fitted board's four edges.
+                var edges = 0.0
+                for k in 0..<4 {
+                    let p = fitted[k], q = fitted[(k + 1) % 4]
+                    edges += Double(hypot(p.x - q.x, p.y - q.y))
+                }
+                let square = edges / 32
+                let off = zip(result.corners, fitted)
+                    .map { Double(hypot($0.x - $1.x, $0.y - $1.y)) / square }.max() ?? .infinity
+                print(String(format: "%@ %@: corners up to %.2f squares from the grid fit's", label, file, off))
+                #expect(off < bound, "\(file): a corner is \(off) squares from the grid fit's")
+            }
         }
 
         // Aggregate floor mirrors the Python eval (~98% per-square on test).

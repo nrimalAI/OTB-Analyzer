@@ -43,8 +43,9 @@ of ChessReD game G033 by 180 degrees (one is the package's fixture
 `test_004005.jpg`), which `main`'s corner model gets right, so the tests fail
 with it once the corners are precise (grid fit). The third row is what is in
 `Models/` until a corner model passes that fixture. With the app's defaults
-(grid fit on, a1 prior 6) it reads 280 of 306 ChessReD test boards exactly and
-82.3% of board B's squares, board not found in 6 of 100. exp3's weights are
+as they are since pull request #12 (grid fit, a1 prior 6, one king a side;
+each photo decoded once) it reads 280 of 306 ChessReD test boards exactly and
+84.67% of board B's squares, board not found in 4 of 100. exp3's weights are
 not kept here, since it never reached `main`: they are
 `runs/pose/corners_s_exp3/weights/last.pt` on the Mac mini, and
 `Training/baseline/corners_yolo11s_exp3.pt` in this branch's history up to

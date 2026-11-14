@@ -8,10 +8,46 @@ struct PieceDetection {
     let color: Piece.Color
     let confidence: Float
     let boundingBox: CGRect  // image coordinates, origin top-left
+    /// The model's score for each kind it considered for this piece, the
+    /// larger of the two colours; a kind without an entry counts as 0
+    /// (`kind_scores` in `chess_pipeline.one_king_a_side`). Empty where
+    /// nothing is known beyond the kind the piece was taken for.
+    let kindScores: [Piece.Kind: Double]
+    /// What the user is shown as the confidence, where that is not
+    /// `confidence`: a piece that a rule took for another kind than the model
+    /// did (`OneKingASide`) is shown with the model's score for that kind,
+    /// so that the app marks it for the user to check. `confidence` stays
+    /// the model's score for its own first choice, as in the Python, and
+    /// goes on deciding which of two pieces on a square stays.
+    let shownConfidence: Float?
+
+    init(
+        piece: Piece.Kind, color: Piece.Color, confidence: Float, boundingBox: CGRect,
+        kindScores: [Piece.Kind: Double] = [:], shownConfidence: Float? = nil
+    ) {
+        self.piece = piece
+        self.color = color
+        self.confidence = confidence
+        self.boundingBox = boundingBox
+        self.kindScores = kindScores
+        self.shownConfidence = shownConfidence
+    }
 
     /// The piece's contact point with the board.
     var anchor: CGPoint {
         CGPoint(x: boundingBox.midX, y: boundingBox.maxY)
+    }
+
+    /// The same detection taken for another kind or side: confidence, box
+    /// and scores stay. Taken for another kind, it is shown with the model's
+    /// score for that kind (0 where it gave none worth the name).
+    func taken(for piece: Piece.Kind? = nil, color: Piece.Color? = nil) -> PieceDetection {
+        let kind = piece ?? self.piece
+        return PieceDetection(
+            piece: kind, color: color ?? self.color,
+            confidence: confidence, boundingBox: boundingBox, kindScores: kindScores,
+            shownConfidence: kind == self.piece
+                ? shownConfidence : Float(OneKingASide.score(of: kind, for: self)))
     }
 }
 
@@ -20,6 +56,14 @@ struct PieceDetection {
 enum SquareAssignment {
 
     static let defaultPull = 0.30
+
+    /// How far outside the board, in squares, the foot of a piece may fall
+    /// and still be taken back onto the rim square (`EDGE_MARGIN`). A piece on
+    /// a rim square can come out just over the edge (corners a little off, a
+    /// piece leaning out); further than this it is a captured or spare piece
+    /// standing beside the board. Half a square, as it was at first, put
+    /// those on the rim.
+    static let edgeMargin = 0.25
 
     /// One piece per square; higher confidence wins, losers are demoted to
     /// their nearest free neighbor square or dropped.
@@ -68,23 +112,23 @@ enum SquareAssignment {
         return board
     }
 
-    /// Board-frame point → square, clamping near-miss anchors within half a
-    /// square of the edge (pieces leaning over the rim).
+    /// Board-frame point → square (`board_square`), taking a point up to
+    /// `edgeMargin` outside the board back onto the rim square; further out
+    /// there is no square.
     static func square(atBoardX x: Double, y: Double) -> Square? {
-        var f = Int(floor(x))
-        var r = Int(floor(y))
-        if !(0..<8).contains(f) || !(0..<8).contains(r) {
-            guard (-0.5..<8.5).contains(x), (-0.5..<8.5).contains(y) else { return nil }
-            f = min(max(f, 0), 7)
-            r = min(max(r, 0), 7)
-        }
+        // The margin first: a point that is not a number, or far away, has no
+        // square (and must not reach `Int()`, which traps on such values).
+        let inside = -edgeMargin..<(8 + edgeMargin)
+        guard inside.contains(x), inside.contains(y) else { return nil }
+        let f = min(max(Int(floor(x)), 0), 7)
+        let r = min(max(Int(floor(y)), 0), 7)
         return FENBuilder.square(file: f + 1, rank: r + 1)
     }
 
     private static func recognized(_ det: PieceDetection, at square: Square) -> RecognizedPiece {
         RecognizedPiece(
             piece: Piece(det.piece, color: det.color, square: square),
-            confidence: det.confidence
+            confidence: det.shownConfidence ?? det.confidence
         )
     }
 }

@@ -21,10 +21,28 @@
 //                   "off" to keep the corner model's a1 as it is.
 //   --grid-fit on|off  corners from the classical grid fit where it accepts
 //                   its own result (the app's default: on).
+//   --sides-from-colour on|off  White and Black from the colours of the
+//                   pieces where they contradict the piece model (default
+//                   off, as in the app).
+//   --one-king on|off  exactly one king a side, from the scores the piece
+//                   model gave each piece for every kind (the app's default:
+//                   on).
+//   --flag-below C[,C...]  the app marks a square for the user to check
+//                   when its piece's confidence is under 0.85 (AppModel);
+//                   count how many of the right and of the wrong pieces that
+//                   marks, for each threshold given (default 0.85).
+//   --colours FILE  score nothing: write, for each photo, what the piece model
+//                   finds, the colour of each piece and the sides the colour
+//                   step gives, for `swift_reference.py colours` to compare
+//                   with the Python on the same boxes.
 //   --grid FILE     run no model: write what the classical grid fit
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
 //   --verbose       one line per photo, not only the wrong ones.
+//   --upright PHOTO OUT.png  run nothing: write the photo as every other
+//                   mode reads it (turned as its EXIF orientation says) to
+//                   OUT.png, to hold it against another reader, e.g.
+//                   PIL's ImageOps.exif_transpose(Image.open(PHOTO)).
 //
 // Needs only the Command Line Tools (no Xcode, no XCTest).
 import ChessKit
@@ -41,22 +59,60 @@ func fail(_ message: String) -> Never {
 
 /// The photo the way a viewer shows it: turned as its EXIF orientation tag
 /// says, which is what the app's camera pipeline hands the recognizer and
-/// what `cv2.imread` returns in the Python. Photos without a tag (all of the
-/// current test sets) are loaded as they are.
+/// what `cv2.imread` returns in the Python. A photo without a tag is loaded
+/// as it is, undecoded: the recognizer decodes it once (`DecodedImage`). A
+/// photo with a tag (every chess-cv photo of the second held-out set, two
+/// of samryan's) is decoded once in full here and its pixels are then moved
+/// to where the tag says, none of them changed: the same pixels as one full
+/// decode, as for every other photo. (Until 2026-11-13 such photos went
+/// through ImageIO's thumbnail call, which decodes them its own way.)
 func upright(_ url: URL) -> CGImage? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    else { return nil }
     let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
     let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-    guard orientation != 1,
-          let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
-          let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
-    else { return CGImageSourceCreateImageAtIndex(source, 0, nil) }
-    let options: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceThumbnailMaxPixelSize: max(width, height),
-    ]
-    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    guard (2...8).contains(orientation) else { return image }
+    return turned(DecodedImage.once(image), orientation: orientation)
+}
+
+/// A bitmap with its pixels moved as an EXIF orientation (2 to 8) asks.
+func turned(_ image: CGImage, orientation: Int) -> CGImage? {
+    let width = image.width, height = image.height
+    let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil }
+        ?? CGColorSpace(name: CGColorSpace.sRGB)!
+    let info = CGImageAlphaInfo.noneSkipLast.rawValue
+    // The pixels as they are, in rows of four bytes a pixel.
+    guard let from = CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 4 * width,
+        space: space, bitmapInfo: info)
+    else { return nil }
+    from.interpolationQuality = .none
+    from.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    let swapped = orientation >= 5  // the four that turn by a quarter
+    let outWidth = swapped ? height : width, outHeight = swapped ? width : height
+    guard let to = CGContext(
+        data: nil, width: outWidth, height: outHeight, bitsPerComponent: 8, bytesPerRow: 4 * outWidth,
+        space: space, bitmapInfo: info),
+        let source = from.data?.assumingMemoryBound(to: UInt32.self),
+        let target = to.data?.assumingMemoryBound(to: UInt32.self)
+    else { return nil }
+    for y in 0..<height {
+        for x in 0..<width {
+            let (u, v): (Int, Int)
+            switch orientation {
+            case 2: (u, v) = (width - 1 - x, y)               // mirrored left to right
+            case 3: (u, v) = (width - 1 - x, height - 1 - y)  // half a turn
+            case 4: (u, v) = (x, height - 1 - y)              // mirrored top to bottom
+            case 5: (u, v) = (y, x)                           // mirrored along the diagonal
+            case 6: (u, v) = (height - 1 - y, x)              // a quarter turn clockwise
+            case 7: (u, v) = (height - 1 - y, width - 1 - x)  // mirrored along the other diagonal
+            default: (u, v) = (y, width - 1 - x)              // 8: a quarter turn anticlockwise
+            }
+            target[v * outWidth + u] = source[y * width + x]
+        }
+    }
+    return to.makeImage()
 }
 
 var modelsPath: String?
@@ -69,6 +125,12 @@ var a1PriorGiven = false
 var gridPath: String?
 var gridFit = true
 var gridFitGiven = false
+var sidesFromColour = false
+var sidesFromColourGiven = false
+var oneKing: Bool?
+var flagBelow: [Float] = [0.85]
+var coloursPath: String?
+var uprightPaths: (photo: String, out: String)?
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
     let flag = arguments.removeFirst()
@@ -83,6 +145,22 @@ while !arguments.isEmpty {
         gridFit = value == "on"
         gridFitGiven = true
     case "--grid": gridPath = arguments.isEmpty ? nil : arguments.removeFirst()
+    case "--sides-from-colour":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--sides-from-colour takes on or off") }
+        sidesFromColour = value == "on"
+        sidesFromColourGiven = true
+    case "--colours": coloursPath = arguments.isEmpty ? nil : arguments.removeFirst()
+    case "--one-king":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--one-king takes on or off") }
+        oneKing = value == "on"
+    case "--flag-below":
+        let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Float($0) }
+        guard !values.isEmpty, values.allSatisfy({ $0 != nil }) else {
+            fail("--flag-below takes a number, or several with commas between them")
+        }
+        flagBelow = values.compactMap { $0 }
     case "--a1-prior":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         if value == "off" {
@@ -94,8 +172,25 @@ while !arguments.isEmpty {
         }
         a1PriorGiven = true
     case "--verbose": verbose = true
+    case "--upright":
+        guard arguments.count >= 2 else { fail("--upright takes a photo and the PNG to write") }
+        uprightPaths = (arguments.removeFirst(), arguments.removeFirst())
     default: fail("unknown argument \(flag)")
     }
+}
+if let uprightPaths {
+    // The pixels as the recognizer will have them: one full decode.
+    guard let image = upright(URL(fileURLWithPath: uprightPaths.photo)).map(DecodedImage.once),
+          let destination = CGImageDestinationCreateWithURL(
+              URL(fileURLWithPath: uprightPaths.out) as CFURL, "public.png" as CFString, 1, nil)
+    else { fail("could not load \(uprightPaths.photo) or write \(uprightPaths.out)") }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else { fail("could not write \(uprightPaths.out)") }
+    print("\(image.width) x \(image.height) written to \(uprightPaths.out)")
+    exit(0)
+}
+if coloursPath != nil && (gridPath != nil || redraw != nil || portrait) {
+    fail("--colours reads the photos as they are: it goes with neither --grid, --redraw nor --portrait")
 }
 if let gridPath, let listPath {
     let listURL = URL(fileURLWithPath: listPath)
@@ -135,7 +230,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--verbose]")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--flag-below C] [--colours FILE] [--verbose] | app_check --upright PHOTO OUT.png")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -184,8 +279,15 @@ do {
     let pieces = try MLModel(
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
-    recognizer = try CoreMLBoardRecognizer(
-        cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit)
+    if let oneKing {
+        recognizer = try CoreMLBoardRecognizer(
+            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+            sidesFromColour: sidesFromColour, oneKing: oneKing)
+    } else {
+        recognizer = try CoreMLBoardRecognizer(
+            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+            sidesFromColour: sidesFromColour)
+    }
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -197,11 +299,53 @@ guard
     !list.isEmpty
 else { fail("could not read \(listPath) as a JSON object of photo -> placement") }
 
+if let coloursPath {
+    // What the piece model finds and what the colour step makes of it.
+    var out: [String: Any] = [:]
+    var changed = 0
+    for path in list.keys.sorted() {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : listURL.deletingLastPathComponent().appending(path: path)
+        guard let image = upright(url) else { fail("could not load \(path)") }
+        let pieces: [PieceSideDiagnosis]
+        do {
+            pieces = try recognizer.diagnosePieceSides(image)
+        } catch {
+            fail("\(path): \(error)")
+        }
+        if pieces.contains(where: { $0.label != $0.finalLabel }) {
+            changed += 1
+        }
+        out[path] = pieces.map { piece in
+            [
+                "cls": piece.label, "confidence": Double(piece.confidence),
+                "box": [piece.box.minX, piece.box.minY, piece.box.maxX, piece.box.maxY].map { Double($0) },
+                "colour": piece.colour ?? NSNull(),
+                "colour_side": piece.colourSide ?? NSNull(),
+                "final": piece.finalLabel,
+            ] as [String: Any]
+        }
+    }
+    do {
+        try JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])
+            .write(to: URL(fileURLWithPath: coloursPath))
+    } catch {
+        fail("could not write \(coloursPath): \(error)")
+    }
+    print("\(out.count) photos; the colours changed a side on \(changed); written to \(coloursPath)")
+    exit(0)
+}
+
 var photos = 0
 var squaresRight = 0
 var exact = 0
 var exactTurned = 0  // right once the board is turned 180 degrees
 var notFound = 0
+// Pieces the app would mark for the user to check, for each threshold:
+// [right, wrong]; and all pieces put on a square: [right, wrong].
+var marked = [[Int]](repeating: [0, 0], count: flagBelow.count)
+var placed = [0, 0]
 for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
     let url = path.hasPrefix("/")
         ? URL(fileURLWithPath: path)
@@ -210,6 +354,12 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
         var image = upright(url),
         let expected = FENBuilder.pieces(fromPlacement: placement)
     else { fail("could not load \(path) or its placement") }
+    if portrait || redraw != nil {
+        // The harness draws the photo itself: it draws the decoded copy, as
+        // the recognizer would have (an undecoded JPEG drawn scaled gives
+        // other pixels).
+        image = DecodedImage.once(image)
+    }
     if portrait {
         guard let canvas = draw(image, width: image.width, height: image.width * 4 / 3)
         else { fail("could not draw \(path)") }
@@ -230,6 +380,15 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
         let result = try await recognizer.recognize(image)
         got = FENBuilder.placement(result.pieces.mapValues(\.piece))
         have = squares(got)
+        for (square, piece) in result.pieces {
+            // `squares` runs from a8 to h1.
+            let index = (8 - square.rank.value) * 8 + square.file.number - 1
+            let wrong = have[index] == want[index] ? 0 : 1
+            placed[wrong] += 1
+            for (k, threshold) in flagBelow.enumerated() where piece.confidence < threshold {
+                marked[k][wrong] += 1
+            }
+        }
     } catch RecognitionError.boardNotFound {
         // Counts as 64 wrong squares, as in evaluate.py.
         notFound += 1
@@ -251,9 +410,17 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
       board not found: \(notFound)
     """)
+for (k, threshold) in flagBelow.enumerated() {
+    print(String(
+        format: "  marked for the user to check (confidence under %@): %d of %d wrong pieces (%@), "
+            + "%d of %d right pieces (%@), %.2f a photo",
+        "\(threshold)", marked[k][1], placed[1], percent(marked[k][1], placed[1]),
+        marked[k][0], placed[0], percent(marked[k][0], placed[0]),
+        Double(marked[k][0] + marked[k][1]) / Double(max(photos, 1))))
+}

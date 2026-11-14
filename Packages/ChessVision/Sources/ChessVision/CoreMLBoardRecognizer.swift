@@ -13,13 +13,21 @@ import Vision
 ///   order (a1, a8, h8, h1). We take the single best-scoring anchor.
 /// - **Pieces** (detect, NMS pipeline): Vision surfaces
 ///   `VNRecognizedObjectObservation`s with normalized bounding boxes
-///   (lower-left origin) and class labels like `"white_pawn"`.
+///   (lower-left origin) and class labels like `"white_pawn"`. Vision hands
+///   out the model's score for every class of a box, but divided by their
+///   sum: a label's confidence times the observation's own confidence (the
+///   sum) is the score as the model gave it (`classScores`).
 ///
-/// After the models, two steps that need no learning (`docs/RECOGNITION.md`):
-/// the corners are replaced by the classical grid fit (`GridCorners`) where it
-/// accepts its own result, and which corner is a1 is checked against the
-/// pieces (`BoardOrientation`).
+/// After the models, two steps that need no learning
+/// (`docs/RECOGNITION.md`): the corners are replaced by the classical grid
+/// fit (`GridCorners`) where it accepts its own result, and which corner is
+/// a1 is checked against the pieces (`BoardOrientation`). A third, White and
+/// Black from the colours of the pieces where the piece model's own answer
+/// does not fit them (`PieceSides`), is there but switched off: on boards
+/// nobody tuned its rule on, it fails with the piece model it was made for.
+/// A fourth sees to it that each side has one king (`OneKingASide`).
 ///
+/// The photo's pixels are decoded once for all of it (`DecodedImage`).
 /// Both models see the photo letterboxed into a square (`Letterbox`), as in
 /// training, never stretched. The square is passed to Vision with
 /// `.scaleFill`, which for a square only resizes; `Letterbox` maps the
@@ -32,6 +40,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     private let pull: Double
     private let a1Prior: Double?
     private let gridFit: Bool
+    /// Internal for testing: the app's default must stay off.
+    let sidesFromColour: Bool
+    /// Internal for testing.
+    let oneKing: Bool
 
     /// - Parameters:
     ///   - a1Prior: which corner is a1 is checked against the pieces
@@ -41,13 +53,29 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     (`GridCorners`) where it accepts its own result, and from the
     ///     corner model where it does not. With it, a board the corner model
     ///     does not find can still be read.
+    ///   - sidesFromColour: decide White and Black from the colours of the
+    ///     pieces in the photo where they contradict the piece model for
+    ///     more than a share of the pieces (`PieceSides`). Off unless asked
+    ///     for: on the second held-out test set the rule as it is loses 12
+    ///     points of squares on one source with the retrained piece model
+    ///     it was made for, and gains nothing lasting with the model in
+    ///     `Models/` (`docs/RECOGNITION.md`). It is kept for the reference's
+    ///     next version of the rule.
+    ///   - oneKing: exactly one king a side, from the scores the piece model
+    ///     gave each piece for every kind (`OneKingASide`). On: no
+    ///     development set loses by it in total, with either piece model it
+    ///     was tried with, the pair in `Models/` gains on all three, and the
+    ///     second held-out test set does not contradict that
+    ///     (`docs/RECOGNITION.md`, "What one king a side is worth").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
         cornerScoreThreshold: Float = 0.25,
         pull: Double = 0.30,  // = SquareAssignment.defaultPull
         a1Prior: Double? = 6,  // = BoardOrientation.appPrior
-        gridFit: Bool = true
+        gridFit: Bool = true,
+        sidesFromColour: Bool = false,
+        oneKing: Bool = true
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
@@ -55,6 +83,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.pull = pull
         self.a1Prior = a1Prior
         self.gridFit = gridFit
+        self.sidesFromColour = sidesFromColour
+        self.oneKing = oneKing
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -92,7 +122,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     // MARK: - BoardRecognizer
 
-    public func recognize(_ image: CGImage) async throws -> RecognitionResult {
+    public func recognize(_ photo: CGImage) async throws -> RecognitionResult {
+        // One decode of the photo for the models, the grid fit and the colours.
+        let image = DecodedImage.once(photo)
         let letterbox = Letterbox(
             imageSize: CGSize(width: image.width, height: image.height))
         guard let square = letterbox.render(image) else {
@@ -112,24 +144,60 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         guard let located = Self.corners(model: modelCorners, in: image, gridFit: gridFit) else {
             throw RecognitionError.boardNotFound
         }
-        var corners = located.corners
-
         let detections = try detectPieces(in: square, letterbox: letterbox)
-        if let prior = Self.orientationPrior(fromModel: located.fromModel, configured: a1Prior) {
+        guard let placed = Self.place(
+            detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
+            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: a1Prior, pull: pull)
+        else { throw RecognitionError.boardNotFound }
+
+        return RecognitionResult(
+            pieces: placed.pieces,
+            corners: placed.corners,
+            orientationGuess: Self.orientationGuess(corners: placed.corners)
+        )
+    }
+
+    /// What follows the two models, in `evaluate.py`'s order: the sides from
+    /// the colours first, since the kings are counted by side and which
+    /// corner is a1 is read from sides and kinds; then one king a side; then
+    /// a1; then the squares. Returns the corners as finally turned and the
+    /// board; nil when the corners are not a board. Internal for testing.
+    static func place(
+        _ found: [PieceDetection],
+        corners located: [CGPoint],
+        cornersFromModel: Bool,
+        in image: CGImage,
+        sidesFromColour: Bool,
+        oneKing: Bool,
+        a1Prior: Double?,
+        pull: Double
+    ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
+        var corners = located
+        var detections = found
+        if sidesFromColour {
+            detections = PieceSides.fromColour(detections, in: image)
+        }
+        if oneKing {
+            detections = OneKingASide.apply(detections)
+        }
+        if let prior = orientationPrior(fromModel: cornersFromModel, configured: a1Prior) {
             corners = BoardOrientation.orient(
                 corners: corners, detections: detections, pull: pull, prior: prior)
         }
-        guard let homography = Homography(corners: corners) else {
-            throw RecognitionError.boardNotFound
-        }
-        let board = SquareAssignment.assign(
-            detections: detections, homography: homography, pull: pull)
+        guard let homography = Homography(corners: corners) else { return nil }
+        return (corners, SquareAssignment.assign(
+            detections: detections, homography: homography, pull: pull))
+    }
 
-        return RecognitionResult(
-            pieces: board,
-            corners: corners,
-            orientationGuess: Self.orientationGuess(corners: corners)
-        )
+    /// What the piece model finds in a photo and what the colour step
+    /// (`PieceSides`) makes of it, whether or not the step is switched on:
+    /// for checking it against the Python (`app_check --colours`).
+    public func diagnosePieceSides(_ photo: CGImage) throws -> [PieceSideDiagnosis] {
+        let image = DecodedImage.once(photo)
+        let letterbox = Letterbox(
+            imageSize: CGSize(width: image.width, height: image.height))
+        guard let square = letterbox.render(image) else { return [] }
+        return PieceSides.diagnose(try detectPieces(in: square, letterbox: letterbox), in: image)
     }
 
     // MARK: - Grid fit
@@ -241,7 +309,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
     // MARK: - Piece model
 
-    private func detectPieces(in square: CGImage, letterbox: Letterbox) throws -> [PieceDetection] {
+    /// `square` is the letterboxed photo; boxes come back in pixels of the
+    /// original photo. Internal for testing.
+    func detectPieces(in square: CGImage, letterbox: Letterbox) throws -> [PieceDetection] {
         let request = VNCoreMLRequest(model: pieceModel)
         request.imageCropAndScaleOption = .scaleFill  // square in, square out: resize only
         try VNImageRequestHandler(cgImage: square).perform([request])
@@ -250,9 +320,12 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             .compactMap { $0 as? VNRecognizedObjectObservation } ?? []
 
         return observations.compactMap { obs in
+            // (Vision's labels come sorted, the highest first.)
+            let scores = Self.classScores(
+                labels: obs.labels.map { ($0.identifier, $0.confidence) }, sum: obs.confidence)
             guard
-                let label = obs.labels.first,
-                let (kind, color) = Self.pieceClass(fromLabel: label.identifier)
+                let top = scores.first,
+                let (kind, color) = Self.pieceClass(fromLabel: top.identifier)
             else { return nil }
             // Vision boxes are fractions of the square with a lower-left origin.
             let bb = obs.boundingBox
@@ -260,11 +333,56 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
                 x: bb.minX, y: 1 - bb.maxY, width: bb.width, height: bb.height))
             return PieceDetection(
                 piece: kind, color: color,
-                confidence: label.confidence,
-                boundingBox: rect
+                // The model's score, as in the Python. (Vision's own number
+                // for the label is its share of the box's scores: near 1
+                // for a piece the model is unsure is there at all.)
+                confidence: top.score,
+                boundingBox: rect,
+                kindScores: Self.kindScores(scores)
             )
         }
     }
+
+    /// The model's score for each class of one box, from what Vision makes
+    /// of it: Vision divides the scores of a box by their sum, so that its
+    /// labels' confidences add up to 1, and gives the sum as the confidence
+    /// of the observation. Internal for testing.
+    ///
+    /// Vision does not document this; it is checked on macOS
+    /// (`EndToEndFixtureTests.testPieceScoresAreTheModelsOwn`), not on iOS.
+    /// So labels that do not add up to 1 are taken to be the scores
+    /// themselves and are left as they are.
+    static func classScores(
+        labels: [(identifier: String, confidence: Float)], sum: Float
+    ) -> [(identifier: String, score: Float)] {
+        let total = labels.reduce(Float(0)) { $0 + $1.confidence }
+        guard abs(total - 1) <= 1e-3 else {
+            return labels.map { ($0.identifier, $0.confidence) }
+        }
+        return labels.map { ($0.identifier, $0.confidence * sum) }
+    }
+
+    /// The scores of one box by kind, the larger of the two colours
+    /// (`PieceDetection.kindScores`). A score under `leastKindScore` is left
+    /// out, and labels that are no piece. Internal for testing.
+    static func kindScores(_ scores: [(identifier: String, score: Float)]) -> [Piece.Kind: Double] {
+        var out: [Piece.Kind: Double] = [:]
+        for (identifier, score) in scores {
+            guard let (kind, _) = pieceClass(fromLabel: identifier) else { continue }
+            let score = Double(score)
+            guard score.isFinite, score >= leastKindScore else { continue }
+            out[kind] = max(out[kind] ?? 0, score)
+        }
+        return out
+    }
+
+    /// The least score that counts as the model having considered a kind for
+    /// a piece. `evaluate.py` sees none under it either (it asks the model
+    /// for boxes down to 0.02), and the rule that uses the scores
+    /// (`OneKingASide`) was measured that way: without it a king too many
+    /// would become whichever kind has the largest of five scores that are
+    /// all next to nothing, and not a queen.
+    static let leastKindScore = 0.02
 
     /// `"white_pawn"` → (.pawn, .white). Internal for testing.
     static func pieceClass(fromLabel label: String) -> (Piece.Kind, Piece.Color)? {

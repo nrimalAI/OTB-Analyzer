@@ -3,8 +3,11 @@ is checked against this folder's Python and not against a second opinion.
 
     python swift_reference.py orientation
     python swift_reference.py grid-cases
+    python swift_reference.py colour-cases
+    python swift_reference.py king-cases
     python swift_reference.py grid --list photos.json --out python_grid.json
     python swift_reference.py compare --python python_grid.json --swift swift_grid.json
+    python swift_reference.py colours --swift swift_colours.json [--list photos.json]
 
 orientation: random boards seen in perspective with their corners given in a
 random rotation, some pieces missed, misread or found twice, some boxes beside
@@ -17,11 +20,35 @@ small inputs, for GridCornersTests: six drawn pictures (written next to the
 JSON as grid_board_*.png), the four fixture photos, sets of x-corners for the
 lattice fit, and a patch of image for the filters. Written to Fixtures/grid_cases.json.
 
+colour-cases: what chess_pipeline.sides_from_colour and its parts make of
+small inputs, for PieceSidesTests: colours in CIE Lab (evaluate.srgb_to_lab),
+the patch of a box, points split in two groups, detections with their colours
+(the model wrong about the side of none, a few or all of the pieces), and one
+drawn picture of brown and black pieces that a model calls all black (written
+next to the JSON as colour_pieces.png). Written to Fixtures/colour_cases.json.
+
+king-cases: what chess_pipeline.one_king_a_side makes of detections and the
+scores the model gave each of them for every kind: boards with no, one, two
+and more kings, on one side or both, scores on the floor and just under it,
+equal scores, kinds without a score. Written to Fixtures/king_cases.json and
+replayed by OneKingASideTests. These cases are the whole contract: the Python
+gets its scores from overlapping boxes (evaluate.kind_scores_of) and the app
+from the class scores of the box itself, so the two cannot be compared on
+photos piece for piece.
+
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
 the corners before the validity checks, the confidence and the numbers the
 checks look at. `app_check --grid` writes the same for the Swift port, and
 `swift_reference.py compare` puts the two side by side.
+
+colours: the colour step on photos, Swift against Python on the same boxes.
+`app_check --colours` writes what the app's piece model finds in each photo
+of a list, the colour Swift measures for each piece and the sides it ends up
+with; this reads that file, measures the colours and decides the sides in
+Python (evaluate.piece_colours, chess_pipeline.sides_from_colour) and counts
+where the two differ. `--list`: the list given to app_check, when its photo
+paths are relative.
 """
 
 import argparse
@@ -32,9 +59,10 @@ from pathlib import Path
 import numpy as np
 
 from chess_pipeline import (
-    Detection, FEN_LETTER, assign_detections, assign_squares, board_square,
-    board_to_fen_placement, fen_placement_to_board, homography, orient_by_pieces,
-    project, pulled_board_point, white_side_score,
+    Detection, EDGE_MARGIN, FEN_LETTER, KING_FLOOR, KINDS, PIECE_CLASSES, assign_detections, assign_squares,
+    board_square, board_to_fen_placement, colour_patch, fen_placement_to_board, homography,
+    one_king_a_side, orient_by_pieces, colour_sides, project, pulled_board_point, sides_from_colour,
+    two_groups, white_side_score,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -57,7 +85,8 @@ PLACEMENTS = [
 def orientation_cases(count, seed):
     rng = random.Random(seed)
     cases = []
-    counts = {"boxes": 0, "moved to a neighbour": 0, "dropped": 0, "outside": 0}
+    counts = {"boxes": 0, "moved to a neighbour": 0, "dropped": 0, "outside": 0,
+              "taken back onto the rim": 0}
     while len(cases) < count:
         # a board seen in perspective: a square, squeezed towards the far side,
         # turned by any angle, with each corner nudged
@@ -97,9 +126,9 @@ def orientation_cases(count, seed):
                                       file + 0.5 + rng.uniform(-0.3, 0.3),
                                       rank + 0.5 + rng.uniform(-0.3, 0.3)))
         for _ in range(rng.choice([0, 0, 1, 2])):
-            # something beside the board: within half a square it is pulled
-            # onto the edge square, further out it is left out
-            along, out = rng.uniform(0.2, 7.8), rng.choice([-1, 1]) * rng.uniform(0.1, 0.9)
+            # something beside the board: within EDGE_MARGIN of a square it
+            # is taken back onto the rim square, further out it is left out
+            along, out = rng.uniform(0.2, 7.8), rng.choice([-1, 1]) * rng.uniform(0.05, 0.6)
             out = out if out < 0 else 8 + out
             detections.append(box(rng.choice("KQRBNPkqrbnp"),
                                   *((along, out) if rng.random() < 0.5 else (out, along))))
@@ -115,11 +144,12 @@ def orientation_cases(count, seed):
             scores.append(white_side_score(assign_squares(homography(turned), detections, pull))
                           + (prior if k == 0 else 0.0))
         # A piece sitting exactly on a line between two squares, or exactly
-        # half a square outside the board, would make the case a test of
+        # EDGE_MARGIN outside the board, would make the case a test of
         # rounding, not of the port. (Turning the corners turns the board
         # frame, so one rotation stands for all four.)
         def on_a_line(d):
-            return any(abs(b % 1 - 0.5) > 0.499 or abs(b + 0.5) < 0.001 or abs(b - 8.5) < 0.001
+            return any(abs(b % 1 - 0.5) > 0.499 or abs(b + EDGE_MARGIN) < 0.001
+                       or abs(b - 8 - EDGE_MARGIN) < 0.001
                        for b in pulled_board_point(homography(given), d.anchor, pull))
         if any(on_a_line(d) for d in detections):
             continue
@@ -132,6 +162,10 @@ def orientation_cases(count, seed):
         outside = sum(board_square(H, d.anchor, pull) is None for d in detections)
         moved = sum(board_square(H, d.anchor, pull) != sq for sq, d in placed.items())
         counts["outside"] += outside
+        counts["taken back onto the rim"] += sum(
+            board_square(H, d.anchor, pull) is not None
+            and not all(0 <= b < 8 for b in pulled_board_point(H, d.anchor, pull))
+            for d in detections)
         counts["moved to a neighbour"] += moved
         counts["dropped"] += len(detections) - outside - len(placed)
         counts["boxes"] += len(detections)
@@ -367,6 +401,316 @@ def grid_cases():
     print(f"written to {path} ({path.stat().st_size // 1024} kB)")
 
 
+def drawn_pieces(seed, size=(480, 400)):
+    """A chequered table top under uneven light with upright pieces of two
+    colours on it: light brown ("White") and near black. Returns (BGR image,
+    [(side, bbox)]), the boxes round each piece."""
+    import cv2
+    rng = np.random.default_rng(seed)
+    w, h = size
+    img = np.zeros((h, w, 3), np.uint8)
+    cell = 60
+    for j in range(0, h, cell):
+        for i in range(0, w, cell):
+            img[j:j + cell, i:i + cell] = (150, 200, 225) if (i + j) // cell % 2 == 0 else (60, 95, 140)
+    pieces = []
+    for j in range(3):
+        for i in range(7):
+            if rng.random() < 0.15:
+                continue
+            side = "white" if rng.random() < 0.5 else "black"
+            cx = 40 + i * 62 + int(rng.integers(-8, 9))
+            foot = 110 + j * 125 + int(rng.integers(-8, 9))
+            bw, bh = int(rng.integers(26, 40)), int(rng.integers(60, 100))
+            shade = rng.uniform(0.8, 1.15)
+            base = (95, 140, 190) if side == "white" else (38, 36, 40)
+            colour = tuple(int(min(255, v * shade)) for v in base)
+            cv2.ellipse(img, (cx, foot - bh // 3), (bw // 2, bh // 3), 0, 0, 360, colour, -1, cv2.LINE_AA)
+            cv2.rectangle(img, (cx - bw // 4, foot - bh + bw // 3), (cx + bw // 4, foot - bh // 3), colour, -1)
+            cv2.circle(img, (cx, foot - bh + bw // 3), bw // 3, colour, -1, cv2.LINE_AA)
+            pieces.append((side, (cx - bw / 2 - 1.5, foot - bh - 1.25, cx + bw / 2 + 1.5, foot + 1.75)))
+    light = np.linspace(0.6, 1.15, w)[None, :, None] * np.linspace(1.05, 0.85, h)[:, None, None]
+    img = (img * light).clip(0, 255).astype(np.uint8)
+    img = cv2.GaussianBlur(img, (0, 0), 0.9)
+    img = (img.astype(np.float32) + rng.normal(0, 2.0, img.shape)).clip(0, 255).astype(np.uint8)
+    return img, pieces
+
+
+def colour_cases(seed):
+    import cv2
+    from evaluate import piece_colours, srgb_to_lab
+    cv2.setNumThreads(1)
+    rng = random.Random(seed)
+    out = {}
+
+    # 1. Colours: sRGB bytes -> CIE Lab.
+    colours = [(0, 0, 0), (255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (1, 1, 1),
+               (10, 10, 10), (11, 11, 11), (23, 24, 25), (128, 128, 128)]
+    colours += [tuple(rng.randrange(256) for _ in range(3)) for _ in range(150)]
+    colours += [tuple(rng.randrange(40) for _ in range(3)) for _ in range(40)]   # dark: the linear parts
+    lab = srgb_to_lab(np.array([(b, g, r) for r, g, b in colours], np.uint8))
+    out["lab"] = [dict(rgb=list(c), lab=[float(v) for v in l]) for c, l in zip(colours, lab)]
+
+    # 2. The patch of a box, also for boxes that stick out of the photo or
+    # lie beside it, and boxes too small to hold a pixel.
+    patches = []
+    for k in range(120):
+        width, height = rng.choice([(640, 480), (3024, 4032), (50, 40)])
+        w, h = rng.uniform(0, 0.2) * width, rng.uniform(0, 0.4) * height
+        if k % 10 == 0:
+            w = h = rng.choice([0.0, 0.3, 1.0])
+        x, y = rng.uniform(-0.3, 1.2) * width, rng.uniform(-0.3, 1.2) * height
+        box = (x, y, x + w, y + h)
+        patches.append(dict(box=list(box), width=width, height=height,
+                            patch=colour_patch(box, width, height)))
+    out["patches"] = patches
+
+    # 3. Points split in two groups: clouds, points on a grid (ties: a point
+    # as near to one mean as to the other; several pairs equally far apart),
+    # the same point twice, too few points, all points the same.
+    groups = []
+    for k in range(60):
+        n = rng.choice([0, 1, 2, 2, 3, 5, 8, 16, 32])
+        kind = k % 4
+        if kind == 0:      # two clouds, sometimes overlapping
+            gap = rng.choice([0.5, 2.0, 10.0, 40.0])
+            pts = [[rng.gauss(gap * (i % 2), 3), rng.gauss(0, 12), rng.gauss(-gap * (i % 2), 12)]
+                   for i in range(n)]
+        elif kind == 1:    # whole numbers
+            pts = [[float(rng.randrange(-2, 3)) for _ in range(3)] for _ in range(n)]
+        elif kind == 2:    # one cloud
+            pts = [[rng.uniform(0, 100), rng.uniform(-80, 80), rng.uniform(-80, 80)] for _ in range(n)]
+        else:              # all the same
+            pts = [[50.0, 8.0, -12.0]] * n
+        split = two_groups(pts)
+        groups.append(dict(points=pts, group=None if split is None else split[0],
+                           centres=None if split is None else split[1].tolist()))
+    out["groups"] = groups
+
+    # 4. Detections with their colours. The pieces are of two colours; the
+    # model has the side of some share of them wrong.
+    sides = []
+    tally = {"changed": 0, "kept, contradicted a little": 0, "kept, agreed": 0, "no split": 0}
+
+    def case(n, wrong, gap, missing):
+        light = (rng.uniform(55, 85), rng.uniform(-5, 15), rng.uniform(5, 35))
+        dark = (light[0] - gap, rng.uniform(-3, 6), rng.uniform(-6, 10))
+        truth = [rng.choice(["white", "black"]) for _ in range(n)]
+        wrong_ones = set(rng.sample(range(n), min(n, wrong)))
+        detections, cols = [], []
+        for k in range(n):
+            said = truth[k] if k not in wrong_ones else ("black" if truth[k] == "white" else "white")
+            kind = rng.choice(["king", "queen", "rook", "bishop", "knight", "pawn"])
+            x, y = rng.uniform(0, 2800), rng.uniform(0, 3800)
+            detections.append(Detection(f"{said}_{kind}", rng.randrange(250, 1000) / 1000,
+                                        (x, y, x + rng.uniform(60, 200), y + rng.uniform(120, 420))))
+            centre = light if truth[k] == "white" else dark
+            cols.append(None if rng.random() < missing
+                        else tuple(c + rng.gauss(0, s) for c, s in zip(centre, (6, 1.5, 3))))
+        return record(detections, cols, bool(wrong_ones))
+
+    def record(detections, cols, contradicted=True):
+        result = sides_from_colour(detections, cols)
+        changed = any(a.cls != b.cls for a, b in zip(detections, result))
+        by_colour = colour_sides(cols)
+        if by_colour is None:
+            tally["no split"] += 1
+        elif changed:
+            tally["changed"] += 1
+        elif contradicted:
+            tally["kept, contradicted a little"] += 1
+        else:
+            tally["kept, agreed"] += 1
+        sides.append(dict(
+            detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
+            colours=[None if c is None else list(c) for c in cols],
+            by_colour=by_colour,
+            sides=[d.cls for d in result]))
+        return changed
+
+    for _ in range(70):
+        n = rng.choice([0, 1, 2, 3, 6, 12, 20, 20, 32])
+        case(n, wrong=rng.choice([0, 0, 1, 2, 3, 4, n // 2, n]),
+             gap=rng.choice([3.0, 15.0, 30.0, 45.0]), missing=rng.choice([0.0, 0.0, 0.1, 0.6]))
+    # On the line: 3 of 20 is 15%, which is not more than 15%; 4 of 20 is.
+    for wrong in (3, 4, 3, 4):
+        assert case(20, wrong=wrong, gap=45.0, missing=0.0) == (wrong == 4)
+
+    def pieces(said, cols):
+        return [Detection(f"{side}_pawn", 0.9 - 0.01 * k, (100.0 * k, 50.0, 100.0 * k + 60, 170.0))
+                for k, side in enumerate(said)], cols
+    cream, ebony = (80.0, 2.0, 20.0), (20.0, 1.0, 2.0)
+    # The share is of the pieces that have a colour: 20 with a colour, the
+    # model wrong about 4 of them, and 7 more without. 4 of 20 is over 15%
+    # (4 of 27 would not be), and the 7 keep the model's side.
+    truth = ["white", "black"] * 10
+    said = ["black", "white"] * 2 + truth[4:] + ["white"] * 7
+    assert record(*pieces(said, [cream if t == "white" else ebony for t in truth] + [None] * 7))
+    assert [c.split("_")[0] for c in sides[-1]["sides"]] == truth + ["white"] * 7
+    # Two groups equally light, told apart by colour alone: the group of the
+    # first of the two points farthest apart is White.
+    grey, brown = (45.0, 0.0, 0.0), (45.0, 14.0, 28.0)
+    for cols in ([grey, brown, grey, brown], [brown, grey, brown, grey]):
+        assert record(*pieces(["black"] * 4, cols))
+        assert [c.split("_")[0] for c in sides[-1]["sides"]] == ["white", "black", "white", "black"]
+    out["sides"] = sides
+
+    # 5. A drawn picture: brown and black pieces, and a model that calls
+    # every one of them black.
+    img, pieces = drawn_pieces(seed)
+    name = "colour_pieces.png"
+    cv2.imwrite(str(FIXTURES / name), img)
+    kinds = ["king", "queen", "rook", "bishop", "knight", "pawn"]
+    detections = [Detection(f"black_{kinds[k % 6]}", 0.9 - 0.01 * k, bbox)
+                  for k, (_, bbox) in enumerate(pieces)]
+    # one box beside the picture: no colour, its side stays as the model said
+    detections.append(Detection("black_pawn", 0.4, (500.0, 100.0, 540.0, 180.0)))
+    cols = piece_colours(FIXTURES / name, detections)
+    result = sides_from_colour(detections, cols)
+    assert [d.cls.split("_")[0] for d in result[:-1]] == [side for side, _ in pieces]
+    assert cols[-1] is None and result[-1].cls == "black_pawn"
+    out["picture"] = dict(
+        file=name,
+        detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
+        colours=[None if c is None else list(c) for c in cols],
+        sides=[d.cls for d in result])
+
+    # 6. A photo: the colours of boxes spread over a fixture (a JPEG: the two
+    # decoders differ by a grey level here and there, the medians hardly).
+    photo = "test_000000.jpg"
+    height, width = cv2.imread(str(FIXTURES / photo)).shape[:2]
+    boxes = []
+    for _ in range(24):
+        x, y = rng.uniform(0.15, 0.75) * width, rng.uniform(0.15, 0.7) * height
+        boxes.append(Detection("white_pawn", 0.9, (x, y, x + rng.uniform(0.03, 0.07) * width,
+                                                   y + rng.uniform(0.06, 0.14) * height)))
+    out["photo"] = dict(file=photo, boxes=[list(d.bbox) for d in boxes],
+                        colours=[list(c) for c in piece_colours(FIXTURES / photo, boxes)])
+
+    path = FIXTURES / "colour_cases.json"
+    path.write_text(json.dumps(out, separators=(",", ":")) + "\n")
+    print(f"written to {path} ({path.stat().st_size // 1024} kB) and {name}: "
+          f"{len(out['lab'])} colours, {len(patches)} patches "
+          f"({sum(p['patch'] is None for p in patches)} empty), {len(groups)} sets of points "
+          f"({sum(g['group'] is None for g in groups)} without a split), "
+          f"{len(sides)} sets of detections {tally}, "
+          f"{len(pieces)} drawn pieces ({sum(s == 'white' for s, _ in pieces)} brown)")
+
+
+def king_cases(seed):
+    rng = random.Random(seed)
+    cases = []
+    tally = {"two kings, left alone": 0, "a king given": 0, "fewer than two kings, none given": 0,
+             "kings taken away": 0, "other": 0}
+
+    def piece(side, kind, scores, k):
+        return Detection(f"{side}_{kind}", rng.randrange(250, 1000) / 1000,
+                         (60.0 * k, 40.0, 60.0 * k + 50, 150.0)), scores
+
+    def record(pieces):
+        detections = [d for d, _ in pieces]
+        scores = [s for _, s in pieces]
+        result = one_king_a_side(detections, scores)
+        assert all(a.confidence == b.confidence and a.bbox == b.bbox
+                   and a.cls.split("_")[0] == b.cls.split("_")[0] for a, b in zip(detections, result))
+        kings = sum(d.cls.endswith("_king") for d in detections)
+        changed = [(a.cls, b.cls) for a, b in zip(detections, result) if a.cls != b.cls]
+        if kings == 2:
+            assert not changed
+            tally["two kings, left alone"] += 1
+        elif kings < 2 and changed:
+            assert all(b.endswith("_king") for _, b in changed)
+            tally["a king given"] += 1
+        elif kings < 2:
+            tally["fewer than two kings, none given"] += 1
+        elif changed:
+            assert all(a.endswith("_king") and not b.endswith("_king") for a, b in changed)
+            tally["kings taken away"] += 1
+        else:
+            tally["other"] += 1
+        cases.append(dict(
+            detections=[dict(cls=d.cls, confidence=d.confidence, scores=s) for d, s in pieces],
+            out=[d.cls for d in result]))
+        return [d.cls for d in result]
+
+    def scores_for(kind):
+        """What a model might score a piece of this kind: its own kind high,
+        a few others low, some kinds not at all."""
+        scores = {kind: rng.randrange(250, 1000) / 1000}
+        for other in KINDS:
+            if other != kind and rng.random() < 0.45:
+                scores[other] = rng.choice([0.0, 0.004, 0.019, 0.02, 0.021, 0.05, 0.1, 0.3,
+                                            round(rng.uniform(0, 0.6), 3)])
+        return scores
+
+    # 1. Random boards: 0 to 4 kings, on either side, any number of pieces.
+    for n in range(260):
+        count = rng.choice([0, 1, 2, 3, 5, 8, 16, 24, 32])
+        kings = rng.choice([0, 0, 1, 1, 2, 3, 3, 4])
+        pieces = []
+        for k in range(count):
+            side = rng.choice(["white", "black"]) if n % 5 else "white"
+            kind = "king" if k < kings else rng.choice(KINDS[1:])
+            pieces.append(piece(side, kind, scores_for(kind), k))
+        rng.shuffle(pieces)
+        record(pieces)
+
+    # 2. By hand, each sentence of the rule.
+    def p(cls, k=0, **scores):
+        side, kind = cls.split("_")
+        return piece(side, kind, scores, k)
+    # No pieces; one side only.
+    assert record([]) == []
+    assert record([p("white_queen", king=0.3)]) == ["white_king"]
+    # Two kings: nothing, also when both are on one side.
+    assert record([p("white_king", king=0.9), p("black_king", king=0.9), p("black_queen", king=0.8)]) \
+        == ["white_king", "black_king", "black_queen"]
+    assert record([p("white_king", king=0.9), p("white_king", king=0.2, queen=0.6),
+                   p("black_queen", king=0.5)]) == ["white_king", "white_king", "black_queen"]
+    # One king: the other side gets one, the side that has one is left alone.
+    assert record([p("white_king", king=0.9), p("white_queen", king=0.5), p("black_queen", king=0.05),
+                   p("black_rook", king=0.3)]) == ["white_king", "white_queen", "black_queen", "black_king"]
+    # No king: each side its own best; one side may find none.
+    assert record([p("white_queen", king=0.1), p("white_rook", king=0.2), p("black_pawn", king=0.019),
+                   p("black_queen")]) == ["white_queen", "white_king", "black_pawn", "black_queen"]
+    # On the floor counts, under it does not.
+    assert record([p("white_queen", king=KING_FLOOR)]) == ["white_king"]
+    assert record([p("white_queen", king=KING_FLOOR - 1e-9)]) == ["white_queen"]
+    # Equal king scores: the earlier piece.
+    assert record([p("black_rook", king=0.4), p("black_queen", king=0.4), p("black_pawn", king=0.39)]) \
+        == ["black_king", "black_queen", "black_pawn"]
+    # More than two kings: a side with several keeps its best, by the king
+    # score and not by the confidence of the box; a side with one is left.
+    assert record([p("white_king", king=0.5, queen=0.3), p("white_king", king=0.7),
+                   p("white_king", king=0.6, rook=0.2, queen=0.1), p("black_king", king=0.3)]) \
+        == ["white_queen", "white_king", "white_rook", "black_king"]
+    # Equal king scores among several kings: the earlier one stays.
+    assert record([p("white_king", king=0.6, bishop=0.1), p("white_king", king=0.6, knight=0.2),
+                   p("black_king", king=0.9)]) == ["white_king", "white_knight", "black_king"]
+    # The other kind: the best score; equal scores in the order queen, rook,
+    # bishop, knight, pawn; no other score, a queen.
+    assert record([p("black_king", king=0.9), p("black_king", king=0.5, pawn=0.2, knight=0.2),
+                   p("black_king", king=0.4, rook=0.3, queen=0.3), p("black_king", king=0.3),
+                   p("black_king", king=0.2, pawn=0.01)]) \
+        == ["black_king", "black_knight", "black_queen", "black_queen", "black_pawn"]
+    # Three kings on one side and none on the other: the other side gets none
+    # (it has more than two kings on the board, not fewer).
+    assert record([p("white_king", king=0.9), p("white_king", king=0.8, queen=0.1),
+                   p("white_king", king=0.7), p("black_queen", king=0.6)]) \
+        == ["white_king", "white_queen", "white_queen", "black_queen"]
+    # Four kings, two a side.
+    assert record([p("white_king", king=0.3, pawn=0.1), p("black_king", king=0.3, rook=0.2),
+                   p("white_king", king=0.8), p("black_king", king=0.2, bishop=0.1)]) \
+        == ["white_pawn", "black_king", "white_king", "black_bishop"]
+    # A king that the model gave no king score (scores from elsewhere) loses to one that has one.
+    assert record([p("white_king"), p("white_king", king=0.1), p("black_king", king=0.5)]) \
+        == ["white_queen", "white_king", "black_king"]
+
+    path = FIXTURES / "king_cases.json"
+    path.write_text(json.dumps(cases, separators=(",", ":")) + "\n")
+    print(f"{len(cases)} cases written to {path} ({path.stat().st_size // 1024} kB): {tally}")
+
+
 def grid_reference(list_path, out_path, limit):
     import cv2
     from grid_corners import find_grid
@@ -423,14 +767,62 @@ def compare(python_path, swift_path):
             print(f"  {name}: {sq:.4f} squares ({px:.2f} px)")
 
 
+def compare_colours(swift_path, list_path):
+    """The colour step of the same photos and boxes in Python and in Swift."""
+    from evaluate import piece_colours
+    sw = json.loads(Path(swift_path).read_text())
+    base = Path(list_path).resolve().parent if list_path else Path.cwd()
+    photos = pieces = no_colour_differs = side_differs = final_differs = 0
+    fired_py = fired_sw = photos_side_differs = photos_final_differs = split_differs = 0
+    off = []
+    for photo in sorted(sw):
+        found = sw[photo]
+        src = Path(photo) if Path(photo).is_absolute() else base / photo
+        detections = [Detection(d["cls"], d["confidence"], tuple(d["box"])) for d in found]
+        cols = piece_colours(src, detections)
+        final = [d.cls for d in sides_from_colour(detections, cols)]
+        split = colour_sides(cols)
+        by_colour = split or [None] * len(detections)
+        photos += 1
+        pieces += len(detections)
+        sides_here = finals_here = 0
+        split_differs += (split is None) != all(d["colour_side"] is None for d in found)
+        for d, c, side, cls in zip(found, cols, by_colour, final):
+            if (c is None) != (d["colour"] is None):
+                no_colour_differs += 1
+            elif c is not None:
+                off.append(max(abs(a - b) for a, b in zip(c, d["colour"])))
+            sides_here += side != d["colour_side"]
+            finals_here += cls != d["final"]
+        side_differs += sides_here
+        final_differs += finals_here
+        photos_side_differs += sides_here > 0
+        photos_final_differs += finals_here > 0
+        fired_py += any(cls != d["cls"] for cls, d in zip(final, found))
+        fired_sw += any(d["final"] != d["cls"] for d in found)
+        if sides_here or finals_here:
+            print(f"  {Path(photo).name}: {len(detections)} pieces, side by colour differs for "
+                  f"{sides_here}, final class for {finals_here}")
+    off = np.array(off) if off else np.zeros(1)
+    print(f"{photos} photos, {pieces} pieces found by the app's piece model")
+    print(f"colours, Swift against Python, largest of L*, a*, b*: median {np.median(off):.3f}, "
+          f"p95 {np.percentile(off, 95):.3f}, max {off.max():.3f}; "
+          f"a colour in one and none in the other: {no_colour_differs}")
+    print(f"side by colour alone differs: {side_differs} pieces on {photos_side_differs} photos "
+          f"(split in one and none in the other: {split_differs} photos)")
+    print(f"the step changed a side: Python on {fired_py} photos, Swift on {fired_sw}; "
+          f"final classes differ: {final_differs} pieces on {photos_final_differs} photos")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=["orientation", "grid-cases", "grid", "compare"])
+    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "grid", "compare", "colours"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
     ap.add_argument("--python", help="compare: file written by `grid`")
-    ap.add_argument("--swift", help="compare: file written by `app_check --grid`")
+    ap.add_argument("--swift", help="compare: file written by `app_check --grid`; "
+                                    "colours: file written by `app_check --colours`")
     ap.add_argument("--count", type=int, default=120)
     ap.add_argument("--seed", type=int, default=20261113)
     args = ap.parse_args()
@@ -443,8 +835,14 @@ def main():
               f"rotations chosen: {[turns.count(k) for k in range(4)]}; {counts}")
     elif args.what == "grid-cases":
         grid_cases()
+    elif args.what == "colour-cases":
+        colour_cases(args.seed)
+    elif args.what == "king-cases":
+        king_cases(args.seed)
     elif args.what == "grid":
         grid_reference(args.list, args.out, args.limit)
+    elif args.what == "colours":
+        compare_colours(args.swift, args.list)
     else:
         compare(args.python, args.swift)
 
