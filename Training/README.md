@@ -319,7 +319,7 @@ full-size photos; for a piece model trained on the copies use `score.sh`.
 | `pieces_s_render2` | continues render1's `last.pt`, 12 epochs, `merged_all` (every piece source incl. Roboflow + 8,000 renders, 15,438 photos) | Finished 2026-11-13 23:27. `last.pt`, labelled corners: ChessReD test 99.96% / **98.4%** (301 of 306), Fenit A (trained on) 99.7% / 88%, board B 90.9% / 0%. On board B the kinds are better again (pawns right 95.5%, knights all; kings still read as queens 56 times of 196) and what is wrong is mostly the side: 243 of 868 brown "white" pawns read as black. The candidate described below |
 | `pieces_s_crop1` | continues render1's `last.pt`, 12 epochs, `merged_all_crop` (`crop_boards.py`: the 7,370 photos of `merged_all` with a corner label, cut down to the board) | Finished 2026-11-14 02:20. Scored with `--crop-board`, against `pieces_s_render2` (same start, same 12 epochs, whole photos). Labelled corners (`scores/pieces_s_crop1_last.txt`): board B 92.5% / 2 of 98 exact against 90.9% / 0; ChessReD test 99.97% / 98.4% against 99.96% / 98.4%; Fenit A (trained on) 94% exact against 88%. End to end in Python with `main`'s corner model, grid fit, a1 prior 6, one king a side (`scores/endtoend_crop1_vs_render2.txt`): board B 84.3% / 2 of 100 against 82.9% / 0; ChessReD test 298 against 297 of 306. A small gain on board B and none on ChessReD: not by itself worth the change in the app. The side is still what is wrong on board B (P read as p 145 times, was 243) |
 | `pieces_s_render3` | continues render2's `last.pt`, 10 epochs, `merged_all3` (as `merged_all`, with 4,000 more renders whose two sides are two shades of one list, the lighter one White, and more views from above: 19,438 photos) | Finished 2026-11-14 08:17. `last.pt`, labelled corners (`scores/pieces_s_render3_last.txt`): **board B 94.7% / 8 of 98 exact** (render2 90.9% / 0), Fenit A (trained on) 99.8% / 92%, ChessReD test 99.94% / 96.7% (296 of 306; render2 301). On board B, P read as p 132 times (render2 243); during the run it moved between 111 and 175 from one epoch to the next. **In `Models/`**: see below |
-| `pieces_s_render4` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos) | queued after `corners_s_canon1` |
+| `pieces_s_tone1` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos), `--side-tone 0.35` (`side_tone.py`: a third of the training photos shown in another tone, so that a cream side looks tan or brown beside a darker one) | queued after `corners_s_canon1`. Two changes in one run (more renders, the tone), to save six hours of the GPU: if it gains, which of the two did it is not known |
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | running since 08:17 on 2026-11-14 |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
@@ -563,6 +563,13 @@ was in `Models/`, and why it was taken out again.
   `merged_all3` (1-3), `merged_all4` (1-4). In the first 4,000 the sides of
   thick boards carry a warped copy of the board pattern (fixed in the script
   since; the labels are right).
+- `side_tone.py`, `train.py pieces --side-tone P`: an augmentation for the
+  side of a piece. With probability P a training photo gets a colour cast
+  (warm two times in three), another tone curve and a little lift of the
+  blacks, the same for every pixel: the lighter side stays the lighter one,
+  its colour changes. `python side_tone.py --sheet out.jpg <photos>` shows
+  what it does. `--close-mosaic N` sets how many last epochs go without
+  mosaic (ultralytics' 10 switches it off for a whole run of 10 epochs).
 - `score.sh pieces|corners <label> <weights>`: the standard scores on the CPU,
   into `runs/scores/`.
 - `compare_app_check.py <pair to beat>.txt <candidate>.txt`: two
