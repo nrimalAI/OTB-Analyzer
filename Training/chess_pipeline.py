@@ -313,14 +313,20 @@ KING_FLOOR = 0.02
 
 def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
     """The detections with one king on each side, where the model's scores
-    allow it. Every position has exactly two kings, and a king read as a
-    queen (or a third "king") is what a piece model gets wrong on a set it
-    has not seen, from above most of all.
+    allow it. Every position of a game has exactly two kings, and a king read
+    as a queen (or a third "king") is what a piece model gets wrong on a set
+    it has not seen, from above most of all. A board set up without a king
+    on a side (a study, a layout: 13 of Fenit A's 286 photos, 50 of the 200
+    Y-LIChess photos) is not a game position, and there the rule makes a
+    king out of the best candidate and is wrong.
 
     `kind_scores[k]` holds, for detection k, the model's score for each kind
     it considered for that piece: {"king": 0.31, "queen": 0.48, ...}; a kind
-    it gave no score counts as 0. (In the app: the confidences of Vision's
-    labels for the box, the larger of the two colours for each kind.)
+    it gave no score counts as 0. (In the app: the model's score for each
+    label of the box, which is Vision's label confidence times the
+    observation's confidence, the larger of the two colours for each kind,
+    with scores under 0.02 left out, as evaluate.kind_scores_of never sees
+    a box under 0.02 either.)
 
     Nothing is done to a board that has exactly two kings, also when both
     are on one side: that is a wrong side (a set whose "white" pieces the
