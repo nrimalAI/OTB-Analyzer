@@ -73,8 +73,17 @@ divided by their sum, so that they add up to 1, and the observation's own
 confidence is the sum. A label's confidence times the observation's is the
 score as the model gave it (`CoreMLBoardRecognizer.classScores`). Nothing in
 Vision's documentation says so; `EndToEndFixtureTests.testPieceScoresAreTheModelsOwn`
-holds it against the model run without Vision on the same pixels, and finds
-the two equal to four decimals for every piece of the four fixtures. The
+holds it against the model run without Vision on the same pixels, for
+every class of every box: once on the four fixtures as the app reads them,
+and once on boxes the model is unsure of (the fixtures drawn at a quarter
+of the size, the model's threshold at 0.01), because a box with a single
+score says nothing about what the scores are divided by, and a piece model
+that reads the fixtures without a doubt has no other on them. The two agree
+to five decimals on every score, and the boxes are the same in the same
+order: 105 boxes, 70 of them split between two classes, with the pair in
+`Models/`; 153 and 81 with `pieces_s_render3` (on the Mac mini's Neural
+Engine; a few more or fewer on the CPU, where the reviewer of pull request
+#16 ran them too). The
 reviewer of pull request #12 found the same on 479 photos of boards the
 models have not seen (5,853 boxes: labels add up to 1, the observation's
 confidence is the sum, also where the sum is over 1).
@@ -92,8 +101,9 @@ Two things are read from the scores:
   for**, as in the Python. Until pull request #12 it was Vision's label
   confidence, the share: about 1.0 for nearly every box, also for one the
   model gave 0.3, since a second class seldom has a score near the first's
-  (on the fixtures 1 box of 57 has a second score of 0.02 or more; on boards
-  the models have not seen about a fifth have, most of them small).
+  (on the fixtures 1 box of 57 had a second score of 0.02 or more with the
+  first piece model, none with `pieces_s_render3`; on boards the models have
+  not seen about a fifth have, most of them small).
   The confidence decides which of two pieces on one square stays, and it is
   what the app shows: a piece under 0.85 is marked for the user to check
   (`AppModel.lowConfidenceThreshold`). See "What the confidence marks".
@@ -132,7 +142,13 @@ the Command Line Tools (the Mac mini) the script adds the search paths that
 let `swift test` find Swift Testing there; that is why the tests use Swift
 Testing and not XCTest, which the Command Line Tools do not have. CI runs the
 same script (`.github/workflows/swift-test.yml`) and fails if the models are
-missing or the end-to-end tests did not run.
+missing or the end-to-end tests did not run. To run the tests on a
+candidate pair without putting it in `Models/`:
+`CHESSVISION_TEST_MODELS=/folder ./Scripts/swift-test.sh`, with the folder's
+full path (the script runs from `Packages/ChessVision`) and the two packages
+in it named `BoardCorners.mlpackage` and `Pieces.mlpackage`. A folder that
+is not there, or does not hold them, fails the end-to-end tests; it does not
+skip them.
 
 `EndToEndFixtureTests` reads four ChessReD test photos with the models in
 `Models/`, three times: as the app does, with the grid fit switched off, and

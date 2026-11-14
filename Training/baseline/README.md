@@ -9,8 +9,9 @@ which file is in `Models/` now is in the table at the end.
 |---|---|---|
 | `corners_yolo11n_chessred2k.pt` | YOLO11n-pose, 640 px, 4 keypoints (a1, a8, h8, h1) | ChessReD2K train |
 | `pieces_yolo11n_chessred2k.pt` | YOLO11n detect, 640 px, 12 classes | ChessReD2K train |
+| `pieces_yolo11s_render3.pt` | YOLO11s detect, 640 px, 12 classes (run `pieces_s_render3`; the saved settings carry no local paths) | ChessReD2K, chesscog, Fenit board A, Roboflow projects, 12,000 renders |
 
-ChessReD test split with these two: 97.92% per-square, 73.5% boards exact
+ChessReD test split with the first two (the baseline pair): 97.92% per-square, 73.5% boards exact
 (225 of 306; an earlier run of the same files gave 224).
 
 Score them on other data to get the number a new model has to beat, e.g. the
@@ -37,12 +38,14 @@ results in `Models/`. The first row's piece model needs
 | before 2026-11 | `corners_yolo11n_chessred2k.pt` | `pieces_yolo11n_chessred2k.pt`, NMS per class | ChessReD2K | ChessReD test 97.86% / 74.2%; Fenit board B 24.2% / 0%: the board is not found in 66 of 100 photos, which count as all wrong; on the 34 found about 71% (the `.pt` files find 88 and give 58.0% / 0%) |
 | 2026-11-13 | `corners_yolo11s_exp3.pt` (run `corners_s_exp3`, FP16) | `pieces_yolo11n_chessred2k.pt` again, exported with NMS across classes (FP16) | corners: ChessReD2K, chesscog, Fenit board A, 3,000 synthetic boards; pieces: ChessReD2K | ChessReD test 99.47% / 87.6%; Fenit board B 67.7% / 0%, board found in all 100 |
 | 2026-11-13, later | `corners_yolo11n_chessred2k.pt` again (the file from `main`) | unchanged: `pieces_yolo11n_chessred2k.pt` with NMS across classes (FP16) | ChessReD2K | Through the app's code (`app_check`, a1 from the pieces), ChessReD test boards exact: 238 of 306 (77.8%; with `main`'s piece export 229), Fenit board B 46.6% of squares, board not found in 35 of 100 |
+| 2026-11-14 | unchanged: `corners_yolo11n_chessred2k.pt` | `pieces_yolo11s_render3.pt` (run `pieces_s_render3`, YOLO11s detect, 640 px, 12 classes; FP16, NMS across classes) | pieces: ChessReD2K, chesscog, Fenit board A, the Roboflow projects in `sources.yaml`, 12,000 renders of `render_boards.py` | Through the app's code (`app_check`, the app's defaults): ChessReD test 99.68% / 288 of 306 (the row above, same binary: 99.54% / 280); Fenit board B 88.55% / 6 of 100 (84.67% / 1), board not found in 4; second test set 88.49% / 298 of 1,619 (76.08% / 3) |
 
 The second row never reached `main`: exp3's corners turn three endgame photos
 of ChessReD game G033 by 180 degrees (one is the package's fixture
 `test_004005.jpg`), which `main`'s corner model gets right, so the tests fail
-with it once the corners are precise (grid fit). The third row is what is in
-`Models/` until a corner model passes that fixture. With the app's defaults
+with it once the corners are precise (grid fit). The third row's corner
+model stays in `Models/` until a corner model passes that fixture; the
+fourth row is what is in `Models/` now. With the app's defaults
 as they are since pull request #12 (grid fit, a1 prior 6, one king a side;
 each photo decoded once) it reads 280 of 306 ChessReD test boards exactly and
 84.67% of board B's squares, board not found in 4 of 100. exp3's weights are

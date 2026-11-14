@@ -16,7 +16,8 @@ Every image gets:
   pieces/labels/<stem>.txt   one box per piece, class ids of chess_pipeline.PIECE_CLASSES
   corners/labels/<stem>.txt  the playing area's corners (a1, a8, h8, h1), when
                              all four are inside the picture
-  positions.jsonl            stem, FEN placement, camera, for scoring and debugging
+  positions.jsonl            stem, FEN placement, camera, and (since 2026-11-14) the
+                             --palette and --from-above it was made with
                              (a render cut off and done again leaves two rows
                              for its stem: the later one counts)
 in the `native` layout build_dataset.py merges (source `render` in
@@ -340,10 +341,44 @@ SQUARES = [  # light, dark
     ((0.88, 0.90, 0.93), (0.25, 0.38, 0.55)), ((0.93, 0.88, 0.75), (0.55, 0.20, 0.15)),
     ((0.75, 0.75, 0.72), (0.35, 0.35, 0.35)), ((0.96, 0.90, 0.78), (0.62, 0.42, 0.25)),
 ]
+# What pieces are made of, from near white to near black. The two sides of a
+# set are two of these, the lighter one White (--palette relative, the
+# default since 2026-11-14). Whether a brown piece is White depends on the
+# other side of its set: brown is White against ebony and Black against
+# boxwood. With the first renders' two separate lists (--palette split:
+# White always cream to mid-brown, Black always dark) a model could learn
+# the side from the colour alone, and the real photos, where brown is nearly
+# always Black, then taught it that; on a set with brown "white" pieces it
+# called a quarter of them black.
+SHADES = [(0.95, 0.95, 0.93), (0.92, 0.88, 0.76), (0.88, 0.80, 0.60), (0.85, 0.70, 0.45),
+          (0.80, 0.60, 0.40), (0.70, 0.48, 0.26), (0.55, 0.32, 0.16), (0.62, 0.30, 0.18),
+          (0.40, 0.22, 0.10), (0.30, 0.16, 0.08), (0.32, 0.12, 0.07), (0.16, 0.08, 0.04),
+          (0.10, 0.05, 0.03), (0.35, 0.35, 0.36), (0.12, 0.12, 0.13), (0.05, 0.03, 0.02),
+          (0.03, 0.03, 0.035), (0.015, 0.015, 0.015), (0.015, 0.015, 0.015)]
+# (The last shade is there twice by a slip. It stays: taking it out would
+# change what --seed 3 and --seed 4, the batches made with this list, give.)
 WHITE_SIDE = [(0.92, 0.88, 0.76), (0.95, 0.95, 0.93), (0.85, 0.70, 0.45), (0.70, 0.48, 0.26),
               (0.55, 0.32, 0.16), (0.80, 0.60, 0.40), (0.88, 0.80, 0.60), (0.62, 0.30, 0.18)]
 BLACK_SIDE = [(0.015, 0.015, 0.015), (0.03, 0.03, 0.035), (0.10, 0.05, 0.03), (0.16, 0.08, 0.04),
               (0.08, 0.08, 0.09), (0.05, 0.03, 0.02), (0.12, 0.03, 0.03)]
+PALETTE = "relative"
+
+
+def lightness(colour):
+    """CIE L* of a linear RGB colour."""
+    y = 0.2126 * colour[0] + 0.7152 * colour[1] + 0.0722 * colour[2]
+    return 116 * y ** (1 / 3) - 16 if y > 216 / 24389 else 903.3 * y
+
+
+def side_colours(rng):
+    """(white, black): the colours of a set's two sides."""
+    if PALETTE == "split":
+        return vary(rng.choice(WHITE_SIDE), rng), vary(rng.choice(BLACK_SIDE), rng, 0.3)
+    while True:
+        a, b = vary(rng.choice(SHADES), rng, 0.15), vary(rng.choice(SHADES), rng, 0.15)
+        # A real set's sides are easy to tell apart: at least 22 L* here.
+        if abs(lightness(a) - lightness(b)) >= 22:
+            return (a, b) if lightness(a) > lightness(b) else (b, a)
 
 
 def vary(colour, rng, amount=0.08):
@@ -430,8 +465,7 @@ def build_scene(rng, placement):
 
     # Pieces.
     meshes = make_set(rng)
-    white = vary(rng.choice(WHITE_SIDE), rng)
-    black = vary(rng.choice(BLACK_SIDE), rng, 0.3)
+    white, black = side_colours(rng)
     gloss = rng.choice([rng.uniform(0.03, 0.2), rng.uniform(0.2, 0.5), rng.uniform(0.5, 0.9)])
     coat = rng.choice([0.0, rng.uniform(0.3, 1.0)])
     mats = {True: material("white", white, min(gloss * rng.uniform(0.8, 1.3), 1), rng, coat),
@@ -489,6 +523,11 @@ def build_scene(rng, placement):
     return scene, pieces, border
 
 
+# The share of pictures taken from lower than 70 degrees; the rest are from
+# 70 degrees to straight above (--from-above sets the rest's share).
+HIGH_FROM = 0.7
+
+
 def place_camera(scene, rng, border, size):
     w, h = size
     cam_data = bpy.data.cameras.new("camera")
@@ -503,7 +542,7 @@ def place_camera(scene, rng, border, size):
 
     # From a low side view to straight above, from any side of the board.
     r = rng.random()
-    elevation = (rng.uniform(22, 40) if r < 0.2 else rng.uniform(40, 70) if r < 0.7
+    elevation = (rng.uniform(22, 40) if r < 0.2 else rng.uniform(40, 70) if r < HIGH_FROM
                  else rng.uniform(70, 90))
     azimuth = rng.uniform(0, 360)
     fill = rng.uniform(0.6, 1.15)      # how much of the short side the board takes up
@@ -604,7 +643,17 @@ def main():
     ap.add_argument("--samples", type=int, default=24, help="render samples (quality against time)")
     ap.add_argument("--long-side", type=int, default=1280)
     ap.add_argument("--preview", action="store_true", help="also write the labels drawn on a small copy")
+    ap.add_argument("--palette", choices=["relative", "split"], default="relative",
+                    help="how the two sides' colours are chosen: relative (two shades of one "
+                         "list, the lighter is White) or split (the first renders' two lists)")
+    ap.add_argument("--from-above", type=float, default=0.3,
+                    help="share of pictures taken from 70 degrees up to straight above, "
+                         "0 to 0.8 (a fifth are always low side views)")
     args = ap.parse_args(argv)
+    if not 0 <= args.from_above <= 0.8:
+        ap.error("--from-above must be between 0 and 0.8")
+    global PALETTE, HIGH_FROM
+    PALETTE, HIGH_FROM = args.palette, 1.0 - args.from_above
 
     out = Path(args.out).resolve()
     for sub in ("pieces/images", "pieces/labels", "corners/images", "corners/labels"):
@@ -655,7 +704,8 @@ def main():
                 link.symlink_to(image_path)
         with open(out / "positions.jsonl", "a") as f:
             f.write(json.dumps(dict(stem=stem, placement=placement, corners=corners,
-                                    corners_inside=inside, size=size, **view)) + "\n")
+                                    corners_inside=inside, size=size, palette=PALETTE,
+                                    from_above=args.from_above, **view)) + "\n")
         # Last, because this file is what marks an image as done (see the skip above).
         (out / "pieces" / "labels" / f"{stem}.txt").write_text(
             "".join(f"{c} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for c, x, y, w, h in boxes))
