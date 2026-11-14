@@ -272,29 +272,43 @@ in which no board was found.
 
 | Source (photos) | Pair in `Models/`, steps off | Pair in `Models/`, both steps | `pieces_s_render1`, both steps |
 |---|---|---|---|
-| Y-LIChess (200) | 0%; 0; no board in 200 | 70.1%; 1; 6 | 78.0%; 0; 6 |
-| ChessQ (50) | 28.3%; 0; 26 | 64.6%; 1; 10 | 69.7%; 6; 10 |
-| chesscog (29) | 32.9%; 0; 10 | 73.3%; 0; 0 | 92.7%; 0; 0 |
-| samryan (500) | 54.8%; 0; 72 | 70.4%; 0; 16 | 82.9%; 16; 16 |
-| chess-cv games (840) | 53.5%; 0; 32 | 80.5%; 0; 12 | 89.3%; 9; 12 |
-| **all (1,619)** | **46.2%; 0; 340** | **75.5%; 2; 44** | **85.4%; 31; 44** |
+| Y-LIChess (200) | 0%; 0; no board in 200 | 72.4%; 2; 6 | 84.8%; 14; 6 |
+| ChessQ (50) | 28.3%; 0; 26 | 64.6%; 1; 10 | 69.8%; 6; 10 |
+| chesscog (29) | 32.9%; 0; 10 | 73.3%; 0; 0 | 93.1%; 0; 0 |
+| samryan (500) | 54.8%; 0; 72 | 70.9%; 0; 16 | 83.2%; 16; 16 |
+| chess-cv games (840) | 53.5%; 0; 32 | 80.6%; 0; 12 | 89.3%; 9; 12 |
+| **all (1,619)** | **46.2%; 0; 340** | **75.9%; 3; 44** | **86.3%; 45; 44** |
 
-- The two app-side steps take the pair in `Models/` from 46% to 75% of
+- The two app-side steps take the pair in `Models/` from 46% to 76% of
   squares on boards nobody has seen, and from no board in 340 photos to 44.
 - `pieces_s_render1` (the training session's piece model trained with
   rendered boards, not in `Models/`; same corner model) reads ten points more
-  squares on every source and 31 boards fully instead of 2. That is still
-  under 2% of unseen boards fully right.
-- With the colour step on, the pair in `Models/` stays at 75.5% (1 board
-  exact) and `pieces_s_render1` drops to 82.6% (27): Y-LIChess 78.0% ->
-  65.5%, samryan 82.9% -> 79.0%, ChessQ 69.7% -> 68.5%, the other two
-  unchanged. See the next section.
+  squares on every source and 45 boards fully instead of 3. That is still
+  under 3% of unseen boards fully right.
+- **Pieces beside the board.** The two "both steps" columns are with
+  `SquareAssignment.edgeMargin` at a quarter of a square (pull request #11);
+  the "steps off" column was measured with half a square. With half a square
+  the same two columns were 75.5%; 2 and 85.4%; 31: captured pieces standing
+  next to the board were read as pieces on the rim. The change is nearly all
+  Y-LIChess, whose photos have such pieces: 70.1% -> 72.4% with the pair in
+  `Models/`, 78.0% -> 84.8% and 0 -> 14 boards exact with
+  `pieces_s_render1`. On the three development sets it changes next to
+  nothing (pair in `Models/`: ChessReD test 279 of 306 and board B 84.58%
+  as before, Fenit A 91.38% -> 91.43%), which is why half a square went
+  unnoticed there.
+- With the colour step on (measured with the margin at half a square), the
+  pair in `Models/` stays at 75.5% (1 board exact) and `pieces_s_render1`
+  drops from 85.4% to 82.6% (27): Y-LIChess 78.0% -> 65.5%, samryan 82.9% ->
+  79.0%, ChessQ 69.7% -> 68.5%, the other two unchanged. See the next
+  section.
 
 ## What the colour step is worth
 
 Through `app_check` on the Mac mini, 2026-11-13, grid fit on and prior 6,
-`--sides-from-colour off` against `on`, each photo decoded once. Boards
-exact (in brackets: once turned by 180 degrees) and squares right. **The step is off in the app**
+`--sides-from-colour off` against `on`, each photo decoded once, the rim
+margin still at half a square (a quarter changes these sets by a few
+hundredths of a point). Boards exact (in brackets: once turned by 180
+degrees) and squares right. **The step is off in the app**
 (`CoreMLBoardRecognizer(sidesFromColour:)` defaults to false): what follows
 is why it was written and why it is off.
 
