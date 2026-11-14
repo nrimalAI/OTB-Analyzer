@@ -205,14 +205,14 @@ enum PieceSides {
     /// `piece_colours`: the median colour (each of L*, a*, b* by itself) of
     /// the patch of each detection's box in the photo, or nil for an empty
     /// patch. All nil when the photo's pixels cannot be read.
-    static func colours(of detections: [PieceDetection], in image: CGImage) -> [Lab?] {
+    static func colours(of detections: [PieceDetection], in photo: CGImage) -> [Lab?] {
+        let image = DecodedImage.once(photo)
         let patches = detections.map {
             colourPatch($0.boundingBox, width: image.width, height: image.height)
         }
         let found = patches.compactMap { $0 }
         guard !found.isEmpty else { return patches.map { _ in nil } }
-        // One read of the rectangle that holds every patch: a photo is
-        // decoded once for it, not once a piece.
+        // One read of the rectangle that holds every patch, not one a piece.
         let x0 = found.map(\.x0).min()!, y0 = found.map(\.y0).min()!
         let x1 = found.map(\.x1).max()!, y1 = found.map(\.y1).max()!
         let width = x1 - x0
