@@ -100,7 +100,12 @@ def main():
                      "put the run's dataset file back before continuing it")
         if marked:
             canonical_corners.patch()
-        tone = (yaml.safe_load(data_file.read_text()) or {}).get("side_tone") if data_file.is_file() else None
+        if not data_file.is_file():
+            # Without it there is no telling whether the run had --side-tone,
+            # and it would be continued without, saying nothing.
+            ap.error(f"{args.model} was trained from {data_file}, which is not here: run this from "
+                     "Training/ on the machine that has the run, or put the dataset file back")
+        tone = (yaml.safe_load(data_file.read_text()) or {}).get("side_tone")
         if tone:
             import side_tone
             side_tone.patch(float(tone))

@@ -10,8 +10,11 @@ The real photos have few sets, so here each photo is, with probability p,
 shown in another tone: a colour cast (warm most of the time), a darker or
 lighter tone curve and a little lift of the blacks, the same for every
 pixel. A cream side then looks tan, orange or brown and the dark side
-darker still: the order of the two sides stays, the colours do not, and the
-labels need no change. `render_boards.py --palette relative` teaches the
+darker still: the colours change and the labels need no change. Within
+each colour channel the order of any two values is kept, so a side that is
+lighter in every channel stays the lighter one; two sides of different hue
+and nearly the same lightness could change places, which a set's sides are
+not. `render_boards.py --palette relative` teaches the
 same with rendered sets; this does it on real pieces.
 
 It is added to the ultralytics dataset by `patch`, after its own colour
@@ -60,6 +63,9 @@ class SideTone:
 
     def __init__(self, p, seed=None):
         self.p = float(p)
+        # Not seeded from the run. With dataloader workers each worker would
+        # get a copy of this generator and draw the same tones; on Apple's
+        # GPU ultralytics runs without workers, as every run here has.
         self.rng = np.random.default_rng(seed)
 
     def __call__(self, labels):

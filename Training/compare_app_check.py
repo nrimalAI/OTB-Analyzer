@@ -14,8 +14,11 @@ This is the test the rule for replacing a model in `Models/` is checked with
 ("beat the ones in `Models/` on the held-out board by more than the noise"):
 the count of boards read fully right moves too little on 100 photos to show
 a difference, the squares of each photo do. The photos are taken as
-independent, which photos of one board are not quite: a difference just over
-the line is not a result.
+independent, which photos of one board or one game are not (board B is one
+board, the second test set 19): a difference just over the line is not a
+result. Read the sign test first. The bootstrap interval says how large the
+difference is, not whether there is one: when the candidate is better on a
+few photos and worse on none it cannot include zero, however few they are.
 
 Photos are paired by their place in the file, not by name (the chess-cv
 games repeat file names from one game folder to the next), so both files

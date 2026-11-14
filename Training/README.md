@@ -319,13 +319,128 @@ full-size photos; for a piece model trained on the copies use `score.sh`.
 | `pieces_s_render2` | continues render1's `last.pt`, 12 epochs, `merged_all` (every piece source incl. Roboflow + 8,000 renders, 15,438 photos) | Finished 2026-11-13 23:27. `last.pt`, labelled corners: ChessReD test 99.96% / **98.4%** (301 of 306), Fenit A (trained on) 99.7% / 88%, board B 90.9% / 0%. On board B the kinds are better again (pawns right 95.5%, knights all; kings still read as queens 56 times of 196) and what is wrong is mostly the side: 243 of 868 brown "white" pawns read as black. The candidate described below |
 | `pieces_s_crop1` | continues render1's `last.pt`, 12 epochs, `merged_all_crop` (`crop_boards.py`: the 7,370 photos of `merged_all` with a corner label, cut down to the board) | Finished 2026-11-14 02:20. Scored with `--crop-board`, against `pieces_s_render2` (same start, same 12 epochs, whole photos). Labelled corners (`scores/pieces_s_crop1_last.txt`): board B 92.5% / 2 of 98 exact against 90.9% / 0; ChessReD test 99.97% / 98.4% against 99.96% / 98.4%; Fenit A (trained on) 94% exact against 88%. End to end in Python with `main`'s corner model, grid fit, a1 prior 6, one king a side (`scores/endtoend_crop1_vs_render2.txt`): board B 84.3% / 2 of 100 against 82.9% / 0; ChessReD test 298 against 297 of 306. A small gain on board B and none on ChessReD: not by itself worth the change in the app. The side is still what is wrong on board B (P read as p 145 times, was 243) |
 | `pieces_s_render3` | continues render2's `last.pt`, 10 epochs, `merged_all3` (as `merged_all`, with 4,000 more renders whose two sides are two shades of one list, the lighter one White, and more views from above: 19,438 photos) | Finished 2026-11-14 08:17. `last.pt`, labelled corners (`scores/pieces_s_render3_last.txt`): **board B 94.7% / 8 of 98 exact** (render2 90.9% / 0), Fenit A (trained on) 99.8% / 92%, ChessReD test 99.94% / 96.7% (296 of 306; render2 301). On board B, P read as p 132 times (render2 243); during the run it moved between 111 and 175 from one epoch to the next. **In `Models/`**: see below |
-| `pieces_s_tone1` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos), `--side-tone 0.35` (`side_tone.py`: a third of the training photos shown in another tone, so that a cream side looks tan or brown beside a darker one) | queued after `corners_s_canon1`. Two changes in one run (more renders, the tone), to save six hours of the GPU: if it gains, which of the two did it is not known |
-| `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | Finished 2026-11-14 11:12. `last.pt` (`scores/corners_s_canon1_last.txt`), median corner error in squares: **board B 0.27** (exp4 0.91; within half a square 83% against 32%), ChessReD test **0.14** (exp4 0.19, baseline 0.31), Fenit A 0.11. Which corner is a1 it gets right on ChessReD (301 of 306) and wrong on board B (11 of 93; the app takes a1 from the pieces). The first learned corner model that passes the package's tests (103 of 103, the G033 endgame fixture read right with the grid fit off). The candidate described below |
+| `pieces_s_tone1` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos), `--side-tone 0.35` (`side_tone.py`: a third of the training photos shown in another tone, so that a cream side looks tan or brown beside a darker one) | Finished 2026-11-14 17:09. `last.pt`, labelled corners (`scores/pieces_s_tone1_last.txt`): **board B 96.8% / 20 of 98 exact** (render3 94.7% / 8), P read as p 39 times (render3 132; after epoch 3 it was 72); Fenit A (trained on) 99.7% / 89%; ChessReD test 99.95% / 97.7% (299 of 306; render3 296). Two changes in one run (8,000 more renders, the tone): which of the two did how much is not known. Mosaic was off for the whole run, as for render3 (8 epochs, `close_mosaic` left at 10). **In `Models/`**: see below |
+| `pieces_s_tone2` | continues tone1's `last.pt`, 8 epochs, `merged_all4`, `--side-tone 0.6` | running since 17:19 on 2026-11-14 |
+| `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | Finished 2026-11-14 11:12. `last.pt` (`scores/corners_s_canon1_last.txt`), median corner error in squares: **board B 0.27** (exp4 0.91; within half a square 83% against 32%), ChessReD test **0.14** (exp4 0.19, baseline 0.31), Fenit A 0.11. Which corner is a1 it gets right on ChessReD (301 of 306) and wrong on board B (11 of the 90 boards it finds there; the app takes a1 from the pieces). The first learned corner model that passes the package's tests (103 of 103, the G033 endgame fixture read right with the grid fit off). **In `Models/`**: see below |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
-**In `Models/` since 2026-11-14: the piece model `pieces_s_render3`**
+**In `Models/` since 2026-11-14 evening: `pieces_s_tone1` and `corners_s_canon1`**
+(FP16 exports, 18 MB and 19 MB; `runs/export_tone1/Pieces-fp16.mlpackage`,
+`runs/export_canon1/BoardCorners-fp16.mlpackage`; weights
+`baseline/pieces_yolo11s_tone1.pt`, `baseline/corners_yolo11s_canon1.pt`).
+Against the pair they replace (`pieces_s_render3` with the first corner
+model), through `app_check` with the app's defaults (`runs/app_check/tone1/`,
+`final/render3_*.txt`, `final_h2/`; `compare_app_check.py`). The two new
+columns are from the build of 2026-11-14 09:02; the first column is from
+the build before it, which reads board B and ChessReD test the same photo
+for photo (`runs/app_check/after16/`). Squares right; boards exact; photos with no board
+found:
+
+| | Pair they replace | `pieces_s_tone1`, old corners | `pieces_s_tone1` + `corners_s_canon1` |
+|---|---|---|---|
+| Fenit board B (100; held out) | 88.55%; 6; 4 | 91.19%; 15; 4 | **94.36%; 16; 0** |
+| ChessReD test (306) | 99.68%; 288; 0 | 99.67%; 291; 0 | 99.80%; 295; 0 |
+| Fenit A (286; trained on) | 95.32%; 183; 0 | 95.41%; 197; 0 | 97.79%; 231; 0 |
+| Second test set: `ylichess` (200) | 85.73%; 45; 6 | 85.83%; 45; 6 | 88.16%; 44; 0 |
+| `chessq` (50) | 71.66%; 14; 10 | 71.28%; 12; 10 | 93.03%; 14; 0 |
+| `chesscog_real` (29) | 98.44%; 10; 0 | 98.17%; 8; 0 | 98.17%; 8; 0 |
+| `samryan` (500) | 84.85%; 58; 16 | 85.10%; 80; 16 | 95.50%; 106; 0 |
+| `chesscv_games` (840) | 91.97%; 171; 13 | 92.42%; 242; 13 | 97.99%; 267; 0 |
+| Second test set, all 1,619 | 88.49%; 298; 45 | 88.80%; 387; 45 | **95.86%; 439; 0** |
+
+Photo by photo, the new pair against the pair it replaces:
+
+- **Board B:** more squares right on 57 photos, fewer on 14 (sign test
+  p = 0.0000003); 5.8 points of squares more (95% bootstrap interval 3.2 to
+  9.1); 13 boards gained, 3 lost (p = 0.02).
+- **ChessReD test:** 12 boards gained, 5 lost (p = 0.14); +0.12 points of
+  squares (-0.17 to +0.45). Not worse.
+- **Second test set** (a test, nothing chosen on it): 7.4 points more (6.4
+  to 8.4); 232 boards gained, 91 lost.
+
+Each model's share on board B: the piece model alone, with the old corners,
+gains 2.6 points (1.7 to 3.7; more right on 52 photos, fewer on 15; 12
+boards gained, 3 lost), which meets the rule by itself; the corner model on
+top of it gains 3.2 more, all of it on 5 photos, 4 of them boards the old
+corner model did not find, and makes no photo worse. That is 5 photos
+against none (sign test p = 0.06): by itself not shown beyond noise, as it
+was not with render3's pieces (8 against 6). (The bootstrap gives 0.6 to
+6.4 points, but with no photo worse it cannot reach zero and is no test
+here.) Of the four boards found, one is read fully and three badly (30, 40
+and 49 of 64 squares). On the
+second test set the corner model is the larger part (88.49% -> 95.44% with
+render3's pieces) and the piece model adds 0.4 points of squares and 109
+boards (330 -> 439). So what speaks for the corner model is the pair's
+result on board B, which the rule asks for, and its own on the second test
+set, which the rule does not name: with this change that set is no longer
+one that nothing was chosen on.
+
+**What the corner model costs.** It reads two ChessReD test photos of game
+G033 (`G033_IMG100`, `G033_IMG102`: endgames of two kings and four pawns)
+turned by 180 degrees, 52 of 64 squares, which the first corner model reads
+right; they are two of the five boards lost on ChessReD test. In such a
+position the pieces cannot say which way the board lies, and the first
+corner model knew ChessReD's own board better (which corner is a1: 301 of
+306 with canon1). The package's fixture of that game, `test_004005.jpg`, is
+read right as it is and with the grid fit off, and turned when the test
+redraws it as a portrait photo (52 of 64; that test asks for 90% of squares
+over the four fixtures and gets 95.3%). The fixture is `G033_IMG101`, the
+frame between the two: of three neighbouring frames of that endgame it reads
+one right as a square photo and none as a 3:4 photo. The weight given to
+the model's own a1 does not change it (the same two photos at
+`--a1-prior` 0, 3, 6 and 12). A turned board is one tap in the app. exp3
+and exp4 turned the fixture itself and were not put in.
+
+As 3:4 photos, the shape the app's camera gives (`app_check --portrait`,
+`runs/app_check/portrait/`): ChessReD test 282 boards exact with the new
+pair, 281 with the new piece model and the old corners, 275 with the pair
+it replaces; the new pair turns two of the 306 (`G033_IMG101`,
+`G033_IMG102`), the old corner model none; board B 94.33%, 91.16% and
+88.56% of squares. So the turn stays at two photos of that one endgame.
+
+On the second test set, boards that are right once turned by 180 degrees:
+12 with the new pair, 18 with the new piece model and the old corners (4
+with the pair it replaces, whose pieces make fewer boards right either
+way). Two boards the pair it replaces read fully (`wood_0033`, `wood_0036`
+of Y-LIChess) are turned by the new corner model; 15 photos lose 5 squares
+or more, 254 gain as much.
+
+With labelled corners (`evaluate.py`, which prints the interval), board B:
+`pieces_s_tone1` 96.8% of squares and 20 of 98 boards exact (14%-29%);
+render3 94.7% and 8 (4%-15%). On Fenit A, which both trained on, it reads
+fewer boards fully than render3 did (88.5% against 92.2%); on ChessReD test
+more (299 against 296).
+
+**Board B is not a blind test** (see the same heading under render3 below):
+the tone augmentation was thought of from what goes wrong on board B, the
+run was scored on it after epochs 1 and 3, and `--side-tone`'s limits were
+set by eye on other photos. For the piece model the second test set,
+which it was not chosen on, agrees (with the old corners: 387 boards exact
+against 298).
+
+**The mark for the user** (confidence under 0.85, not changed): wrong
+pieces marked on board B 57% (147 of 259; render3 54% of 351), ChessReD
+test 50% (12 of 24), Fenit A 23%; right pieces marked on board B 15%; on
+the second test set 49% of wrong pieces and 8.2% of right ones.
+
+The goal is still far: 16% of boards fully right on board B and 27% on the
+second test set, where the target is 85%. What is wrong on board B now,
+with labelled corners: P read as p 39 times, kings read as queens 23 times,
+Q read as q 15.
+
+Trained on: pieces ChessReD2K (CC BY-NC-SA 4.0), chesscog, Fenit board A,
+the Roboflow projects in `sources.yaml`, 20,000 renders; corners ChessReD2K,
+chesscog, Fenit board A, Roboflow photos with derived corners, renders.
+Because of ChessReD both are for personal builds only.
+
+**The piece model before it: `pieces_s_render3`** (in `Models/` from pull
+request #15 on 2026-11-14 morning until the evening; weights
+`baseline/pieces_yolo11s_render3.pt`). "The pair in `Models/`" in the next
+paragraphs, down to "The first pair", is render3 with the first corner
+model.
+
 (FP16 export, 18 MB, `runs/export_render3/`; weights
-`baseline/pieces_yolo11s_render3.pt`; with `main`'s corner model, which stays).
+`baseline/pieces_yolo11s_render3.pt`; with the first corner model, which stayed then).
 It is the first model that meets the rule for replacing one as `CLAUDE.md`
 words it: better than the pair it replaces on the held-out board B by more
 than the noise, and not worse on ChessReD test. Through `app_check` with the
@@ -382,8 +497,9 @@ On the second test set about 18% of boards are fully right, and 6% on
 board B, where the target is 85%. What is still wrong on board B: the
 side of its brown "white" pieces (P read as p 132 times of 868 with labelled
 corners), kings read as queens, and the corners (88.5% of squares through
-the app against 94.7% with labelled corners). `pieces_s_render4` (20,000
-renders) and `corners_s_canon1` are the next attempts at each.
+the app against 94.7% with labelled corners). `pieces_s_tone1` (20,000
+renders and the tone augmentation) and `corners_s_canon1` were the next
+attempts at each, and are what is in `Models/` now.
 
 Trained on ChessReD2K (CC BY-NC-SA 4.0), chesscog, Fenit board A, the
 Roboflow projects in `sources.yaml` and 12,000 renders of `render_boards.py`:
@@ -418,18 +534,18 @@ and the run had 10 (render2, with 12, had it for two). And about 2% of the
 relative-palette renders have a "White" side darker than L* 40 against a
 near-black one, before exposure: two dark sides, a little label noise.
 
-**A corner model that is not in `Models/`: `corners_s_canon1`** (FP16 export
+**`corners_s_canon1` with render3's pieces, before it went in** (FP16 export
 `runs/export_canon1/BoardCorners-fp16.mlpackage`, the corners turned to a1
 order inside the model so the app sees the tensor it always saw; with
 `pieces_s_render3` in `runs/app_check/models_canon1/`; weights
-`runs/pose/corners_s_canon1/weights/last.pt`). It is not put in because on
-board B, which is what the rule in `CLAUDE.md` names, its gain is within
-the noise. Through `app_check` with the app's defaults against the pair in
+`runs/pose/corners_s_canon1/weights/last.pt`). With render3's pieces its
+gain on board B, which is what the rule in `CLAUDE.md` names, was within
+the noise, so it waited for a piece model. Through `app_check` with the app's defaults against the pair in
 `Models/` (same piece model, same build; `runs/app_check/canon1/last_*.txt`,
 `final_h2/canon1_*.txt`; `compare_app_check.py`). Squares right; boards
 exact; photos with no board found:
 
-| | Pair in `Models/` | With `corners_s_canon1` | Photo by photo |
+| | render3 + first corner model | render3 + `corners_s_canon1` | Photo by photo |
 |---|---|---|---|
 | Fenit board B (100; held out) | 88.55%; 6; 4 | 90.41%; 6; 0 | more squares right on 8 photos, fewer on 6; +1.9 points, interval -1.0 to +5.3: **within noise** |
 | ChessReD test (306) | 99.68%; 288; 0 | 99.79%; 291; 0 | 5 boards gained, 2 lost: not worse |
@@ -444,21 +560,22 @@ exact; photos with no board found:
 On boards nobody trained or tuned on it finds every board (45 were not
 found) and gains 7 points of squares; on board B the old corner model with
 the grid fit was already close, and the 4 boards it did not find are the
-whole gain. It goes in with a piece model that carries the pair past board
-B, or when the owner says the second test set counts (the notes, "Needs
-the owner"). Two things seen on the way: the weight of the model's own a1
+whole gain. It went in with `pieces_s_tone1`, which carries the pair past
+board B (above). Two things seen on the way: the weight of the model's own a1
 (`--a1-prior`) hardly matters with it (board B 91.0% / 90.7% / 90.4% /
 89.9% and ChessReD test 288 / 290 / 291 / 291 boards for 0 / 3 / 6 / 12), so
 6 stays; and with the grid fit off the pair is worse on board B (87.75%
 after 7 epochs), so the fit stays too. In the package's tests the fixtures
-read as portrait photos give 95.3% of squares with it (100% with the corner
-model in `Models/`), inside what that test asks.
+read as portrait photos give 95.3% of squares with it (100% with the first
+corner model), inside what that test asks.
 
 **"The first pair"** below is what was in `Models/` from midday on
 2026-11-13 until pull request #15: `main`'s corner model and the baseline
 piece weights exported with NMS across classes. Everything in this file
 measured "with the pair in `Models/`" before 2026-11-14 was measured with
-it; the corner model is still the same.
+it. "`main`'s corner model" in this file means the first corner model
+(`baseline/corners_yolo11n_chessred2k.pt`), which was on `main` until
+`corners_s_canon1` replaced it on 2026-11-14.
 
 **The earlier candidate `pieces_s_render2`** (exports in
 `runs/export_render2/`, weights `runs/detect/pieces_s_render2/weights/last.pt`)
@@ -502,22 +619,23 @@ notes, "Needs the owner"). An INT8 export of it is half the size (9.3 MB
 against 18 MB); it was compared only with the old `app_check` (285 against
 286 ChessReD boards) and the outputs were not kept.
 
-**The corner model in `Models/`** is `main`'s (the baseline corner weights)
-since midday on 2026-11-13. exp3's corners were taken back out: with the
-app-side steps (a1 from the pieces, grid-fit corners) they still turn three
-endgame photos of ChessReD game G033 by 180 degrees, one of them a fixture of
-the package's tests, and `main`'s corner model does not. Until 2026-11-14 the
-piece model beside it was the baseline piece weights exported with NMS across
+**The first corner model** (`main`'s, the baseline corner weights) was in
+`Models/` until 2026-11-14 evening, apart from a few hours on 2026-11-13.
+exp3's corners were taken back out then: with the app-side steps (a1 from
+the pieces, grid-fit corners) they still turn three endgame photos of
+ChessReD game G033 by 180 degrees, one of them a fixture of the package's
+tests, and the first corner model does not. Until pull request #15 the piece
+model beside it was the baseline piece weights exported with NMS across
 classes.
 
-**What a new corner model has to beat** (through `app_check` with the app's
+**What a new model has to beat** (through `app_check` with the app's
 defaults as they are since pull request #12: grid fit on, a1 prior 6, one
-king a side, colour step off, each photo decoded once; with
-`pieces_s_render3` as the piece model): ChessReD test 288 of 306 boards
-exact, none turned; Fenit board B 88.55% of squares, 6 boards exact, board
-not found in 4 of 100; Fenit A 95.32% of squares, 183 of 286 exact
-(`runs/app_check/final/render3_*.txt`; with the piece model before it 280,
-84.67% and 1, 91.69% and 32). Compare two models only through the same
+king a side, colour step off, each photo decoded once; the pair in
+`Models/`, `runs/app_check/tone1/tone1_canon1_*.txt` and
+`final_h2/tone1_canon1_*.txt`): ChessReD test 295 of 306 boards exact, two
+more once turned by 180 degrees; Fenit board B 94.36% of squares, 16 boards
+exact, every board found; Fenit A 97.79% of squares, 231 of 286 exact;
+second test set (a test only) 95.86% and 439 of 1,619. Compare two models only through the same
 build of `app_check`: every app-side step moved these numbers a little, and
 before pull request #9 it read different pixels. And the model has to pass
 the fixture tests of `./Scripts/swift-test.sh`: the four fixtures with the
@@ -696,7 +814,8 @@ was in `Models/`, and why it was taken out again.
     17 without the crop).
   - More renders and all real sources: `pieces_s_render2` (ChessReD test
     better, board B not), then `pieces_s_render3` with renders whose side
-    colours are relative: the model in `Models/`.
+    colours are relative, then `pieces_s_tone1` with more of them and the
+    tone augmentation: the model in `Models/`.
 - **The piece model is what stops board B.** With the labelled corners, one
   board B photo of 98 is read fully right by any of the three. Square by
   square (`pieces_s_norf`, copies): which squares are occupied 98.4% (all
@@ -1065,8 +1184,8 @@ placement JSON per source from `datasets/heldout2/positions.json`, then
   comes out right; with both app-side steps, below, one ChessQ photo of 50).
   Counting a board turned 180 degrees as right changes nothing. The target
   is 85% of boards exact.
-- **The corner model now in `Models/` does not find the board in 294 of the
-  1,619 photos**, among them every photo of the Y-LIChess board, and is below
+- **The first corner model (in `Models/` when this was measured, without
+  the grid fit) does not find the board in 294 of the 1,619 photos**, among them every photo of the Y-LIChess board, and is below
   an empty board on every part. exp3's corners find the board in all 1,619.
   NMS across classes is worth up to about one point per square.
 - **Which model fails**, on the one source that has boxes and corners
