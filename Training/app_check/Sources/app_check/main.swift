@@ -25,8 +25,8 @@
 //                   pieces where they contradict the piece model (default
 //                   off, as in the app).
 //   --one-king on|off  exactly one king a side, from the scores the piece
-//                   model gave each piece for every kind (the app's default
-//                   when not given).
+//                   model gave each piece for every kind (the app's default:
+//                   on).
 //   --flag-below C  the app marks a square for the user to check when its
 //                   piece's confidence is under 0.85 (AppModel); count how
 //                   many of the right and of the wrong pieces that marks

@@ -75,6 +75,16 @@ import Testing
         }
     }
 
+    /// One king a side is on unless switched off (`docs/RECOGNITION.md`, "What
+    /// one king a side is worth").
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testOneKingASideIsOnByDefault() throws {
+        let models = try Self.models.get()
+        #expect(try makeRecognizer().oneKing == true)
+        #expect(try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oneKing: false).oneKing == false)
+    }
+
     /// The colour step is off unless asked for (`docs/RECOGNITION.md`, "What
     /// the colour step is worth"). Switching it on by default is a decision
     /// to take with scores on a set nothing was tuned on, not in passing.

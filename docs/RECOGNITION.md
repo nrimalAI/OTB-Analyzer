@@ -19,7 +19,9 @@ and what they were measured to be worth. Training results are in
    no board and the fit accepts, the fit's corners are used alone. Only when
    both fail is there no board. The fit needs no training, so it works on
    boards no model has seen, where learned corners are a square or so off.
-4. Piece model: boxes with a class and a confidence.
+4. Piece model: boxes, each with the model's score for every class. The
+   class with the highest score is what the piece is taken for, and that
+   score is its confidence (see "The scores of a piece" below).
 5. **White and Black from the colours, switched off** (`PieceSides`, port of
    `sides_from_colour` and of `evaluate.piece_colours`; see "What the colour
    step is worth" for why it is off): the colour of each
@@ -32,23 +34,60 @@ and what they were measured to be worth. Training results are in
    colours contradict them for more than 15% of the pieces that have a colour
    (a box whose middle lies outside the photo has none); then each of those
    takes its group's side. Kinds and confidences are never changed.
-6. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
+6. **One king a side** (`OneKingASide`, port of `one_king_a_side`): every
+   position has exactly two kings, and a king read as a queen, or a third
+   "king", is what a piece model gets wrong on a set it has not seen. A
+   board with exactly two kings is left alone, also when both are on one
+   side (that is a wrong side, not a wrong kind). With fewer than two, a
+   side that has pieces and no king gets one: its piece with the highest
+   score for "king", if the model gave it at least 0.02. With more than two,
+   a side with several kings keeps the one with the highest score for "king"
+   and each of the others becomes its best-scoring other kind, a queen when
+   it has none. Sides, confidences and boxes are never changed.
+7. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
    `orient_by_pieces`): of the four rotations of the corners, the one whose
    board looks most like White at ranks 1-2 wins; the corner model's own
    rotation gets a head start of 6 (`BoardOrientation.appPrior`). When the
    corners are the fit's alone there is no model opinion, and the pieces
    decide without a head start.
-7. Each box's bottom centre goes through the corner homography to a square
+8. Each box's bottom centre goes through the corner homography to a square
    (`Homography`, `SquareAssignment`); one piece per square. A foot that
    falls up to a quarter of a square outside the board is taken back onto
    the rim square (`SquareAssignment.edgeMargin`, the reference's
    `EDGE_MARGIN`); further out it is a captured or spare piece standing
    beside the board and gets no square.
 
-Steps 3 and 6 can be switched off and step 5 on
-(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:)`).
+Steps 3, 6 and 7 can be switched off and step 5 on
+(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:)`).
 How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
 and it is what `Training/evaluate.py --grid-corners` does.
+
+### The scores of a piece
+
+The piece model scores every class for every box. Vision passes those scores
+on in a form of its own: the labels of an observation carry the scores
+divided by their sum, so that they add up to 1, and the observation's own
+confidence is the sum. A label's confidence times the observation's is the
+score as the model gave it (`CoreMLBoardRecognizer.classScores`). Nothing in
+Vision's documentation says so; `EndToEndFixtureTests.testPieceScoresAreTheModelsOwn`
+holds it against the model run without Vision on the same pixels, and finds
+the two equal to four decimals for every piece of the four fixtures.
+
+Two things are read from the scores:
+
+- **The confidence of a piece is the model's score for the class it is taken
+  for**, as in the Python. Until pull request #12 it was Vision's label
+  confidence, the share: about 1.0 for nearly every box, also for one the
+  model gave 0.3, since few boxes have a second class with any score at all.
+  The confidence decides which of two pieces on one square stays, and it is
+  what the app shows: a piece under 0.85 is marked for the user to check
+  (`AppModel.lowConfidenceThreshold`). See "What the confidence marks".
+- **The score for each kind** (`PieceDetection.kindScores`): the larger of
+  the two colours, for step 6. A score under 0.02 is left out: the Python
+  has none under 0.02 either (it makes the scores of a piece up from every
+  box down to that confidence that overlaps it, `evaluate.kind_scores_of`,
+  because ultralytics does not hand out the scores of one box), and the rule
+  was measured that way.
 
 ### The grid fit in a paragraph
 
@@ -136,6 +175,18 @@ photos by itself.
   `PieceSidesTests` replays them: patches, groups and sides must be the
   Python's exactly, and the colours to nine decimals where both read the same
   pixels (the drawn picture).
+- `Training/swift_reference.py king-cases` writes `Fixtures/king_cases.json`:
+  275 sets of detections with the scores of each piece for every kind, and
+  what `one_king_a_side` makes of them: boards with no, one, two, three and
+  four kings, on one side or both, scores on the floor and just under it,
+  equal scores, kinds without a score, and each sentence of the rule by
+  hand. `OneKingASideTests` replays them and requires the same classes, and
+  that side, confidence, box and scores are untouched. These cases are the
+  whole contract for this step: on photos the Python and the app are not
+  given the same scores (see "The scores of a piece"), so they cannot be
+  compared piece for piece, and the board scores differ a little. Two more
+  tests place drawn pieces through the recognizer's own code and fail if the
+  kings are counted before the sides from the colours or after a1.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -208,6 +259,12 @@ IndexError that rejects the photo, or, for small negative indices, a wrap to
 the other side); see `GridWindow.choose`.
 
 ## What the two steps are worth
+
+(Measured before pull request #12, with Vision's share as a piece's
+confidence and without the rule for the kings. The app's default path today
+is the "on" column of "What one king a side is worth"; the difference to the
+"both" rows here is a quarter of a point of squares at most, and Fenit A's
+16 boards exact are 32.)
 
 Through `app_check` (the app's own code, Vision doing the resize) on the Mac
 mini, 2026-11-13, each photo decoded once (`DecodedImage`). "Off" is
@@ -301,6 +358,87 @@ in which no board was found.
   drops from 85.4% to 82.6% (27): Y-LIChess 78.0% -> 65.5%, samryan 82.9% ->
   79.0%, ChessQ 69.7% -> 68.5%, the other two unchanged. See the next
   section.
+
+## What one king a side is worth
+
+Through `app_check`, 2026-11-13, both steps on, colour step off, margin a
+quarter of a square, a piece's confidence the model's score; `--one-king off`
+against the default. Squares right; boards exact.
+
+| Set (photos) | Pair in `Models/`: off -> on | `pieces_s_render1`: off -> on |
+|---|---|---|
+| ChessReD test (306) | 99.53%; 279 -> 99.54%; 280 | 99.64%; 285 -> 99.64%; 285 |
+| Fenit board B (100) | 84.58%; 0 -> 84.67%; 1 | 84.31%; 1 -> 84.33%; 1 |
+| Fenit A (286) | 91.44%; 16 -> 91.69%; 32 | 95.35%; 185 -> 95.41%; 185 |
+| *second held-out set:* | | |
+| Y-LIChess (200) | 72.57%; 2 -> 72.49%; 2 | 84.77%; 14 -> 85.02%; 23 |
+| ChessQ (50) | 64.56%; 1 -> 64.62%; 1 | 69.78%; 6 -> 69.81%; 6 |
+| chesscog (29) | 73.49%; 0 -> 73.71%; 0 | 93.21%; 0 -> 93.59%; 0 |
+| samryan (500) | 70.95%; 0 -> 71.12%; 0 | 83.23%; 16 -> 83.32%; 18 |
+| chess-cv games (840) | 80.55%; 0 -> 80.62%; 0 | 89.31%; 9 -> 89.62%; 16 |
+| **all (1,619)** | **75.98%; 3 -> 76.06%; 3** | **86.34%; 45 -> 86.57%; 63** |
+
+- **On by default.** The three development sets say so for both piece
+  models: nothing lost on any of them, Fenit A's boards exact doubled with
+  the pair in `Models/` (16 to 32: boards whose only mistake was a king read
+as a queen or a bishop, or a queen read as a second king). The
+  second held-out set was not used to choose; it agrees, by 0.1 points of
+  squares with the pair in `Models/` and 0.2 with `pieces_s_render1`, where
+  18 more boards come out fully right (45 to 63 of 1,619).
+- It is a small step, as it must be: it can change two pieces of a board at
+  most. It pays in boards fully right, and only once the rest of the board
+  is right, which is why it shows with `pieces_s_render1` and not with the
+  pair in `Models/` on boards nobody has seen.
+- **One part goes the other way**: Y-LIChess with the pair in `Models/`,
+  72.57% -> 72.49%. Ten photos gain a square each, three lose one, and one
+  loses 17 (`wood_0060.jpg`: the model takes nearly every piece for White
+  and sees four kings, three of them White; with two of those made something
+  else, a1 from the pieces turns the board). The rule changes kinds
+  before a1 is read from them, in the Python too, and on a board read that
+  badly either can make it worse.
+- The Python measured the same direction with its made-up scores
+  (`Training/README.md`): `pieces_s_render1` on Y-LIChess games 10 -> 15 of
+  102 exact, chess-cv 11 -> 13. The app's numbers are not the Python's
+  (other scores, other resize), only the direction is comparable.
+
+## What the confidence marks
+
+A piece's confidence is the model's score since pull request #12, and was
+Vision's share before ("The scores of a piece"). For the board that is read
+it changes next to nothing: only which of two pieces found on one square
+stays. Squares right; boards exact, without the rule for the kings:
+
+| Set | Pair in `Models/`: share -> score | `pieces_s_render1`: share -> score |
+|---|---|---|
+| ChessReD test | 99.52%; 279 -> 99.53%; 279 | 99.64%; 285 -> 99.64%; 285 |
+| Fenit board B | 84.58%; 0 -> 84.58%; 0 | 84.28%; 1 -> 84.31%; 1 |
+| Fenit A | 91.43%; 16 -> 91.44%; 16 | 95.34%; 185 -> 95.35%; 185 |
+| second held-out set | 75.94%; 3 -> 75.98%; 3 | 86.33%; 45 -> 86.34%; 45 |
+
+What it changes is what the user is shown. The app marks a piece whose
+confidence is under 0.85 for the user to check
+(`AppModel.lowConfidenceThreshold`, not changed). `app_check` counts how
+many of the pieces it put on a square that marks, among those on a wrong
+square or of a wrong class and among the right ones:
+
+| Set | Pair in `Models/`: wrong pieces marked | right pieces marked | `pieces_s_render1`: wrong pieces marked | right pieces marked |
+|---|---|---|---|---|
+| ChessReD test | 10% -> 55% (36 of 66) | 0.05% -> 1.0% | 13% -> 39% (18 of 46) | 0.06% -> 1.1% |
+| Fenit board B | 24% -> 76% | 6.5% -> 40% | 16% -> 60% | 3.8% -> 27% |
+| Fenit A | 18% -> 64% | 4.7% -> 23% | 3.5% -> 23% | 0.2% -> 12% |
+| second held-out set | 15% -> 78% | 5.5% -> 47% | 18% -> 46% | 3.2% -> 11% |
+
+- With the share, the mark said next to nothing: it left more than four in
+  five of the wrong pieces on an unseen board unmarked, because a model that is unsure whether
+  a piece is there at all is seldom split between two classes.
+- With the score, the mark follows what the model knows. On a board like the
+  ones it was trained on, one right piece in a hundred is marked and half of
+  the few wrong ones. On a board it has not seen, the pair in `Models/`
+  marks nearly half of the right pieces too: there it puts 13,000 pieces
+  wrong and 16,500 right, and its scores say as much.
+- The threshold of 0.85 was set when the number under it was another one.
+  It is the owner's to move; `app_check --flag-below C` counts the same for
+  any other value. Not tried in the app on a phone.
 
 ## What the colour step is worth
 

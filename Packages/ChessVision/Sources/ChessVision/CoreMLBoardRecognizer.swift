@@ -62,7 +62,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     `Models/` (`docs/RECOGNITION.md`). It is kept for the reference's
     ///     next version of the rule.
     ///   - oneKing: exactly one king a side, from the scores the piece model
-    ///     gave each piece for every kind (`OneKingASide`).
+    ///     gave each piece for every kind (`OneKingASide`). On: it gains a
+    ///     little on every development set with both piece models it was
+    ///     tried with, and the second held-out test set does not contradict
+    ///     that (`docs/RECOGNITION.md`, "What one king a side is worth").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -71,7 +74,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         a1Prior: Double? = 6,  // = BoardOrientation.appPrior
         gridFit: Bool = true,
         sidesFromColour: Bool = false,
-        oneKing: Bool = false
+        oneKing: Bool = true
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
