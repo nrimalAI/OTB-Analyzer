@@ -4,6 +4,7 @@ is checked against this folder's Python and not against a second opinion.
     python swift_reference.py orientation
     python swift_reference.py grid-cases
     python swift_reference.py colour-cases
+    python swift_reference.py king-cases
     python swift_reference.py grid --list photos.json --out python_grid.json
     python swift_reference.py compare --python python_grid.json --swift swift_grid.json
     python swift_reference.py colours --swift swift_colours.json [--list photos.json]
@@ -25,6 +26,15 @@ the patch of a box, points split in two groups, detections with their colours
 (the model wrong about the side of none, a few or all of the pieces), and one
 drawn picture of brown and black pieces that a model calls all black (written
 next to the JSON as colour_pieces.png). Written to Fixtures/colour_cases.json.
+
+king-cases: what chess_pipeline.one_king_a_side makes of detections and the
+scores the model gave each of them for every kind: boards with no, one, two
+and more kings, on one side or both, scores on the floor and just under it,
+equal scores, kinds without a score. Written to Fixtures/king_cases.json and
+replayed by OneKingASideTests. These cases are the whole contract: the Python
+gets its scores from overlapping boxes (evaluate.kind_scores_of) and the app
+from the class scores of the box itself, so the two cannot be compared on
+photos piece for piece.
 
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
@@ -49,9 +59,10 @@ from pathlib import Path
 import numpy as np
 
 from chess_pipeline import (
-    Detection, EDGE_MARGIN, FEN_LETTER, PIECE_CLASSES, assign_detections, assign_squares, board_square,
-    board_to_fen_placement, colour_patch, fen_placement_to_board, homography, orient_by_pieces,
-    colour_sides, project, pulled_board_point, sides_from_colour, two_groups, white_side_score,
+    Detection, EDGE_MARGIN, FEN_LETTER, KING_FLOOR, KINDS, PIECE_CLASSES, assign_detections, assign_squares,
+    board_square, board_to_fen_placement, colour_patch, fen_placement_to_board, homography,
+    one_king_a_side, orient_by_pieces, colour_sides, project, pulled_board_point, sides_from_colour,
+    two_groups, white_side_score,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -586,6 +597,120 @@ def colour_cases(seed):
           f"{len(pieces)} drawn pieces ({sum(s == 'white' for s, _ in pieces)} brown)")
 
 
+def king_cases(seed):
+    rng = random.Random(seed)
+    cases = []
+    tally = {"two kings, left alone": 0, "a king given": 0, "no piece scored a king": 0,
+             "kings taken away": 0, "other": 0}
+
+    def piece(side, kind, scores, k):
+        return Detection(f"{side}_{kind}", rng.randrange(250, 1000) / 1000,
+                         (60.0 * k, 40.0, 60.0 * k + 50, 150.0)), scores
+
+    def record(pieces):
+        detections = [d for d, _ in pieces]
+        scores = [s for _, s in pieces]
+        result = one_king_a_side(detections, scores)
+        assert all(a.confidence == b.confidence and a.bbox == b.bbox
+                   and a.cls.split("_")[0] == b.cls.split("_")[0] for a, b in zip(detections, result))
+        kings = sum(d.cls.endswith("_king") for d in detections)
+        changed = [(a.cls, b.cls) for a, b in zip(detections, result) if a.cls != b.cls]
+        if kings == 2:
+            assert not changed
+            tally["two kings, left alone"] += 1
+        elif kings < 2 and changed:
+            assert all(b.endswith("_king") for _, b in changed)
+            tally["a king given"] += 1
+        elif kings < 2:
+            tally["no piece scored a king"] += 1
+        elif changed:
+            assert all(a.endswith("_king") and not b.endswith("_king") for a, b in changed)
+            tally["kings taken away"] += 1
+        else:
+            tally["other"] += 1
+        cases.append(dict(
+            detections=[dict(cls=d.cls, confidence=d.confidence, scores=s) for d, s in pieces],
+            out=[d.cls for d in result]))
+        return [d.cls for d in result]
+
+    def scores_for(kind):
+        """What a model might score a piece of this kind: its own kind high,
+        a few others low, some kinds not at all."""
+        scores = {kind: rng.randrange(250, 1000) / 1000}
+        for other in KINDS:
+            if other != kind and rng.random() < 0.45:
+                scores[other] = rng.choice([0.0, 0.004, 0.019, 0.02, 0.021, 0.05, 0.1, 0.3,
+                                            round(rng.uniform(0, 0.6), 3)])
+        return scores
+
+    # 1. Random boards: 0 to 4 kings, on either side, any number of pieces.
+    for n in range(260):
+        count = rng.choice([0, 1, 2, 3, 5, 8, 16, 24, 32])
+        kings = rng.choice([0, 0, 1, 1, 2, 3, 3, 4])
+        pieces = []
+        for k in range(count):
+            side = rng.choice(["white", "black"]) if n % 5 else "white"
+            kind = "king" if k < kings else rng.choice(KINDS[1:])
+            pieces.append(piece(side, kind, scores_for(kind), k))
+        rng.shuffle(pieces)
+        record(pieces)
+
+    # 2. By hand, each sentence of the rule.
+    def p(cls, k=0, **scores):
+        side, kind = cls.split("_")
+        return piece(side, kind, scores, k)
+    # No pieces; one side only.
+    assert record([]) == []
+    assert record([p("white_queen", king=0.3)]) == ["white_king"]
+    # Two kings: nothing, also when both are on one side.
+    assert record([p("white_king", king=0.9), p("black_king", king=0.9), p("black_queen", king=0.8)]) \
+        == ["white_king", "black_king", "black_queen"]
+    assert record([p("white_king", king=0.9), p("white_king", king=0.2, queen=0.6),
+                   p("black_queen", king=0.5)]) == ["white_king", "white_king", "black_queen"]
+    # One king: the other side gets one, the side that has one is left alone.
+    assert record([p("white_king", king=0.9), p("white_queen", king=0.5), p("black_queen", king=0.05),
+                   p("black_rook", king=0.3)]) == ["white_king", "white_queen", "black_queen", "black_king"]
+    # No king: each side its own best; one side may find none.
+    assert record([p("white_queen", king=0.1), p("white_rook", king=0.2), p("black_pawn", king=0.019),
+                   p("black_queen")]) == ["white_queen", "white_king", "black_pawn", "black_queen"]
+    # On the floor counts, under it does not.
+    assert record([p("white_queen", king=KING_FLOOR)]) == ["white_king"]
+    assert record([p("white_queen", king=KING_FLOOR - 1e-9)]) == ["white_queen"]
+    # Equal king scores: the earlier piece.
+    assert record([p("black_rook", king=0.4), p("black_queen", king=0.4), p("black_pawn", king=0.39)]) \
+        == ["black_king", "black_queen", "black_pawn"]
+    # More than two kings: a side with several keeps its best, by the king
+    # score and not by the confidence of the box; a side with one is left.
+    assert record([p("white_king", king=0.5, queen=0.3), p("white_king", king=0.7),
+                   p("white_king", king=0.6, rook=0.2, queen=0.1), p("black_king", king=0.3)]) \
+        == ["white_queen", "white_king", "white_rook", "black_king"]
+    # Equal king scores among several kings: the earlier one stays.
+    assert record([p("white_king", king=0.6, bishop=0.1), p("white_king", king=0.6, knight=0.2),
+                   p("black_king", king=0.9)]) == ["white_king", "white_knight", "black_king"]
+    # The other kind: the best score; equal scores in the order queen, rook,
+    # bishop, knight, pawn; no other score, a queen.
+    assert record([p("black_king", king=0.9), p("black_king", king=0.5, pawn=0.2, knight=0.2),
+                   p("black_king", king=0.4, rook=0.3, queen=0.3), p("black_king", king=0.3),
+                   p("black_king", king=0.2, pawn=0.01)]) \
+        == ["black_king", "black_knight", "black_queen", "black_queen", "black_pawn"]
+    # Three kings on one side and none on the other: the other side gets none
+    # (it has more than two kings on the board, not fewer).
+    assert record([p("white_king", king=0.9), p("white_king", king=0.8, queen=0.1),
+                   p("white_king", king=0.7), p("black_queen", king=0.6)]) \
+        == ["white_king", "white_queen", "white_queen", "black_queen"]
+    # Four kings, two a side.
+    assert record([p("white_king", king=0.3, pawn=0.1), p("black_king", king=0.3, rook=0.2),
+                   p("white_king", king=0.8), p("black_king", king=0.2, bishop=0.1)]) \
+        == ["white_pawn", "black_king", "white_king", "black_bishop"]
+    # A king that the model gave no king score (scores from elsewhere) loses to one that has one.
+    assert record([p("white_king"), p("white_king", king=0.1), p("black_king", king=0.5)]) \
+        == ["white_queen", "white_king", "black_king"]
+
+    path = FIXTURES / "king_cases.json"
+    path.write_text(json.dumps(cases, separators=(",", ":")) + "\n")
+    print(f"{len(cases)} cases written to {path} ({path.stat().st_size // 1024} kB): {tally}")
+
+
 def grid_reference(list_path, out_path, limit):
     import cv2
     from grid_corners import find_grid
@@ -691,7 +816,7 @@ def compare_colours(swift_path, list_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "grid", "compare", "colours"])
+    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "grid", "compare", "colours"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
@@ -712,6 +837,8 @@ def main():
         grid_cases()
     elif args.what == "colour-cases":
         colour_cases(args.seed)
+    elif args.what == "king-cases":
+        king_cases(args.seed)
     elif args.what == "grid":
         grid_reference(args.list, args.out, args.limit)
     elif args.what == "colours":

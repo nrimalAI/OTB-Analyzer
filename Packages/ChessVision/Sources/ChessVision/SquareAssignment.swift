@@ -8,10 +8,34 @@ struct PieceDetection {
     let color: Piece.Color
     let confidence: Float
     let boundingBox: CGRect  // image coordinates, origin top-left
+    /// The model's score for each kind it considered for this piece, the
+    /// larger of the two colours; a kind without an entry counts as 0
+    /// (`kind_scores` in `chess_pipeline.one_king_a_side`). Empty where
+    /// nothing is known beyond the kind the piece was taken for.
+    let kindScores: [Piece.Kind: Double]
+
+    init(
+        piece: Piece.Kind, color: Piece.Color, confidence: Float, boundingBox: CGRect,
+        kindScores: [Piece.Kind: Double] = [:]
+    ) {
+        self.piece = piece
+        self.color = color
+        self.confidence = confidence
+        self.boundingBox = boundingBox
+        self.kindScores = kindScores
+    }
 
     /// The piece's contact point with the board.
     var anchor: CGPoint {
         CGPoint(x: boundingBox.midX, y: boundingBox.maxY)
+    }
+
+    /// The same detection taken for another kind or side: confidence, box
+    /// and scores stay.
+    func taken(for piece: Piece.Kind? = nil, color: Piece.Color? = nil) -> PieceDetection {
+        PieceDetection(
+            piece: piece ?? self.piece, color: color ?? self.color,
+            confidence: confidence, boundingBox: boundingBox, kindScores: kindScores)
     }
 }
 

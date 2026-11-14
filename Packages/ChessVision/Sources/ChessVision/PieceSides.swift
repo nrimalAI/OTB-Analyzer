@@ -83,9 +83,7 @@ enum PieceSides {
         }
         return zip(detections, sides).map { detection, side in
             guard let side else { return detection }
-            return PieceDetection(
-                piece: detection.piece, color: side,
-                confidence: detection.confidence, boundingBox: detection.boundingBox)
+            return detection.taken(color: side)
         }
     }
 

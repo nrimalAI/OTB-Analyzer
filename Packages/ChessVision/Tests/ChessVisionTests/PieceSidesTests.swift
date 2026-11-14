@@ -371,7 +371,7 @@ struct PieceSidesTests {
 
     /// A board seen from above, 800 x 800, grey, with eight cream discs on
     /// rank 2 and eight dark ones on rank 7, and the boxes round them.
-    private static func drawnPawns() throws -> (image: CGImage, boxes: [CGRect]) {
+    static func drawnPawns() throws -> (image: CGImage, boxes: [CGRect]) {
         let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try #require(CGContext(
             data: nil, width: 800, height: 800, bitsPerComponent: 8, bytesPerRow: 0, space: space,
@@ -407,7 +407,8 @@ struct PieceSidesTests {
         func place(sidesFromColour: Bool) throws -> (corners: [CGPoint], placement: String) {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: upsideDown, cornersFromModel: false, in: image,
-                sidesFromColour: sidesFromColour, a1Prior: 6, pull: SquareAssignment.defaultPull))
+                sidesFromColour: sidesFromColour, oneKing: false, a1Prior: 6,
+                pull: SquareAssignment.defaultPull))
             return (placed.corners, FENBuilder.placement(placed.pieces.mapValues(\.piece)))
         }
 
