@@ -777,8 +777,32 @@ threshold were chosen on board B, where it turns 1 exact board into 17; that
 gain was fitted, not found. And on the Y-LIChess layouts the candidate is
 below the baseline and both are below what an empty board scores there
 (89.7%): with labelled corners nearly all the pieces it sees on empty
-squares are pieces standing beside the board, which `board_square` takes in
-from up to half a square outside (see `EDGE_MARGIN` in `chess_pipeline.py`).
+squares are pieces standing beside the board, which `board_square` took in
+from up to half a square outside. That is `EDGE_MARGIN` in
+`chess_pipeline.py`, and since f75d1f8 it is a quarter square (next
+paragraph).
+
+**Pieces beside the board (`EDGE_MARGIN`, 2026-11-13).** `board_square` puts
+a piece whose foot comes out just over the edge back on the nearest rim
+square. With half a square of tolerance, captured and spare pieces standing
+next to the board landed on the rim: on Y-LIChess, with labelled corners and
+`pieces_s_render1`, 231 of 258 pieces seen on empty squares in the game
+positions and 364 of 385 in the layouts (on Fenit B 4 of 36, on ChessReD
+test 0 of 7). The value is 0.25 now, chosen on ChessReD test, Fenit A and
+Fenit B, where it gives the same boards as 0.5 with labelled corners and one
+square of 26,000 fewer end to end, while 0.1 starts to lose real rim pieces
+(`runs/edge_margin.txt`, `runs/edge_margin_e2e.txt`). On this set, test
+only, `pieces_s_render1` in Python with `--max-side 1280` and the app-side
+steps, 0.5 -> 0.25: Y-LIChess game positions 77.9% -> 81.8% of squares and
+0 -> 10 of 102 boards exact; layouts 76.2% -> 84.9%, 0 -> 11 of 98; ChessQ
+72.0% -> 72.3%; chesscog 93.7% -> 93.9% (`runs/scores/heldout2_1280_*.txt`
+against `heldout2_1280_m025_*.txt`; samryan and chess-cv are in the second
+file when it is complete). Through the app with the pair in `Models/`
+(app-side session): Y-LIChess 70.1% -> 72.4%, the other parts and the three
+development sets within 0.5 points. The same constant is used when labels
+are built (`derive_corners.check_pieces`, `build_dataset.py`'s corner
+orientation): a dataset rebuilt now can keep or drop a few other photos
+than the folders on disk, which were built with 0.5.
 
 **The app-side steps on this set, through the app's own code, 2026-11-13 midday** (measured with
 `app_check` before it decoded each photo once; with the later binary the two
