@@ -55,26 +55,60 @@ func fail(_ message: String) -> Never {
 
 /// The photo the way a viewer shows it: turned as its EXIF orientation tag
 /// says, which is what the app's camera pipeline hands the recognizer and
-/// what `cv2.imread` returns in the Python. Photos without a tag (all of the
-/// current test sets) are loaded as they are, undecoded: the recognizer
-/// decodes them once (`DecodedImage`). A photo with a tag comes out of
-/// ImageIO's thumbnail call as a bitmap already, whose pixels are about a
-/// fifth of the bytes away from a full decode turned afterwards; if a test
-/// set with tags is ever scored, turn the full decode instead.
+/// what `cv2.imread` returns in the Python. A photo without a tag is loaded
+/// as it is, undecoded: the recognizer decodes it once (`DecodedImage`). A
+/// photo with a tag (every chess-cv photo of the second held-out set, two
+/// of samryan's) is decoded once in full here and its pixels are then moved
+/// to where the tag says, none of them changed: the same pixels as one full
+/// decode, as for every other photo. (Until 2026-11-13 such photos went
+/// through ImageIO's thumbnail call, which decodes them its own way.)
 func upright(_ url: URL) -> CGImage? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    else { return nil }
     let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
     let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-    guard orientation != 1,
-          let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
-          let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
-    else { return CGImageSourceCreateImageAtIndex(source, 0, nil) }
-    let options: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceThumbnailMaxPixelSize: max(width, height),
-    ]
-    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    guard (2...8).contains(orientation) else { return image }
+    return turned(DecodedImage.once(image), orientation: orientation)
+}
+
+/// A bitmap with its pixels moved as an EXIF orientation (2 to 8) asks.
+func turned(_ image: CGImage, orientation: Int) -> CGImage? {
+    let width = image.width, height = image.height
+    let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil }
+        ?? CGColorSpace(name: CGColorSpace.sRGB)!
+    let info = CGImageAlphaInfo.noneSkipLast.rawValue
+    // The pixels as they are, in rows of four bytes a pixel.
+    guard let from = CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 4 * width,
+        space: space, bitmapInfo: info)
+    else { return nil }
+    from.interpolationQuality = .none
+    from.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    let swapped = orientation >= 5  // the four that turn by a quarter
+    let outWidth = swapped ? height : width, outHeight = swapped ? width : height
+    guard let to = CGContext(
+        data: nil, width: outWidth, height: outHeight, bitsPerComponent: 8, bytesPerRow: 4 * outWidth,
+        space: space, bitmapInfo: info),
+        let source = from.data?.assumingMemoryBound(to: UInt32.self),
+        let target = to.data?.assumingMemoryBound(to: UInt32.self)
+    else { return nil }
+    for y in 0..<height {
+        for x in 0..<width {
+            let (u, v): (Int, Int)
+            switch orientation {
+            case 2: (u, v) = (width - 1 - x, y)               // mirrored left to right
+            case 3: (u, v) = (width - 1 - x, height - 1 - y)  // half a turn
+            case 4: (u, v) = (x, height - 1 - y)              // mirrored top to bottom
+            case 5: (u, v) = (y, x)                           // mirrored along the diagonal
+            case 6: (u, v) = (height - 1 - y, x)              // a quarter turn clockwise
+            case 7: (u, v) = (height - 1 - y, width - 1 - x)  // mirrored along the other diagonal
+            default: (u, v) = (y, width - 1 - x)              // 8: a quarter turn anticlockwise
+            }
+            target[v * outWidth + u] = source[y * width + x]
+        }
+    }
+    return to.makeImage()
 }
 
 var modelsPath: String?
