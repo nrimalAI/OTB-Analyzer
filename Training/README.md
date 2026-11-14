@@ -339,13 +339,16 @@ pair in `Models/` against candidate:
 | Fenit A (286; render1 trained on these photos) | 91.4%, 16 exact | 95.3%, 185 exact |
 | Second test set, all 1,619 | 75.5%, 2 exact | 85.4%, 31 exact |
 | Second test set, with `EDGE_MARGIN` 0.25 (pull request #11) | 75.9%, 3 exact | 86.3%, 45 exact |
-| Second test set, with the two-kings rule as well (pull request #12; what the branch does now) | 76.1%, 3 exact | 86.6%, 63 exact |
-| The same with the chess-cv photos read from one full decode (pull request #14; they carry an EXIF orientation and had gone through a thumbnail path) | 76.1%, 3 exact | 86.6%, 68 exact |
+| Second test set, with the two-kings rule as well (pull request #12) | 76.1%, 3 exact | 86.6%, 63 exact |
+| The same with the chess-cv photos read from one full decode (pull request #14; what the branch does now) | 76.08%, 3 exact | 86.62%, 68 exact |
 
 (The first four rows are with the rim tolerance of half a square; with a
 quarter the three development sets do not move, and on the second test set
 Y-LIChess goes from 78.0% and 0 boards exact to 84.8% and 14 with the
-candidate. Per-photo outputs: `runs/app_check/edge_margin_025/`.)
+candidate. Per-photo outputs: `runs/app_check/edge_margin_025/`. Every
+second-test-set row but the last read the 840 chess-cv photos, which carry
+an EXIF orientation, through a thumbnail path; the last row is the one to
+quote: 76.08% and 3 boards exact against 86.62% and 68.)
 
 What speaks for it is the second test set, where it is better on every part
 (table in that section). Whether that is enough is the owner's call (the
@@ -753,8 +756,11 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 | `chesscv_games` | 840 | 59.4% | 53.0% / 0%, board not found in 10 | 54.2% / 0%, board not found in 10 | 85.4% / 0% | 85.4% / 0% |
 
 **`pieces_s_render1` on this set, through the app's own code** (2026-11-13
-evening; test only. `app_check` decoding each photo once, the app's defaults,
-colour step off; the pair in `Models/` against the same corner model with the
+evening; test only. `app_check` at pull request #10, i.e. before the rim fix
+and the two-kings rule, and with the chess-cv photos still read through a
+thumbnail path (pull request #14 reads them from one full decode: with
+today's defaults the chess-cv row is 80.65%; 0 and 89.72%; 21, no board in
+13). The app's defaults of that build, colour step off; the pair in `Models/` against the same corner model with the
 candidate piece model; measured by the app-side session, per-photo outputs
 in `runs/app_check/decode_once/`). Squares right; boards exact; photos with
 no board found:
@@ -770,7 +776,9 @@ no board found:
 Better in squares on every part, by 5 to 19 points; on Y-LIChess as many
 photos lose squares as gain them. Boards fully right: 31 of 1,619 against 2,
 so about 2% where the target is 85%. (Pooled, which this section warns
-against because `chesscv_games` is half the photos: 85.4% against 75.5%.)
+against because `chesscv_games` is half the photos: 85.4% against 75.5%;
+with today's app defaults and the full decode 86.62% and 68 boards against
+76.08% and 3.)
 
 The same comparison in Python (`.pt` weights, `main`'s corner model,
 `--one-piece-per-spot 0.7 --grid-corners --a1-from-pieces 6`), **on the
@@ -842,12 +850,12 @@ always in the right direction. The app has it since pull request #12, on by
 default, with the model's own score for every label of a box (Vision's
 label confidence times the observation's confidence; scores under 0.02 left
 out). Through the app, off -> on: the pair in `Models/` ChessReD test 279 ->
-280 boards exact, Fenit B 0 -> 1, Fenit A 16 -> 32 of 286, this set 75.98%
--> 76.06% of squares (3 exact both); with `pieces_s_render1` this set
-86.34% -> 86.57% and 45 -> 63 boards exact (`runs/app_check/one_king/`).
-(Those totals read the 840 chess-cv photos through a thumbnail path; from
-one full decode, pull request #14, they are 76.01% -> 76.08% and 86.40% ->
-86.62%, 49 -> 68 boards exact: `runs/app_check/exif_full_decode/`.)
+280 boards exact, Fenit B 0 -> 1, Fenit A 16 -> 32 of 286, this set 76.00%
+-> 76.08% of squares (3 exact both); with `pieces_s_render1` this set
+86.40% -> 86.62% and 49 -> 68 boards exact (the chess-cv photos read from
+one full decode, pull request #14: `runs/app_check/exif_full_decode/`; the
+files in `runs/app_check/one_king/` read them through a thumbnail path and
+give 75.98% -> 76.07% and 86.34% -> 86.56%, 45 -> 63).
 Where it loses: a board set up without a king on a side is not a game
 position (13 of Fenit A's 286, 50 of Y-LIChess's 200), and there the rule
 crowns the best candidate; the three boards that were exact without it and
@@ -856,7 +864,8 @@ pieces after it.
 
 **The app-side steps on this set, through the app's own code, 2026-11-13 midday** (measured with
 `app_check` before it decoded each photo once; with the later binary the two
-totals are 46.2% and 75.5%, 340 and 44 photos without a board. `app_check`, the exported models
+totals are 46.2% and 75.5%, 340 and 44 photos without a board, still with
+the chess-cv photos through a thumbnail path. `app_check`, the exported models
 in `Models/` at b546e6a: `main`'s corner model and the piece export with NMS
 across classes; measured by the app-side session, nothing chosen on it).
 "Steps" are the two app-side steps, corners from the grid fit (used alone
