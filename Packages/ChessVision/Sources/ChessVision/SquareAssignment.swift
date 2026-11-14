@@ -80,14 +80,12 @@ enum SquareAssignment {
     /// `edgeMargin` outside the board back onto the rim square; further out
     /// there is no square.
     static func square(atBoardX x: Double, y: Double) -> Square? {
-        var f = Int(floor(x))
-        var r = Int(floor(y))
-        if !(0..<8).contains(f) || !(0..<8).contains(r) {
-            let inside = -edgeMargin..<(8 + edgeMargin)
-            guard inside.contains(x), inside.contains(y) else { return nil }
-            f = min(max(f, 0), 7)
-            r = min(max(r, 0), 7)
-        }
+        // The margin first: a point that is not a number, or far away, has no
+        // square (and must not reach `Int()`, which traps on such values).
+        let inside = -edgeMargin..<(8 + edgeMargin)
+        guard inside.contains(x), inside.contains(y) else { return nil }
+        let f = min(max(Int(floor(x)), 0), 7)
+        let r = min(max(Int(floor(y)), 0), 7)
         return FENBuilder.square(file: f + 1, rank: r + 1)
     }
 
