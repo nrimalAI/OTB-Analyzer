@@ -326,6 +326,12 @@ pair in `Models/` against candidate:
 | Fenit board B (100) | 84.6% of squares, 0 exact | 84.3%, 1 exact |
 | Fenit A (286; render1 trained on these photos) | 91.4%, 16 exact | 95.3%, 185 exact |
 | Second test set, all 1,619 | 75.5%, 2 exact | 85.4%, 31 exact |
+| Second test set, with `EDGE_MARGIN` 0.25 (pull request #11) | 75.9%, 3 exact | 86.3%, 45 exact |
+
+(The first four rows are with the rim tolerance of half a square; with a
+quarter the three development sets do not move, and on the second test set
+Y-LIChess goes from 78.0% and 0 boards exact to 84.8% and 14 with the
+candidate. Per-photo outputs: `runs/app_check/edge_margin_025/`.)
 
 What speaks for it is the second test set, where it is better on every part
 (table in that section). Whether that is enough is the owner's call (the
