@@ -5,7 +5,8 @@
 #   bash score.sh pieces  <label> <weights.pt> [evaluate.py options]
 #                                                piece model with the labelled corners, one box per piece:
 #                                                Fenit board B, board A, ChessReD test
-#   bash score.sh corners <label> <weights.pt>   corner model: corner error and the
+#   bash score.sh corners <label> <weights.pt> [corner_error.py options]
+#                                                corner model: corner error and the
 #                                                boards it gives with the labelled boxes
 #
 # Run it detached for a long one:  nohup bash score.sh ... > /dev/null 2>&1 &
@@ -41,9 +42,9 @@ if [ "$kind" = pieces ]; then
   } > "$out" 2>&1
 else
   { echo "=== $label fenit"
-    ./venv/bin/python corner_error.py --corners-model "$weights" --source fenit --device cpu
+    ./venv/bin/python corner_error.py --corners-model "$weights" --source fenit --device cpu "$@"
     echo "=== $label chessred test"
-    ./venv/bin/python corner_error.py --corners-model "$weights" --source chessred2k --split test --device cpu
+    ./venv/bin/python corner_error.py --corners-model "$weights" --source chessred2k --split test --device cpu "$@"
   } > "$out" 2>&1
 fi
 grep -E "^===|per-square|exact|photos|corner order|corner error" "$out"

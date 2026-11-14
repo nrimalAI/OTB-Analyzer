@@ -50,19 +50,26 @@ training() {
 }
 
 # The state of a run, from its last.pt.  resume: a checkpoint to continue
-# from;  done: it finished (the final checkpoint carries no optimizer);
-# fresh: the file does not load.
+# from;  final: the checkpoint of the last epoch, written before the run's
+# closing validation (ultralytics refuses to resume it: there is nothing
+# left to train);  done: the run finished (its final checkpoint carries no
+# optimizer);  fresh: the file does not load.
 state_of() {
   ./venv/bin/python - "$1" <<'EOF' 2>/dev/null || echo fresh
 import sys, torch
 c = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
-print("resume" if c.get("optimizer") is not None and c.get("epoch", -1) >= 0 else "done")
+if c.get("optimizer") is None or c.get("epoch", -1) < 0:
+    print("done")
+else:
+    epochs = (c.get("train_args") or {}).get("epochs")
+    print("final" if epochs and c["epoch"] + 1 >= epochs else "resume")
 EOF
 }
 
 # Training on Apple's GPU leaks: the process's memory (nearly all of it
-# compressed and swapped out) grows with every batch, about 20 GB an hour on
-# a large dataset. Swap fills the disk, and in the end the system kills the
+# compressed and swapped out) grows with every batch: on 15,000 photos by
+# 30 GB within one 26-minute epoch, so such a run is continued in a new
+# process after every epoch. Swap fills the disk, and in the end the system kills the
 # process (exit 137; pieces_s_rf on 2026-11-13) or the machine crawls. So a
 # run that holds more than MEM_LIMIT_GB is stopped just after its next epoch
 # has been saved and continued in a new process, as often as it takes.
@@ -81,27 +88,41 @@ mem_gb() {
 run_guarded() {
   local name="$1" last="$2"; shift 2
   "$@" >> "runs/$name.log" 2>&1 &
-  local job=$! py over=0 stamp now
+  local job=$! py="" over=0 stamp now state warned=0
   while kill -0 "$job" 2>/dev/null; do
     sleep 30
-    # The python process itself (capital P: not the caffeinate line).
-    py="$(pgrep -f "Python -u train\.py .*--name $name( |\$)" | head -n 1)"
-    [ -z "$py" ] && continue
+    # The python process: with `caffeinate -i cmd &` that is the job itself
+    # (caffeinate becomes its child); if the job is something else, its child.
+    py="$job"
+    case "$(ps -o comm= -p "$job" 2>/dev/null)" in
+      *ython*) ;;
+      *) py="$(pgrep -P "$job" | head -n 1)"
+         case "$(ps -o comm= -p "${py:-0}" 2>/dev/null)" in *ython*) ;; *) py="" ;; esac ;;
+    esac
+    if [ -z "$py" ]; then
+      [ "$warned" = 0 ] && kill -0 "$job" 2>/dev/null \
+        && { log "$name: no python process found to watch; its memory is not guarded"; warned=1; }
+      continue
+    fi
     if [ "$over" = 0 ]; then
       if [ "$(mem_gb "$py")" -ge "$MEM_LIMIT_GB" ]; then
         over=1
         stamp="$(stat -f %m "$last" 2>/dev/null)"
         log "$name holds more than $MEM_LIMIT_GB GB: to be continued in a new process after this epoch"
       fi
-    else
+    elif [ "$over" = 1 ]; then
       now="$(stat -f %m "$last" 2>/dev/null)"
       if [ -n "$now" ] && [ "$now" != "$stamp" ]; then
-        sleep 10   # let the save finish
-        # The last save of a run that is ending must not be interrupted.
-        [ "$(state_of "$last")" = done ] && { over=0; continue; }
-        kill "$py" 2>/dev/null
-        wait "$job" 2>/dev/null
-        return 99
+        # An epoch was saved. Wait until the file has been left alone for 20
+        # seconds (last.pt and best.pt are written one after the other), and
+        # stop the run only if the checkpoint is one that can be continued.
+        [ $(( $(date +%s) - now )) -lt 20 ] && continue
+        state="$(state_of "$last")"
+        case "$state" in
+          resume) kill "$py" 2>/dev/null; wait "$job" 2>/dev/null; return 99 ;;
+          final|done) over=2 ;;   # the run is ending by itself: leave it
+          *) ;;                   # not readable just now: look again next round
+        esac
       fi
     fi
   done
@@ -127,7 +148,7 @@ while true; do
 
   state=fresh
   [ "$cut_off" = 1 ] && [ -f "$dir/weights/last.pt" ] && state="$(state_of "$dir/weights/last.pt")"
-  if [ "$state" = done ]; then
+  if [ "$state" = done ] || [ "$state" = final ]; then
     log "$name had already finished"
     rc=0
   elif [ "$state" = resume ]; then
@@ -154,9 +175,15 @@ while true; do
       --device mps --name "$name"
     rc=$?
   fi
-  # A run stopped for its memory goes on in a new process until it ends.
-  while [ "$rc" = 99 ]; do
-    if [ "$(state_of "$dir/weights/last.pt")" = done ]; then rc=0; break; fi
+  # A run stopped for its memory goes on in a new process until it ends; so
+  # does one the system killed for memory (137), at most three times.
+  killed=0
+  while [ "$rc" = 99 ] || { [ "$rc" = 137 ] && [ "$killed" -lt 3 ]; }; do
+    [ "$rc" = 137 ] && killed=$((killed + 1))
+    state="$(state_of "$dir/weights/last.pt")"
+    [ "$state" = fresh ] && { sleep 30; state="$(state_of "$dir/weights/last.pt")"; }
+    if [ "$state" = done ] || [ "$state" = final ]; then rc=0; break; fi
+    [ "$state" = resume ] || break
     log "continue $name in a new process (memory)"
     run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py resume \
       --model "$dir/weights/last.pt" --name "$name"

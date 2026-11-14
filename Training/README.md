@@ -263,10 +263,12 @@ to rebuild a folder a running job reads.
 all of it compressed and swapped out, so `ps` shows under 1 GB; look with
 `top -o mem`) grows with every batch: `pieces_s_render2` held 85 GB after
 four hours, swap had grown to 36 GB on disk, epochs took 50 minutes instead
-of 16, and a run left alone ends with exit 137 (`pieces_s_rf`). `queue.sh`
-therefore stops a run that holds more than `MEM_LIMIT_GB` (30) just after
-its next epoch is saved and continues it in a new process (`queue.log` says
-when). A run started by hand has no such guard: start runs through the
+of 26, and a run left alone ends with exit 137 (`pieces_s_rf`). On 15,000
+photos it grows by 30 GB within one epoch. `queue.sh` therefore stops a run
+that holds more than `MEM_LIMIT_GB` (30) once its next epoch is saved and
+continues it in a new process, on such a dataset after every epoch
+(`queue.log` says when); a run the system kills for memory is continued up
+to three times. A run started by hand has no such guard: start runs through the
 queue.
 
 **Running jobs.** Start them detached and awake, so no session has to stay
@@ -288,7 +290,7 @@ ONE="--copies --one-piece-per-spot 0.7"    # wherever a piece model runs
 python corner_error.py --corners-model $C --source fenit                      # boards A and B
 python corner_error.py --corners-model $C --source chessred2k --split test
 python evaluate.py --corners-model $C --pieces-model $P $POS $ONE --split test   # board B: the number
-python evaluate.py --corners-model $C --pieces-model $P --split test \
+python evaluate.py --corners-model $C --pieces-model $P --split test --device cpu \
     --annotations datasets/chessred2k/annotations.json --images datasets/chessred2k/images
 python evaluate.py --pieces-model $P --gt-corners $POS $ONE --group B         # pieces alone
 python evaluate.py --corners-model $C --gt-boxes  $POS --group B              # corners alone
@@ -358,18 +360,18 @@ degrees, one of them a fixture of the package's tests, and `main`'s corner
 model does not.
 
 **What a new corner model has to beat** (through `app_check` with the app's
-defaults, i.e. grid fit on, a1 prior 6, colour step off, each photo decoded
-once (the binary since pull request #9); tables in `docs/RECOGNITION.md`):
-ChessReD test 279 of 306 boards exact, none turned; Fenit board B 84.6% of
-squares, board not found in 4 of 100; Fenit A 91.4% of squares. Compare two
-models only through the same build of `app_check`: before #9 it read
-different pixels (280, 82.3%, 6 not found for the same pair). And the model
-has to pass the fixture tests of `./Scripts/swift-test.sh`: the four fixtures
-with the app's pipeline, and the corner model's own test with the grid fit
-off, where a wrong a1 or a board that is not found shows (read
-`EndToEndFixtureTests.swift` for what it asks; pull request #10 changes it
-from a floor of 58 squares a photo to "each corner within one square of the
-grid fit's, and 94% of squares over the four photos").
+defaults as they are since pull request #12: grid fit on, a1 prior 6, one
+king a side, colour step off, each photo decoded once; tables in
+`docs/RECOGNITION.md`): ChessReD test 280 of 306 boards exact, none turned;
+Fenit board B 84.67% of squares, 1 board exact, board not found in 4 of 100;
+Fenit A 91.69% of squares, 32 of 286 exact (`runs/app_check/one_king/`,
+the `main_*_raw_on.txt` files). Compare two models only through the same
+build of `app_check`: every app-side step moved these numbers a little, and
+before pull request #9 it read different pixels. And the model has to pass
+the fixture tests of `./Scripts/swift-test.sh`: the four fixtures with the
+app's pipeline, and the corner model's own test with the grid fit off, where
+a wrong a1 or a board that is not found shows (each corner within one square
+of the grid fit's, and 94% of squares over the four photos).
 
 **The piece export with NMS across classes against `main`'s** (same weights;
 both with `main`'s corner model and the app's defaults, photo by photo,
@@ -512,9 +514,9 @@ was in `Models/`, and why it was taken out again.
   Y-LIChess (through the app: 78.0% -> 65.5%). It is off by default in the
   app and in `evaluate.py`; the 15 of 100 is not a result.
 - Tried or queued for the remaining errors:
-  - "Exactly one king a side" from every class score of each box (scratch
-    prototype, not in the repo): board B 17 -> 21 of 98 with the colour step
-    on, ChessReD unchanged.
+  - Exactly two kings, from every kind the model scored for each piece:
+    `one_king_a_side`, in the repo and on by default in the app since pull
+    request #12 (numbers in the second test set's section).
   - The piece model looking at the board only (`board_crop`, `crop_boards.py`,
     `--crop-board`): `pieces_s_crop1` is queued. A model not trained on
     crops gains nothing from them (16 of 98 on board B with the colour step
@@ -806,8 +808,9 @@ next to the board landed on the rim: on Y-LIChess, with labelled corners and
 `pieces_s_render1`, 231 of 258 pieces seen on empty squares in the game
 positions and 364 of 385 in the layouts (on Fenit B 4 of 36, on ChessReD
 test 0 of 7). The value is 0.25 now, chosen on ChessReD test, Fenit A and
-Fenit B, where it gives the same boards as 0.5 with labelled corners and one
-square of 26,000 fewer end to end, while 0.1 starts to lose real rim pieces
+Fenit B, where it gives the same boards as 0.5 with labelled corners; end to
+end, measured on ChessReD test and Fenit B only, it is one square of 26,000
+fewer; 0.1 starts to lose real rim pieces
 (`runs/edge_margin.txt`, `runs/edge_margin_e2e.txt`). On this set, test
 only, `pieces_s_render1` in Python with `--max-side 1280` and the app-side
 steps, 0.5 -> 0.25: Y-LIChess game positions 77.9% -> 81.8% of squares and
@@ -816,7 +819,7 @@ steps, 0.5 -> 0.25: Y-LIChess game positions 77.9% -> 81.8% of squares and
 89.6% -> 89.6% (`runs/scores/heldout2_1280_*.txt` against
 `heldout2_1280_m025_*.txt`). Through the app with the pair in `Models/`
 (app-side session): Y-LIChess 70.1% -> 72.4%, the other parts and the three
-development sets within 0.5 points. The same constant is used when labels
+development sets within 0.6 points. The same constant is used when labels
 are built (`derive_corners.check_pieces`, `build_dataset.py`'s corner
 orientation): a dataset rebuilt now can keep or drop a few other photos
 than the folders on disk, which were built with 0.5.
@@ -832,7 +835,7 @@ paragraph above with `EDGE_MARGIN` 0.25, without -> with the rule: Y-LIChess
 game positions 81.8% -> 82.1% of squares and 10 -> 15 of 102 boards exact;
 layouts 84.9% -> 85.1%; chesscog 93.9% -> 94.4%; samryan 84.25% -> 84.29%;
 chess-cv 89.6% -> 89.8% and 11 -> 13 boards exact; ChessQ 72.25% -> 72.22%
-(two squares fewer, the same 8 boards exact)
+(one square fewer, the same 8 boards exact)
 (`runs/scores/heldout2_1280_m025_king_render1.txt`). Small and nearly
 always in the right direction. The app has it since pull request #12, on by
 default, with the model's own score for every label of a box (Vision's

@@ -104,9 +104,10 @@ def pulled_board_point(H, point, pull=0.30):
 # still count as standing on the nearest rim square. It was 0.5 until
 # 2026-11-13; captured pieces standing beside the board then landed on the
 # rim (on the Y-LIChess photos nearly every piece seen on an empty square).
-# On ChessReD test, Fenit A and Fenit B 0.25 gives the same boards as 0.5
-# with labelled corners, and one square of 26,000 fewer end to end; at 0.1
-# real rim pieces start to drop out. Chosen on those three sets.
+# With labelled corners 0.25 gives the same boards as 0.5 on ChessReD test,
+# Fenit A and Fenit B; end to end (ChessReD test and Fenit B) it is one
+# square of 26,000 fewer; at 0.1 real rim pieces start to drop out. Chosen
+# on those sets.
 EDGE_MARGIN = 0.25
 
 

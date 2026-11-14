@@ -282,6 +282,14 @@ def position_items(args):
     """The same tuples from a positions.json written by build_dataset.py. The
     photo scored is the original one, or with --copies the dataset's resized
     copy of it."""
+    if args.copies:
+        # A folder merged without --max-side has no copies: its "image" is the
+        # full-size photo. (With --max-side a photo that is already small
+        # enough is its own copy, so the rows cannot tell.)
+        manifest = Path(args.positions).parent / "manifest.json"
+        if manifest.exists() and not json.loads(manifest.read_text()).get("max_side"):
+            raise SystemExit(f"--copies: {args.positions} was merged without --max-side "
+                             "and has no copies. Use --max-side 1280 instead.")
     for row in json.loads(Path(args.positions).read_text()):
         if args.split != "all" and row["split"] != args.split:
             continue
@@ -291,12 +299,6 @@ def position_items(args):
             continue
         if args.copies:
             src = Path(row["image"])
-            original = row.get("original")
-            if original and src.resolve() == Path(original).resolve():
-                raise SystemExit(
-                    f"--copies: {args.positions} has no copies ({src.name} is the "
-                    "original photo: the folder was merged without --max-side). "
-                    "Use --max-side 1280 instead.")
         else:
             src = Path(row.get("original") or row["image"])
         corners, boxes = (merged_labels(row, src) if args.gt_corners or args.gt_boxes
