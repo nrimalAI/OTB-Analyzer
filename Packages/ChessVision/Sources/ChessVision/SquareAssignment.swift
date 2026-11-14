@@ -21,6 +21,14 @@ enum SquareAssignment {
 
     static let defaultPull = 0.30
 
+    /// How far outside the board, in squares, the foot of a piece may fall
+    /// and still be taken back onto the rim square (`EDGE_MARGIN`). A piece on
+    /// a rim square can come out just over the edge (corners a little off, a
+    /// piece leaning out); further than this it is a captured or spare piece
+    /// standing beside the board. Half a square, as it was at first, put
+    /// those on the rim.
+    static let edgeMargin = 0.25
+
     /// One piece per square; higher confidence wins, losers are demoted to
     /// their nearest free neighbor square or dropped.
     static func assign(
@@ -68,16 +76,16 @@ enum SquareAssignment {
         return board
     }
 
-    /// Board-frame point → square, clamping near-miss anchors within half a
-    /// square of the edge (pieces leaning over the rim).
+    /// Board-frame point → square (`board_square`), taking a point up to
+    /// `edgeMargin` outside the board back onto the rim square; further out
+    /// there is no square.
     static func square(atBoardX x: Double, y: Double) -> Square? {
-        var f = Int(floor(x))
-        var r = Int(floor(y))
-        if !(0..<8).contains(f) || !(0..<8).contains(r) {
-            guard (-0.5..<8.5).contains(x), (-0.5..<8.5).contains(y) else { return nil }
-            f = min(max(f, 0), 7)
-            r = min(max(r, 0), 7)
-        }
+        // The margin first: a point that is not a number, or far away, has no
+        // square (and must not reach `Int()`, which traps on such values).
+        let inside = -edgeMargin..<(8 + edgeMargin)
+        guard inside.contains(x), inside.contains(y) else { return nil }
+        let f = min(max(Int(floor(x)), 0), 7)
+        let r = min(max(Int(floor(y)), 0), 7)
         return FENBuilder.square(file: f + 1, rank: r + 1)
     }
 

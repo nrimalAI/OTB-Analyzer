@@ -67,9 +67,35 @@ struct HomographyTests {
         // Near-bottom-edge anchor of e2 with camera-aware pull still bins e2.
         let pulled = try #require(H.pulledBoardPoint(CGPoint(x: 450, y: 698), pull: 0.30))
         #expect(SquareAssignment.square(atBoardX: pulled.x, y: pulled.y) == .e2)
-        // Clamping: half a square outside snaps in; further out is nil.
-        #expect(SquareAssignment.square(atBoardX: -0.3, y: 0.5) == .a1)
-        #expect(SquareAssignment.square(atBoardX: -0.6, y: 0.5) == nil)
+        // A quarter of a square outside is taken back onto the rim (the edge
+        // itself included, as in Python's `-m <= x < 8 + m`); further out,
+        // where captured pieces stand, there is no square.
+        #expect(SquareAssignment.edgeMargin == 0.25)
+        #expect(SquareAssignment.square(atBoardX: -0.2, y: 0.5) == .a1)
+        #expect(SquareAssignment.square(atBoardX: -0.25, y: 0.5) == .a1)
+        #expect(SquareAssignment.square(atBoardX: -0.3, y: 0.5) == nil)
+        #expect(SquareAssignment.square(atBoardX: 8.2, y: 7.5) == .h8)
+        #expect(SquareAssignment.square(atBoardX: 8.25, y: 7.5) == nil)
+        #expect(SquareAssignment.square(atBoardX: 3.5, y: -0.2) == .d1)
+        #expect(SquareAssignment.square(atBoardX: 3.5, y: 8.24) == .d8)
+        #expect(SquareAssignment.square(atBoardX: 3.5, y: 8.3) == nil)
+        // Both out, each by less than the margin: the corner square.
+        #expect(SquareAssignment.square(atBoardX: -0.1, y: 8.1) == .a8)
+        #expect(SquareAssignment.square(atBoardX: -0.1, y: 8.3) == nil)
+        // No square, and no crash, for a point that is not on any board.
+        #expect(SquareAssignment.square(atBoardX: .nan, y: 0.5) == nil)
+        #expect(SquareAssignment.square(atBoardX: 0.5, y: .infinity) == nil)
+        #expect(SquareAssignment.square(atBoardX: -.infinity, y: 0.5) == nil)
+        #expect(SquareAssignment.square(atBoardX: 1e30, y: 1) == nil)
+        // Every square of the board, and the margin all round it, as before.
+        for file in 0..<8 {
+            for rank in 0..<8 {
+                #expect(SquareAssignment.square(atBoardX: Double(file) + 0.5, y: Double(rank) + 0.5)
+                    == FENBuilder.square(file: file + 1, rank: rank + 1))
+            }
+        }
+        #expect(SquareAssignment.square(atBoardX: -0.0, y: 0) == .a1)
+        #expect(SquareAssignment.square(atBoardX: 7.999, y: 7.999) == .h8)
     }
 }
 
