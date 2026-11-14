@@ -266,7 +266,8 @@ photos by itself.
   and samryan photos the difference to PIL and OpenCV is what the JPEG
   decoders differ by (0.07 and 0.02 levels on average, 7 at most). To do it
   again: `app_check --upright PHOTO OUT.png` writes what `app_check` reads.
-  Every chess-cv photo of the second held-out set has such a tag (840, orientation 6) and two of samryan's
+  Every chess-cv photo of the second held-out set has such a tag (840,
+  orientation 6) and two of samryan's
   500. **Until pull request #14 `app_check` loaded those through ImageIO's
   thumbnail call**, a decode of its own making, about a fifth of the bytes
   away from a full decode, while this file said no test set had such
@@ -520,7 +521,8 @@ king a side is worth"; today's are in "What the app reads now".)
   the same two columns were 75.5%; 2 and 85.4%; 31: captured pieces standing
   next to the board were read as pieces on the rim. The change is nearly all
   Y-LIChess, whose photos have such pieces: 70.1% -> 72.4% with the first
-  pair, 78.0% -> 84.8% and 0 -> 14 boards exact with `pieces_s_render1`. On the three development sets it changes next to
+  pair, 78.0% -> 84.8% and 0 -> 14 boards exact with `pieces_s_render1`.
+  On the three development sets it changes next to
   nothing (first pair: ChessReD test 279 of 306 and board B 84.58%
   as before, Fenit A 91.38% -> 91.43%), which is why half a square went
   unnoticed there.
