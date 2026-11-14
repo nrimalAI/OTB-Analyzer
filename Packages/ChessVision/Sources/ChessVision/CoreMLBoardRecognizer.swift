@@ -59,9 +59,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     pieces in the photo where they contradict the piece model for
     ///     more than a share of the pieces (`PieceSides`). Off unless asked
     ///     for: on the second held-out test set the rule as it is loses 12
-    ///     points of squares on one source with the retrained piece model
-    ///     it was made for, and gains nothing lasting with the piece model
-    ///     before that (`docs/RECOGNITION.md`, "What the colour step is
+    ///     points of squares on one source with `pieces_s_render1`, the
+    ///     piece model it was made for, and gains nothing lasting with the
+    ///     piece model before that (`docs/RECOGNITION.md`, "What the colour step is
     ///     worth"; not measured with the one in `Models/` now). It is kept
     ///     for the reference's next version of the rule.
     ///   - oneKing: exactly one king a side, from the scores the piece model
