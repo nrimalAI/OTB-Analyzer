@@ -73,8 +73,15 @@ divided by their sum, so that they add up to 1, and the observation's own
 confidence is the sum. A label's confidence times the observation's is the
 score as the model gave it (`CoreMLBoardRecognizer.classScores`). Nothing in
 Vision's documentation says so; `EndToEndFixtureTests.testPieceScoresAreTheModelsOwn`
-holds it against the model run without Vision on the same pixels, and finds
-the two equal to four decimals for every piece of the four fixtures. The
+holds it against the model run without Vision on the same pixels, for
+every class of every box: once on the four fixtures as the app reads them,
+and once on boxes the model is unsure of (the fixtures drawn at a quarter
+of the size, the model's threshold at 0.01), because a box with a single
+score says nothing about what the scores are divided by, and a piece model
+that reads the fixtures without a doubt has no other on them. The two agree
+to five decimals on every score (some hundred boxes, 70 to 80 of them split
+between two classes, with the pair in `Models/` and with
+`pieces_s_render3`). The
 reviewer of pull request #12 found the same on 479 photos of boards the
 models have not seen (5,853 boxes: labels add up to 1, the observation's
 confidence is the sum, also where the sum is over 1).
@@ -132,7 +139,9 @@ the Command Line Tools (the Mac mini) the script adds the search paths that
 let `swift test` find Swift Testing there; that is why the tests use Swift
 Testing and not XCTest, which the Command Line Tools do not have. CI runs the
 same script (`.github/workflows/swift-test.yml`) and fails if the models are
-missing or the end-to-end tests did not run.
+missing or the end-to-end tests did not run. To run the tests on a
+candidate pair without putting it in `Models/`:
+`CHESSVISION_TEST_MODELS=/folder/with/both/mlpackages ./Scripts/swift-test.sh`.
 
 `EndToEndFixtureTests` reads four ChessReD test photos with the models in
 `Models/`, three times: as the app does, with the grid fit switched off, and
