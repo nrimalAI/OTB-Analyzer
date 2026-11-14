@@ -16,6 +16,8 @@ Optional steps around it:
   - orient_by_pieces (--a1-from-pieces): which corner is a1, from where the
     pieces stand;
   - board_crop (--crop-board): the piece model looks at the board only.
+  - one_king_a_side (--one-king): exactly one king a side, from every kind
+    the model scored for each piece.
 
 The Swift port in ChessVision (Phase 2) must match this file's behavior;
 evaluate.py is the executable spec.
@@ -297,6 +299,60 @@ def sides_from_colour(detections, colours, chroma=CHROMA_WEIGHT,
     for k in idx:
         det = detections[k]
         out[k] = Detection(sides[k] + "_" + det.cls.split("_", 1)[1], det.confidence, det.bbox)
+    return out
+
+
+# --------------------------------------------------------------------------
+# One king a side
+
+KINDS = ("king", "queen", "rook", "bishop", "knight", "pawn")
+# A piece is made the king of a side that has none only if the model gave
+# "king" at least this score for it.
+KING_FLOOR = 0.02
+
+
+def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
+    """The detections with one king on each side, where the model's scores
+    allow it. Every position has exactly two kings, and a king read as a
+    queen (or a third "king") is what a piece model gets wrong on a set it
+    has not seen, from above most of all.
+
+    `kind_scores[k]` holds, for detection k, the model's score for each kind
+    it considered for that piece: {"king": 0.31, "queen": 0.48, ...}; a kind
+    it gave no score counts as 0. (In the app: the confidences of Vision's
+    labels for the box, the larger of the two colours for each kind.)
+
+    Nothing is done to a board that has exactly two kings, also when both
+    are on one side: that is a wrong side (a set whose "white" pieces the
+    model takes for black), not a wrong kind, and moving kings about then
+    makes it worse (Fenit board B). With fewer than two kings, a side that
+    has pieces and no king gets one: its piece with the highest "king" score,
+    if that is at least `floor`. With more than two, a side with several
+    kings keeps the one with the highest "king" score and each of the others
+    becomes its best-scoring other kind (a queen when it has no other score).
+    A piece keeps its side, confidence and box."""
+    out = list(detections)
+    total = sum(1 for d in out if d.cls.endswith("_king"))
+    if total == 2:
+        return out
+    for side in ("white", "black"):
+        idx = [k for k, d in enumerate(out) if d.cls.startswith(side + "_")]
+        if not idx:
+            continue
+        king_score = {k: float(kind_scores[k].get("king", 0.0)) for k in idx}
+        kings = [k for k in idx if out[k].cls == side + "_king"]
+        if total < 2 and not kings:
+            best = max(idx, key=lambda k: (king_score[k], -k))
+            if king_score[best] >= floor:
+                out[best] = Detection(side + "_king", out[best].confidence, out[best].bbox)
+        elif total > 2 and len(kings) > 1:
+            keep = max(kings, key=lambda k: (king_score[k], -k))
+            for k in kings:
+                if k == keep:
+                    continue
+                others = [(float(kind_scores[k].get(kind, 0.0)), -i, kind)
+                          for i, kind in enumerate(KINDS) if kind != "king"]
+                out[k] = Detection(side + "_" + max(others)[2], out[k].confidence, out[k].bbox)
     return out
 
 

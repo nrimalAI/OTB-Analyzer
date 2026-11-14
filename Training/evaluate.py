@@ -32,7 +32,7 @@ from pathlib import Path
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, board_crop, colour_patch, fen_placement_to_board, homography,
-    orient_by_pieces, sides_from_colour,
+    one_king_a_side, orient_by_pieces, sides_from_colour,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -151,16 +151,36 @@ def detect_corners(model, src, imgsz=640, two_pass=False, device=None):
     return [[p[0] + x1, p[1] + y1] for p in second]
 
 
+def box_iou(a, b):
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    inter = w * h
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+
+
+def kind_scores_of(detections, every_box, max_iou=0.7):
+    """For each detection, the model's score for every kind it considered for
+    that piece: the best confidence among all boxes (of either side, down to
+    a low confidence) that overlap the detection by more than max_iou. This
+    stands in for the class scores of one box, which ultralytics does not
+    hand out and Vision does."""
+    out = []
+    for det in detections:
+        scores = {}
+        for other in every_box:
+            if box_iou(det.bbox, other.bbox) > max_iou:
+                kind = other.cls.split("_", 1)[1]
+                scores[kind] = max(scores.get(kind, 0.0), other.confidence)
+        out.append(scores)
+    return out
+
+
 def one_per_spot(detections, max_iou):
     """Detections without the ones that overlap a more confident detection
     (of any class) by more than max_iou."""
-    def iou(a, b):
-        w = min(a[2], b[2]) - max(a[0], b[0])
-        h = min(a[3], b[3]) - max(a[1], b[1])
-        if w <= 0 or h <= 0:
-            return 0.0
-        inter = w * h
-        return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    iou = box_iou
     kept = []
     for det in sorted(detections, key=lambda d: -d.confidence):
         if all(iou(det.bbox, k.bbox) <= max_iou for k in kept):
@@ -323,6 +343,9 @@ def main():
                     help="drop a detected box that overlaps a more confident one of "
                          "any class by more than IOU (the piece model's own NMS is "
                          "per class, so one piece can come back as two classes)")
+    ap.add_argument("--one-king", action="store_true",
+                    help="exactly one king a side, from every kind the model scored "
+                         "for each piece (chess_pipeline.one_king_a_side)")
     ap.add_argument("--crop-board", action="store_true",
                     help="give the piece model only the part of the photo round the "
                          "board (chess_pipeline.board_crop), for a piece model trained "
@@ -405,7 +428,7 @@ def main():
 
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
-    exact_or_flipped = grid_rejected = grid_alone = sides_changed = 0
+    exact_or_flipped = grid_rejected = grid_alone = sides_changed = kings_changed = 0
     confusion = Counter()
 
     for src, gt, gt_kpts, gt_boxes in items:
@@ -470,7 +493,9 @@ def main():
                 if rect is not None:
                     piece_input = whole[rect[1]:rect[3], rect[0]:rect[2]]
                     dx, dy = rect[0] * sx, rect[1] * sy
-            pr = piece_model(piece_input, conf=args.conf,
+            # For --one-king every box down to a low confidence is wanted: the
+            # ones below --conf only say what else each piece might be.
+            pr = piece_model(piece_input, conf=min(args.conf, 0.02) if args.one_king else args.conf,
                              verbose=False, device=args.device)[0]
             if pr.boxes is not None:
                 for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
@@ -480,12 +505,18 @@ def main():
                                                 (x1 * sx + dx, y1 * sy + dy,
                                                  x2 * sx + dx, y2 * sy + dy)))
 
+        every_box = detections
+        detections = [d for d in detections if d.confidence >= args.conf or args.gt_boxes]
         if args.one_piece_per_spot is not None and not args.gt_boxes:
             detections = one_per_spot(detections, args.one_piece_per_spot)
         if args.sides_from_colour and not args.gt_boxes:
             before = [d.cls for d in detections]
             detections = sides_from_colour(detections, piece_colours(src, detections))
             sides_changed += any(d.cls != c for d, c in zip(detections, before))
+        if args.one_king and not args.gt_boxes:
+            before = [d.cls for d in detections]
+            detections = one_king_a_side(detections, kind_scores_of(detections, every_box))
+            kings_changed += any(d.cls != c for d, c in zip(detections, before))
         if not model_found:
             # No model opinion on a1 to weigh against the pieces.
             H = homography(orient_by_pieces(kpts, detections, args.pull, prior=0.0))
@@ -549,6 +580,8 @@ def main():
         print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
     if args.sides_from_colour:
         print(f"sides taken from the pieces' colours on: {sides_changed} boards")
+    if args.one_king:
+        print(f"a king made or unmade on: {kings_changed} boards")
     print(f"180-degree flip suspects: {flip_suspects}")
     print("\ntop confusions (truth -> predicted):")
     for (want, got), n in confusion.most_common(15):
