@@ -11,7 +11,7 @@ which file is in `Models/` now is in the table at the end.
 | `pieces_yolo11n_chessred2k.pt` | YOLO11n detect, 640 px, 12 classes | ChessReD2K train |
 | `pieces_yolo11s_render3.pt` | YOLO11s detect, 640 px, 12 classes (run `pieces_s_render3`; the saved settings carry no local paths) | ChessReD2K, chesscog, Fenit board A, Roboflow projects, 12,000 renders |
 
-ChessReD test split with these two: 97.92% per-square, 73.5% boards exact
+ChessReD test split with the first two (the baseline pair): 97.92% per-square, 73.5% boards exact
 (225 of 306; an earlier run of the same files gave 224).
 
 Score them on other data to get the number a new model has to beat, e.g. the
@@ -43,8 +43,9 @@ results in `Models/`. The first row's piece model needs
 The second row never reached `main`: exp3's corners turn three endgame photos
 of ChessReD game G033 by 180 degrees (one is the package's fixture
 `test_004005.jpg`), which `main`'s corner model gets right, so the tests fail
-with it once the corners are precise (grid fit). The third row is what is in
-`Models/` until a corner model passes that fixture. With the app's defaults
+with it once the corners are precise (grid fit). The third row's corner
+model stays in `Models/` until a corner model passes that fixture; the
+fourth row is what is in `Models/` now. With the app's defaults
 as they are since pull request #12 (grid fit, a1 prior 6, one king a side;
 each photo decoded once) it reads 280 of 306 ChessReD test boards exactly and
 84.67% of board B's squares, board not found in 4 of 100. exp3's weights are

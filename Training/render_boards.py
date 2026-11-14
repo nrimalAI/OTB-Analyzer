@@ -16,7 +16,8 @@ Every image gets:
   pieces/labels/<stem>.txt   one box per piece, class ids of chess_pipeline.PIECE_CLASSES
   corners/labels/<stem>.txt  the playing area's corners (a1, a8, h8, h1), when
                              all four are inside the picture
-  positions.jsonl            stem, FEN placement, camera, for scoring and debugging
+  positions.jsonl            stem, FEN placement, camera, and (since 2026-11-14) the
+                             --palette and --from-above it was made with
                              (a render cut off and done again leaves two rows
                              for its stem: the later one counts)
 in the `native` layout build_dataset.py merges (source `render` in
@@ -354,6 +355,8 @@ SHADES = [(0.95, 0.95, 0.93), (0.92, 0.88, 0.76), (0.88, 0.80, 0.60), (0.85, 0.7
           (0.40, 0.22, 0.10), (0.30, 0.16, 0.08), (0.32, 0.12, 0.07), (0.16, 0.08, 0.04),
           (0.10, 0.05, 0.03), (0.35, 0.35, 0.36), (0.12, 0.12, 0.13), (0.05, 0.03, 0.02),
           (0.03, 0.03, 0.035), (0.015, 0.015, 0.015), (0.015, 0.015, 0.015)]
+# (The last shade is there twice by a slip. It stays: taking it out would
+# change what --seed 3 and --seed 4, the batches made with this list, give.)
 WHITE_SIDE = [(0.92, 0.88, 0.76), (0.95, 0.95, 0.93), (0.85, 0.70, 0.45), (0.70, 0.48, 0.26),
               (0.55, 0.32, 0.16), (0.80, 0.60, 0.40), (0.88, 0.80, 0.60), (0.62, 0.30, 0.18)]
 BLACK_SIDE = [(0.015, 0.015, 0.015), (0.03, 0.03, 0.035), (0.10, 0.05, 0.03), (0.16, 0.08, 0.04),
@@ -644,8 +647,11 @@ def main():
                     help="how the two sides' colours are chosen: relative (two shades of one "
                          "list, the lighter is White) or split (the first renders' two lists)")
     ap.add_argument("--from-above", type=float, default=0.3,
-                    help="share of pictures taken from 70 degrees up to straight above")
+                    help="share of pictures taken from 70 degrees up to straight above, "
+                         "0 to 0.8 (a fifth are always low side views)")
     args = ap.parse_args(argv)
+    if not 0 <= args.from_above <= 0.8:
+        ap.error("--from-above must be between 0 and 0.8")
     global PALETTE, HIGH_FROM
     PALETTE, HIGH_FROM = args.palette, 1.0 - args.from_above
 
@@ -698,7 +704,8 @@ def main():
                 link.symlink_to(image_path)
         with open(out / "positions.jsonl", "a") as f:
             f.write(json.dumps(dict(stem=stem, placement=placement, corners=corners,
-                                    corners_inside=inside, size=size, **view)) + "\n")
+                                    corners_inside=inside, size=size, palette=PALETTE,
+                                    from_above=args.from_above, **view)) + "\n")
         # Last, because this file is what marks an image as done (see the skip above).
         (out / "pieces" / "labels" / f"{stem}.txt").write_text(
             "".join(f"{c} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for c, x, y, w, h in boxes))

@@ -330,10 +330,12 @@ It is the first model that meets the rule for replacing one as `CLAUDE.md`
 words it: better than the pair it replaces on the held-out board B by more
 than the noise, and not worse on ChessReD test. Through `app_check` with the
 app's defaults (grid fit, a1 prior 6, one king a side, rim tolerance 0.25,
-each photo decoded once), one binary for all four columns
-(`runs/app_check/final/`, `final_h2/`; for the first two columns on the
-second test set the app-side session's `runs/app_check/exif_full_decode/`
-and `one_king/`). Squares right; boards exact:
+each photo decoded once), one build of `app_check` for the pair it
+replaces, render2 and render3 (`runs/app_check/final/`, `final_h2/`). The
+render1 column on the second test set is from the build before
+(`runs/app_check/exif_full_decode/`, `one_king/`), whose sources differ in
+nothing that changes a score: the pair it replaces gives the same figures
+with both (76.08% and 3, part by part). Squares right; boards exact:
 
 | | Pair it replaces | `pieces_s_render1` | `pieces_s_render2` | `pieces_s_render3` |
 |---|---|---|---|---|
@@ -353,23 +355,55 @@ the same photos have a board):
 - **Board B:** more squares right on 62 photos, fewer on 23 (sign test
   p = 0.00003); 3.9 points of squares more (95% bootstrap interval 2.1 to
   5.8); 6 boards gained, 1 lost. The count of exact boards alone, 6 against
-  1 of 100, is not beyond noise (p = 0.12); the squares are.
+  1 of 100, is not beyond noise (p = 0.125); the squares are. So "beyond
+  the noise" rests on the paired test of squares, not on the interval
+  `evaluate.py` prints for exact boards: with labelled corners that is 8 of
+  98 (4%-15%) against 1 of 98 (0%-6%) for the model it replaces (94.7%
+  against 90.2% of squares; `scores/pieces_baseline.txt`), and the two
+  intervals overlap.
 - **ChessReD test:** 10 boards gained, 2 lost (p = 0.04); more squares right
   on 17 photos, fewer on 2. Not worse; better.
+- **Second test set** (a test, nothing chosen on it): 12.4 points of squares
+  more (interval 11.9 to 13.0), 296 boards gained, 1 lost.
 - Against render2: board B more squares right on 63 photos, fewer on 5;
   ChessReD test 2 boards gained, 7 lost (p = 0.18, within noise).
 
-The second test set was not used to choose it (render3 was taken on board B
-and ChessReD test alone); there about 18% of boards are fully right, and 6%
-on board B, where the target is 85%. What is still wrong on board B: the
+**Board B is no longer a blind test.** The renders that taught this model
+the side of a piece were designed from what went wrong on board B, the run
+was scored on it twice while it trained, and render1, render2, crop1 and
+render3 were all compared on it; the paired test also treats 100 photos of
+one board as independent. What stands against a result fitted to board B:
+the gain there (3.9 points) is several times the swing from one epoch to
+the next (about 1 point), and the second test set, which nothing was chosen
+on, agrees: against render2 with the same build, 0.5 points of squares more
+(interval 0.4 to 0.6), 171 boards gained and 69 lost.
+
+On the second test set about 18% of boards are fully right, and 6% on
+board B, where the target is 85%. What is still wrong on board B: the
 side of its brown "white" pieces (P read as p 132 times of 868 with labelled
-corners), kings read as queens, and the corners (88.6% of squares through
+corners), kings read as queens, and the corners (88.5% of squares through
 the app against 94.7% with labelled corners). `pieces_s_render4` (20,000
 renders) and `corners_s_canon1` are the next attempts at each.
 
 Trained on ChessReD2K (CC BY-NC-SA 4.0), chesscog, Fenit board A, the
 Roboflow projects in `sources.yaml` and 12,000 renders of `render_boards.py`:
 because of ChessReD it is for personal builds only.
+
+**It is surer of itself when it is wrong.** The app marks a piece whose
+confidence is under 0.85 for the user to check, a threshold set with the
+model before. Wrong pieces that get the mark, model before against render3
+(`runs/app_check/final/`): board B 77% (412 of 538) against 54% (189 of
+351), so 126 wrong pieces went unmarked before and 162 do now; ChessReD
+test 53% against 38% (30 and 25 unmarked); Fenit A 63% against 22% (382 and
+342 unmarked). Right pieces marked fall too: board B 40% against 22%. The
+threshold is the owner's to set (`App/Sources/AppModel.swift`);
+`app_check --flag-below` shows what other values would mark.
+
+Two things about how it was trained, for the next run. Mosaic was off for
+the whole run: `train.py` leaves ultralytics' `close_mosaic` at 10 epochs
+and the run had 10 (render2, with 12, had it for two). And about 2% of the
+relative-palette renders have a "White" side darker than L* 40 against a
+near-black one, before exposure: two dark sides, a little label noise.
 
 **The earlier candidate `pieces_s_render2`** (exports in
 `runs/export_render2/`, weights `runs/detect/pieces_s_render2/weights/last.pt`)
@@ -498,11 +532,18 @@ was in `Models/`, and why it was taken out again.
   `--canonical-corners` run on the labels as they are on disk.
 - `render_boards.py` (runs in Blender 5.x, `brew install --cask blender`):
   rendered positions with exact boxes, corners and position, a new piece set,
-  board, floor, light and camera per image. `datasets/render` holds 4,000
-  (`--seed 1`); source `render` in `sources.yaml`; merged into
-  `datasets/merged_render` (pieces) and `datasets/merged_rf_render` (corners).
-  In those 4,000 the sides of thick boards carry a warped copy of the board
-  pattern (fixed in the script since; the labels are right).
+  board, floor, light and camera per image. `datasets/render` holds 20,000:
+  `--seed 1` and `--seed 2` (4,000 each) with `--palette split`, the first
+  renders' two lists of side colours, and `--seed 3` (4,000) and `--seed 4`
+  (8,000) with `--palette relative --from-above 0.4`, where the two sides
+  are two shades of one list and the lighter is White. `relative` is the
+  default now, so give `--palette split` to add to seeds 1 and 2; from
+  2026-11-14 each line of `positions.jsonl` says which it was. Source
+  `render` in `sources.yaml`; merged into `datasets/merged_render` (seed 1,
+  pieces), `merged_rf_render` (corners), `merged_all` (seeds 1-2),
+  `merged_all3` (1-3), `merged_all4` (1-4). In the first 4,000 the sides of
+  thick boards carry a warped copy of the board pattern (fixed in the script
+  since; the labels are right).
 - `score.sh pieces|corners <label> <weights>`: the standard scores on the CPU,
   into `runs/scores/`.
 - `evaluate.py --device cpu`, `--dump-list` (the photo lists `app_check` takes),
@@ -581,10 +622,13 @@ was in `Models/`, and why it was taken out again.
     `one_king_a_side`, in the repo and on by default in the app since pull
     request #12 (numbers in the second test set's section).
   - The piece model looking at the board only (`board_crop`, `crop_boards.py`,
-    `--crop-board`): `pieces_s_crop1` is queued. A model not trained on
-    crops gains nothing from them (16 of 98 on board B with the colour step
-    on, against 17 without the crop).
-  - More renders and all real sources: `pieces_s_render2`, running.
+    `--crop-board`): `pieces_s_crop1`, a small gain on board B and none on
+    ChessReD test (the runs table). A model not trained on crops gains
+    nothing from them (16 of 98 on board B with the colour step on, against
+    17 without the crop).
+  - More renders and all real sources: `pieces_s_render2` (ChessReD test
+    better, board B not), then `pieces_s_render3` with renders whose side
+    colours are relative: the model in `Models/`.
 - **The piece model is what stops board B.** With the labelled corners, one
   board B photo of 98 is read fully right by any of the three. Square by
   square (`pieces_s_norf`, copies): which squares are occupied 98.4% (all
