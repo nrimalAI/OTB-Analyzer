@@ -237,10 +237,27 @@ photos by itself.
   the copy. Two limits. Whether an image is a bitmap already is read off its
   file type (`CGImage.utType`, nil for a bitmap made in memory): checked on
   macOS, not yet on iOS, where it decides only the app's rare path of an
-  upright photo of 3072 px or less. And `app_check` loads a photo that has
-  an EXIF orientation tag through ImageIO's thumbnail call, which is a
-  bitmap of its own making, about a fifth of the bytes away from a full
-  decode; no current test set has such photos.
+  upright photo of 3072 px or less. And a photo with an EXIF orientation
+  tag: `app_check` decodes it once in full and moves the pixels to where
+  the tag says, none of them changed. Checked by the reviewer of pull
+  request #14 for every tag from 1 to 8: a PNG comes out byte for byte as
+  PIL's `exif_transpose` and `cv2.imread` give it, and JPEGs (also grey,
+  CMYK, with a Display P3 profile) and PNGs with alpha, a palette or 16
+  bits come out as the plain full decode with its pixels moved; on chess-cv
+  and samryan photos the difference to PIL and OpenCV is what the JPEG
+  decoders differ by (0.07 and 0.02 levels on average, 7 at most). To do it
+  again: `app_check --upright PHOTO OUT.png` writes what `app_check` reads. Every chess-cv photo of the second
+  held-out set has such a tag (840, orientation 6) and two of samryan's
+  500. **Until pull request #14 `app_check` loaded those through ImageIO's
+  thumbnail call**, a decode of its own making, about a fifth of the bytes
+  away from a full decode, while this file said no test set had such
+  photos. Comparisons of one model or setting with another were not
+  affected (both read the same pixels); the chess-cv figures were a little
+  off. Measured on today's defaults, thumbnail -> full decode: the pair in
+  `Models/` 80.62% -> 80.65% of chess-cv's squares, `pieces_s_render1`
+  89.62% -> 89.72% and 16 -> 21 boards exact, one more photo without a
+  board (13, not 12); samryan to the square as before. The tables below
+  say which of their chess-cv figures are from which path.
 - For any list of photos, Python against Swift:
   `swift_reference.py grid --list L.json --out py.json`,
   `app_check --list L.json --grid sw.json`,
@@ -351,6 +368,16 @@ in which no board was found.
 | chess-cv games (840) | 53.5%; 0; 32 | 80.6%; 0; 12 | 89.3%; 9; 12 |
 | **all (1,619)** | **46.2%; 0; 340** | **75.9%; 3; 44** | **86.3%; 45; 44** |
 
+(This table and the points under it are from before pull requests #12 and
+#14: Vision's share as a piece's confidence, no rule for the kings, and
+chess-cv's photos, which carry an EXIF orientation, read through ImageIO's
+thumbnail call and not from one full decode, whatever the line above the
+table says of each photo. The chess-cv row and the totals are therefore a
+little off: by a tenth of a point of squares, a few boards exact and one
+photo without a board (44 is 45 from the full decode), going by what the
+change of path does to today's defaults. The current figures are in "What
+one king a side is worth".)
+
 - The two app-side steps take the pair in `Models/` from 46% to 76% of
   squares on boards nobody has seen, and from no board in 340 photos to 44.
 - `pieces_s_render1` (the training session's piece model trained with
@@ -390,8 +417,18 @@ against the default. Squares right; boards exact.
 | ChessQ (50) | 64.56%; 1 -> 64.62%; 1 | 69.78%; 6 -> 69.81%; 6 |
 | chesscog (29) | 73.49%; 0 -> 73.71%; 0 | 93.21%; 0 -> 93.59%; 0 |
 | samryan (500) | 70.95%; 0 -> 71.12%; 0 | 83.23%; 16 -> 83.32%; 18 |
-| chess-cv games (840) | 80.55%; 0 -> 80.62%; 0 | 89.31%; 9 -> 89.62%; 16 |
-| **all (1,619)** | **75.98%; 3 -> 76.06%; 3** | **86.34%; 45 -> 86.57%; 63** |
+| chess-cv games (840) | 80.60%; 0 -> 80.65%; 0 | 89.43%; 13 -> 89.72%; 21 |
+| **all (1,619)** | **76.00%; 3 -> 76.08%; 3** | **86.40%; 49 -> 86.62%; 68** |
+
+(chess-cv and samryan as re-scored for pull request #14, their photos with
+an EXIF orientation turned from one full decode. Through the thumbnail
+call, as first measured, chess-cv was 80.55%; 0 -> 80.62%; 0 and 89.31%; 9
+-> 89.62%; 16, and the totals 75.98%; 3 -> 76.07%; 3 and 86.34%; 45 ->
+86.56%; 63 (given at first as 76.06% and 86.57%, from the rounded parts;
+the totals here are from the squares counted). No board is found in 45
+photos in every column; through the thumbnail call it was 44. The outputs
+for every photo are kept outside the repository, on the Mac mini, in
+`Training/runs/app_check/one_king/` and `exif_full_decode/`.)
 
 - **On by default.** The three development sets say so: no set loses in
   total with either piece model, and the pair in `Models/` gains on all
@@ -401,8 +438,8 @@ against the default. Squares right; boards exact.
   (no photo of ChessReD test changes, board B gains seven squares and loses
   six, Fenit A's 185 boards exact are two gained and two lost). The second held-out set was
   not used to choose; it agrees, by 0.1 points of squares with the pair in
-  `Models/` and 0.2 with `pieces_s_render1`, where 18 more boards come out
-  fully right (45 to 63 of 1,619).
+  `Models/` and 0.2 with `pieces_s_render1`, where 19 more boards come out
+  fully right (49 to 68 of 1,619).
 - Single photos do lose: with the pair in `Models/` ten Fenit A photos lose
   11 squares between them while fifty gain 56.
 - **Positions without two kings lose.** The rule takes every position to
@@ -441,6 +478,10 @@ stays. Squares right; boards exact, without the rule for the kings:
 | Fenit board B | 84.58%; 0 -> 84.58%; 0 | 84.28%; 1 -> 84.31%; 1 |
 | Fenit A | 91.43%; 16 -> 91.44%; 16 | 95.34%; 185 -> 95.35%; 185 |
 | second held-out set | 75.94%; 3 -> 75.98%; 3 | 86.33%; 45 -> 86.34%; 45 |
+
+(Second held-out set, here and in the next table: chess-cv through the
+thumbnail call, both halves alike; see "How the Swift is checked against
+the Python".)
 
 What it changes is what the user is shown. The app marks a piece whose
 confidence is under 0.85 for the user to check
@@ -487,16 +528,17 @@ their marks came from a build with a temporary switch back to the share.)
 | ChessReD test | 27% / 0.1% / 0.08 | 44% / 0.3% / 0.15 | 53% / 1.1% / 0.33 |
 | Fenit board B | 25% / 8.2% / 2.2 | 53% / 19% / 4.7 | 77% / 40% / 8.1 |
 | Fenit A | 18% / 5.6% / 1.2 | 40% / 12% / 2.6 | 63% / 24% / 4.5 |
-| second held-out set | 32% / 9.8% / 3.6 | 55% / 23% / 6.9 | 78% / 47% / 11.2 |
+| second held-out set | 33% / 10% / 3.7 | 56% / 24% / 7.0 | 79% / 48% / 11.3 |
 | *`pieces_s_render1`:* | | | |
 | ChessReD test | 15% / 0.05% / 0.03 | 30% / 0.3% / 0.10 | 39% / 1.1% / 0.27 |
 | Fenit board B | 15% / 2.2% / 1.1 | 32% / 10% / 2.9 | 62% / 28% / 6.4 |
 | Fenit A | 4.0% / 0.1% / 0.07 | 10% / 1.2% / 0.29 | 23% / 12% / 1.7 |
-| second held-out set | 9.7% / 1.9% / 0.70 | 25% / 4.9% / 1.8 | 46% / 12% / 3.8 |
+| second held-out set | 9.8% / 1.9% / 0.70 | 25% / 4.9% / 1.8 | 46% / 12% / 3.8 |
 
   With the share at 0.85 the same sets had 0.03, 1.9, 1.1 and 1.8 squares
   marked a photo with the pair in `Models/`, and 0.03, 1.3, 0.08 and 1.3
-  with `pieces_s_render1`. No threshold marks most of the wrong pieces and
+  with `pieces_s_render1` (the last of each for the second held-out set
+  with chess-cv through the thumbnail call). No threshold marks most of the wrong pieces and
   few of the right ones: on a board the model has not seen, its scores for
   right and wrong pieces overlap. Nothing of this was tried in the app on a
   phone.
@@ -543,11 +585,15 @@ rendered boards, exported for this measurement only, with the corner model in
   Through `app_check`, squares right without ->
   with the step: with `pieces_s_render1`, the model the step was made for,
   the app shows the same loss, 78.0% -> 65.5% on the 200 Y-LIChess photos,
-  ChessQ 69.7% -> 68.5%, chesscog 92.7% -> 92.7%. With the model in
-  `Models/` it gains squares there (Y-LIChess 70.1% -> 71.8%, ChessQ 64.6%
-  -> 64.8%, chesscog unchanged) and loses that model's one exact board. So
-  it is off because it fails with the piece model that is to replace the
-  one in `Models/`, and is worth little with the one that is there.
+  ChessQ 69.7% -> 68.5%, samryan 82.9% -> 79.0%, chesscog and chess-cv
+  unchanged. With the model in `Models/` it gains on three parts and loses
+  on one (Y-LIChess 70.1% -> 71.8%, ChessQ 64.6% -> 64.8%, chess-cv 80.5%
+  -> 81.0%, chesscog unchanged, samryan 70.4% -> 68.8%), which comes to
+  nothing over the whole set (75.5% both ways), and it loses one of that
+  model's two exact boards. (All of these from before pull request #14:
+  chess-cv through the thumbnail call.) So it is off because it fails with the piece
+  model that is to replace the one in `Models/`, and is worth nothing with
+  the one that is there.
 - The rule has no smallest distance between the two groups, and with six
   pieces or fewer one disagreement is already over 15%. The Fenit A photos
   it acts on are such positions (2 to 9 pieces found): on one, two black
