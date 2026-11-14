@@ -212,8 +212,7 @@ enum PieceSides {
         }
         let found = patches.compactMap { $0 }
         guard !found.isEmpty else { return patches.map { _ in nil } }
-        // One read of the rectangle that holds every patch: a photo is
-        // decoded once for it, not once a piece.
+        // One read of the rectangle that holds every patch, not one a piece.
         let x0 = found.map(\.x0).min()!, y0 = found.map(\.y0).min()!
         let x1 = found.map(\.x1).max()!, y1 = found.map(\.y1).max()!
         let width = x1 - x0

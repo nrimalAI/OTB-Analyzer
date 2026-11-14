@@ -49,7 +49,9 @@ struct DecodedImageTests {
 
     /// What the copy is for: a part of it read by itself is that part of the
     /// whole, and it stays what it was after the photo has been drawn scaled.
-    /// (Neither holds for a JPEG that is not decoded yet.)
+    /// (A part of a JPEG that is not decoded yet, read by itself, is not that
+    /// part of the whole. That is ImageIO's doing and may change with the OS,
+    /// so it is not tested here.)
     @Test func testEveryReadOfTheCopyIsTheSamePixels() throws {
         let copy = DecodedImage.once(try Self.fromFile("test_000102.jpg"))
         let whole = try Self.bytes(copy)
@@ -71,8 +73,9 @@ struct DecodedImageTests {
         #expect(try part(of: copy) == expected)
     }
 
-    /// The grid fit, the colours and the recognizer take the copy themselves:
-    /// handed the file's image or the copy, they give the same answer.
+    /// The grid fit and the colours take the copy themselves: handed the
+    /// file's image or the copy, they give the same answer. (The recognizer:
+    /// `EndToEndFixtureTests.testRecognizerDecodesThePhotoItself`.)
     @Test func testTheStagesDecodeForThemselves() throws {
         let image = try Self.fromFile("test_000102.jpg")
         let copy = DecodedImage.once(image)

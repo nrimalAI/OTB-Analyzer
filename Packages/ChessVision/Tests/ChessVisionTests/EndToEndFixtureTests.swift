@@ -94,13 +94,47 @@ import Testing
     /// would go unnoticed here, because the fit reads these photos by itself
     /// (and the pieces alone happen to put a1 right on them). This is the
     /// test that a corner model has to pass on its own corners and its own a1.
-    /// (The corner model in `Models/` reads `test_000000.jpg` at 58 of 64 this
-    /// way, on the floor: two pieces of the back rank land a square off with
-    /// its corners. It was 60 before each photo was decoded once, when Vision
-    /// was handed the undecoded JPEG; a new corner model should clear it.)
+    ///
+    /// What it asks: each of the model's corners within one square of the
+    /// grid fit's (the corners themselves, a number that moves smoothly), and
+    /// 94% of the squares of the four photos together (one photo turned by
+    /// 180 degrees fails that). Not 58 squares a photo, as for the app's
+    /// pipeline: with corners up to 0.74 squares off, as the model in
+    /// `Models/` has them on `test_000000.jpg`, the pieces of the far rank
+    /// stand on the lines between squares, and each one that slips costs two
+    /// squares. That photo reads 58 of 64 on the Mac mini's Neural Engine and
+    /// 60 on its CPU and on the CI runner, from the same pixels: a count on a
+    /// coin toss, not a measure of the corners.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testCornerModelAloneReadsTheFixtures() async throws {
-        try await expectFixturesRead(by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone")
+        try await expectFixturesRead(
+            by: try makeRecognizer(gridFit: false), label: "fixture, corner model alone",
+            perPhotoFloor: nil, cornersWithinSquaresOfTheFit: 1.0)
+    }
+
+    /// The recognizer decodes a photo that comes straight from a file once
+    /// (`DecodedImage`): handed the file's image or the decoded copy, it gives
+    /// the same corners and the same board. With the grid fit off and a
+    /// square photo this is the case where Vision would otherwise get the
+    /// undecoded image itself.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testRecognizerDecodesThePhotoItself() async throws {
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let source = try #require(
+            CGImageSourceCreateWithURL(fixtures.appending(path: "test_000000.jpg") as CFURL, nil))
+        let fromFile = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(fromFile.width == fromFile.height)
+        let copy = DecodedImage.once(fromFile)
+        #expect(copy !== fromFile)
+        for gridFit in [false, true] {
+            let recognizer = try makeRecognizer(gridFit: gridFit)
+            let a = try await recognizer.recognize(fromFile)
+            let b = try await recognizer.recognize(copy)
+            #expect(a.corners == b.corners, "grid fit \(gridFit)")
+            #expect(a.pieces == b.pieces, "grid fit \(gridFit)")
+            #expect(try recognizer.diagnosePieceSides(fromFile).map(\.colour)
+                == recognizer.diagnosePieceSides(copy).map(\.colour), "grid fit \(gridFit)")
+        }
     }
 
     /// The colour step is off in the app. Switched on, it must leave boards
@@ -140,7 +174,15 @@ import Testing
         }
     }
 
-    private func expectFixturesRead(by recognizer: CoreMLBoardRecognizer, label: String) async throws {
+    /// - Parameters:
+    ///   - perPhotoFloor: squares that must be right on each photo; nil for
+    ///     no floor a photo.
+    ///   - cornersWithinSquaresOfTheFit: if given, each corner the recognizer
+    ///     returns must lie within so many squares of the grid fit's corner.
+    private func expectFixturesRead(
+        by recognizer: CoreMLBoardRecognizer, label: String,
+        perPhotoFloor: Int? = 58, cornersWithinSquaresOfTheFit: Double? = nil
+    ) async throws {
 
         let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
@@ -190,7 +232,25 @@ import Testing
             // with a corner model that knows a1 here (main's), 52/64, the
             // board turned by 180 degrees, with one that does not (exp3,
             // exp4). See docs/RECOGNITION.md.
-            #expect(correct >= 58, "\(file) regressed: \(correct)/64")
+            if let perPhotoFloor {
+                #expect(correct >= perPhotoFloor, "\(file) regressed: \(correct)/64")
+            }
+
+            if let bound = cornersWithinSquaresOfTheFit {
+                let fit = try #require(GridCorners.find(in: image), "\(file): the grid fit finds no board")
+                let fitted = GridCorners.turned(fit.corners, nearestTo: result.corners)
+                // The side of a square, from the fitted board's four edges.
+                var edges = 0.0
+                for k in 0..<4 {
+                    let p = fitted[k], q = fitted[(k + 1) % 4]
+                    edges += Double(hypot(p.x - q.x, p.y - q.y))
+                }
+                let square = edges / 32
+                let off = zip(result.corners, fitted)
+                    .map { Double(hypot($0.x - $1.x, $0.y - $1.y)) / square }.max() ?? .infinity
+                print(String(format: "%@ %@: corners up to %.2f squares from the grid fit's", label, file, off))
+                #expect(off < bound, "\(file): a corner is \(off) squares from the grid fit's")
+            }
         }
 
         // Aggregate floor mirrors the Python eval (~98% per-square on test).

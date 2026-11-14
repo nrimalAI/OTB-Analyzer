@@ -79,7 +79,11 @@ missing or the end-to-end tests did not run.
 `EndToEndFixtureTests` reads four ChessReD test photos with the models in
 `Models/`, three times: as the app does, with the grid fit switched off, and
 with the colour step switched on. The second run is the corner model's own
-test. With the fit on, a corner model
+test: each of its corners within one square of the grid fit's, and 94% of
+the squares of the four photos together. It has no floor of squares a photo,
+because with corners most of a square off the count hangs on single pieces
+standing on a line (58 or 60 of 64 on one fixture, from the same pixels,
+depending on whether CoreML runs on the Neural Engine or the CPU). With the fit on, a corner model
 that found no board at all would go unnoticed, because the fit reads these
 photos by itself.
 
@@ -149,16 +153,24 @@ photos by itself.
   colours) in 10-20% (up to 13), and a whole read made after a scaled draw
   in up to 28% (up to 42), that last one differently from run to run
   (measured by the reviewer of pull request #9 on Y-LIChess and fixture
-  photos). The run-to-run part made scores unrepeatable: two of 200
+  photos; the reviewer of #10 found the cropped reads again, 7-9% of bytes,
+  and the run-to-run part not, in a probe without the models). The
+  run-to-run part made scores unrepeatable when it was found: two of 200
   Y-LIChess photos went from "no board" to a board and back between
-  identical runs. The grid fit itself gives the same answer for the same
+  identical runs of `app_check`. The grid fit itself gives the same answer for the same
   pixels every time. With the copy every stage reads the pixels of one full
   decode, the nearest to what `cv2.imread` gives the Python, in the app, in
   the package's tests and in `app_check` alike. A photo that is a bitmap
   already is not copied: that is what the app passes for every photo it
   redraws upright (`normalizedUprightCGImage`: anything turned or larger
   than 3072 px, so nearly every camera photo). `DecodedImageTests` checks
-  the copy.
+  the copy. Two limits. Whether an image is a bitmap already is read off its
+  file type (`CGImage.utType`, nil for a bitmap made in memory): checked on
+  macOS, not yet on iOS, where it decides only the app's rare path of an
+  upright photo of 3072 px or less. And `app_check` loads a photo that has
+  an EXIF orientation tag through ImageIO's thumbnail call, which is a
+  bitmap of its own making, about a fifth of the bytes away from a full
+  decode; no current test set has such photos.
 - For any list of photos, Python against Swift:
   `swift_reference.py grid --list L.json --out py.json`,
   `app_check --list L.json --grid sw.json`,
@@ -245,6 +257,34 @@ What this says:
   exp3's corners, priors 0 / 3 / 6 give 280 / 282 / 282
   boards on ChessReD, 86.4 / 86.4 / 86.3% of squares on board B and 92.7 /
   93.1 / 93.5% on Fenit A, so 6 stays.
+
+## The second held-out set through the app
+
+`Training/datasets/heldout2`: 1,619 photos of 19 boards that nothing was
+trained or tuned on (`Training/README.md`, "Second held-out test set"). Test
+only: no step, weight or default here was chosen on it. Through `app_check`,
+2026-11-13, each photo decoded once; squares right, boards exact, and photos
+in which no board was found.
+
+| Source (photos) | Pair in `Models/`, steps off | Pair in `Models/`, both steps | `pieces_s_render1`, both steps |
+|---|---|---|---|
+| Y-LIChess (200) | 0%; 0; no board in 200 | 70.1%; 1; 6 | 78.0%; 0; 6 |
+| ChessQ (50) | 28.3%; 0; 26 | 64.6%; 1; 10 | 69.7%; 6; 10 |
+| chesscog (29) | 32.9%; 0; 10 | 73.3%; 0; 0 | 92.7%; 0; 0 |
+| samryan (500) | 54.8%; 0; 72 | 70.4%; 0; 16 | 82.9%; 16; 16 |
+| chess-cv games (840) | 53.5%; 0; 32 | 80.5%; 0; 12 | 89.3%; 9; 12 |
+| **all (1,619)** | **46.2%; 0; 340** | **75.5%; 2; 44** | **85.4%; 31; 44** |
+
+- The two app-side steps take the pair in `Models/` from 46% to 75% of
+  squares on boards nobody has seen, and from no board in 340 photos to 44.
+- `pieces_s_render1` (the training session's piece model trained with
+  rendered boards, not in `Models/`; same corner model) reads ten points more
+  squares on every source and 31 boards fully instead of 2. That is still
+  under 2% of unseen boards fully right.
+- With the colour step on, the pair in `Models/` stays at 75.5% (1 board
+  exact) and `pieces_s_render1` drops to 82.6% (27): Y-LIChess 78.0% ->
+  65.5%, samryan 82.9% -> 79.0%, ChessQ 69.7% -> 68.5%, the other two
+  unchanged. See the next section.
 
 ## What the colour step is worth
 

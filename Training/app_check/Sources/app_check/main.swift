@@ -49,7 +49,11 @@ func fail(_ message: String) -> Never {
 /// The photo the way a viewer shows it: turned as its EXIF orientation tag
 /// says, which is what the app's camera pipeline hands the recognizer and
 /// what `cv2.imread` returns in the Python. Photos without a tag (all of the
-/// current test sets) are loaded as they are.
+/// current test sets) are loaded as they are, undecoded: the recognizer
+/// decodes them once (`DecodedImage`). A photo with a tag comes out of
+/// ImageIO's thumbnail call as a bitmap already, whose pixels are about a
+/// fifth of the bytes away from a full decode turned afterwards; if a test
+/// set with tags is ever scored, turn the full decode instead.
 func upright(_ url: URL) -> CGImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
     let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
@@ -268,6 +272,12 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
         var image = upright(url),
         let expected = FENBuilder.pieces(fromPlacement: placement)
     else { fail("could not load \(path) or its placement") }
+    if portrait || redraw != nil {
+        // The harness draws the photo itself: it draws the decoded copy, as
+        // the recognizer would have (an undecoded JPEG drawn scaled gives
+        // other pixels).
+        image = DecodedImage.once(image)
+    }
     if portrait {
         guard let canvas = draw(image, width: image.width, height: image.width * 4 / 3)
         else { fail("could not draw \(path)") }
