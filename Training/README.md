@@ -546,6 +546,12 @@ was in `Models/`, and why it was taken out again.
   since; the labels are right).
 - `score.sh pieces|corners <label> <weights>`: the standard scores on the CPU,
   into `runs/scores/`.
+- `compare_app_check.py <pair to beat>.txt <candidate>.txt`: two
+  `app_check --verbose` outputs of the same list of photos, photo by photo:
+  on how many photos the candidate has more squares right and on how many
+  fewer (sign test), the difference with a bootstrap interval, boards gained
+  and lost. This is the test "better by more than the noise" is checked
+  with; the figures for `pieces_s_render3` above come from it.
 - `evaluate.py --device cpu`, `--dump-list` (the photo lists `app_check` takes),
   and with `--grid-corners` a board the corner model does not find is read by
   the grid fit alone, a1 from the pieces.
