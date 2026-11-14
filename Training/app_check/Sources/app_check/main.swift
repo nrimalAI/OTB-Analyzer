@@ -24,6 +24,13 @@
 //   --sides-from-colour on|off  White and Black from the colours of the
 //                   pieces where they contradict the piece model (default
 //                   off, as in the app).
+//   --one-king on|off  exactly one king a side, from the scores the piece
+//                   model gave each piece for every kind (the app's default:
+//                   on).
+//   --flag-below C[,C...]  the app marks a square for the user to check
+//                   when its piece's confidence is under 0.85 (AppModel);
+//                   count how many of the right and of the wrong pieces that
+//                   marks, for each threshold given (default 0.85).
 //   --colours FILE  score nothing: write, for each photo, what the piece model
 //                   finds, the colour of each piece and the sides the colour
 //                   step gives, for `swift_reference.py colours` to compare
@@ -82,6 +89,8 @@ var gridFit = true
 var gridFitGiven = false
 var sidesFromColour = false
 var sidesFromColourGiven = false
+var oneKing: Bool?
+var flagBelow: [Float] = [0.85]
 var coloursPath: String?
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
@@ -103,6 +112,16 @@ while !arguments.isEmpty {
         sidesFromColour = value == "on"
         sidesFromColourGiven = true
     case "--colours": coloursPath = arguments.isEmpty ? nil : arguments.removeFirst()
+    case "--one-king":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--one-king takes on or off") }
+        oneKing = value == "on"
+    case "--flag-below":
+        let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Float($0) }
+        guard !values.isEmpty, values.allSatisfy({ $0 != nil }) else {
+            fail("--flag-below takes a number, or several with commas between them")
+        }
+        flagBelow = values.compactMap { $0 }
     case "--a1-prior":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         if value == "off" {
@@ -158,7 +177,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--colours FILE] [--verbose]")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--flag-below C] [--colours FILE] [--verbose]")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -207,9 +226,15 @@ do {
     let pieces = try MLModel(
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
-    recognizer = try CoreMLBoardRecognizer(
-        cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
-        sidesFromColour: sidesFromColour)
+    if let oneKing {
+        recognizer = try CoreMLBoardRecognizer(
+            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+            sidesFromColour: sidesFromColour, oneKing: oneKing)
+    } else {
+        recognizer = try CoreMLBoardRecognizer(
+            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+            sidesFromColour: sidesFromColour)
+    }
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -264,6 +289,10 @@ var squaresRight = 0
 var exact = 0
 var exactTurned = 0  // right once the board is turned 180 degrees
 var notFound = 0
+// Pieces the app would mark for the user to check, for each threshold:
+// [right, wrong]; and all pieces put on a square: [right, wrong].
+var marked = [[Int]](repeating: [0, 0], count: flagBelow.count)
+var placed = [0, 0]
 for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
     let url = path.hasPrefix("/")
         ? URL(fileURLWithPath: path)
@@ -298,6 +327,15 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
         let result = try await recognizer.recognize(image)
         got = FENBuilder.placement(result.pieces.mapValues(\.piece))
         have = squares(got)
+        for (square, piece) in result.pieces {
+            // `squares` runs from a8 to h1.
+            let index = (8 - square.rank.value) * 8 + square.file.number - 1
+            let wrong = have[index] == want[index] ? 0 : 1
+            placed[wrong] += 1
+            for (k, threshold) in flagBelow.enumerated() where piece.confidence < threshold {
+                marked[k][wrong] += 1
+            }
+        }
     } catch RecognitionError.boardNotFound {
         // Counts as 64 wrong squares, as in evaluate.py.
         notFound += 1
@@ -319,9 +357,17 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
       board not found: \(notFound)
     """)
+for (k, threshold) in flagBelow.enumerated() {
+    print(String(
+        format: "  marked for the user to check (confidence under %@): %d of %d wrong pieces (%@), "
+            + "%d of %d right pieces (%@), %.2f a photo",
+        "\(threshold)", marked[k][1], placed[1], percent(marked[k][1], placed[1]),
+        marked[k][0], placed[0], percent(marked[k][0], placed[0]),
+        Double(marked[k][0] + marked[k][1]) / Double(max(photos, 1))))
+}

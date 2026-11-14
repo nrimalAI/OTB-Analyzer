@@ -75,6 +75,16 @@ import Testing
         }
     }
 
+    /// One king a side is on unless switched off (`docs/RECOGNITION.md`, "What
+    /// one king a side is worth").
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testOneKingASideIsOnByDefault() throws {
+        let models = try Self.models.get()
+        #expect(try makeRecognizer().oneKing == true)
+        #expect(try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oneKing: false).oneKing == false)
+    }
+
     /// The colour step is off unless asked for (`docs/RECOGNITION.md`, "What
     /// the colour step is worth"). Switching it on by default is a decision
     /// to take with scores on a set nothing was tuned on, not in passing.
@@ -82,6 +92,77 @@ import Testing
     func testColourStepIsOffByDefault() throws {
         #expect(try makeRecognizer().sidesFromColour == false)
         #expect(try makeRecognizer(sidesFromColour: true).sidesFromColour == true)
+    }
+
+    /// What the rule for the kings (`OneKingASide`) is given: the piece
+    /// model's own score for every class of each box. Vision hands them out
+    /// divided by their sum, with the sum as the observation's confidence
+    /// (`CoreMLBoardRecognizer.classScores`); nothing in its documentation
+    /// says so, so this holds it against the model run without Vision, on the
+    /// same pixels: the photo drawn at the model's input size, which neither
+    /// then has to resize.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testPieceScoresAreTheModelsOwn() throws {
+        let models = try Self.models.get()
+        let recognizer = try makeRecognizer()
+        let constraint = try #require(
+            models.pieces.modelDescription.inputDescriptionsByName["image"]?.imageConstraint)
+        let side = constraint.pixelsWide
+        #expect(side == constraint.pixelsHigh)
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self, from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+        var pieces = 0, secondScores = 0
+        for file in manifest.keys.sorted() {
+            let source = try #require(
+                CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
+            let photo = DecodedImage.once(try #require(CGImageSourceCreateImageAtIndex(source, 0, nil)))
+            let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+            let context = try #require(CGContext(
+                data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.interpolationQuality = .high
+            context.draw(photo, in: CGRect(x: 0, y: 0, width: side, height: side))
+            let square = try #require(context.makeImage())
+
+            let found = try recognizer.detectPieces(
+                in: square, letterbox: Letterbox(imageSize: CGSize(width: side, height: side)))
+            let output = try models.pieces.prediction(from: MLDictionaryFeatureProvider(
+                dictionary: ["image": MLFeatureValue(cgImage: square, constraint: constraint)]))
+            let rows = try #require(output.featureValue(for: "confidence")?.multiArrayValue)
+            #expect(rows.shape.count == 2)
+            #expect(rows.shape[0].intValue == found.count, "\(file)")
+            guard rows.shape[0].intValue == found.count, rows.shape[1].intValue >= 12 else { continue }
+            #expect(!found.isEmpty, "\(file)")
+
+            for (index, detection) in found.enumerated() {
+                // The classes in training order: white king, queen, rook,
+                // bishop, knight, pawn, then black's.
+                let row = (0..<12).map { rows[[index, $0] as [NSNumber]].doubleValue }
+                let top = try #require(row.max())
+                #expect(abs(Double(detection.confidence) - top) < 1e-4, "\(file) piece \(index)")
+                let topClass = try #require(row.firstIndex(of: top))
+                #expect(detection.piece == OneKingASide.kinds[topClass % 6], "\(file) piece \(index)")
+                #expect(detection.color == (topClass < 6 ? .white : .black), "\(file) piece \(index)")
+                for (k, kind) in OneKingASide.kinds.enumerated() {
+                    let score = max(row[k], row[k + 6])
+                    let have = detection.kindScores[kind]
+                    if score >= CoreMLBoardRecognizer.leastKindScore + 1e-4 {
+                        #expect(abs((have ?? -1) - score) < 1e-4, "\(file) piece \(index) \(kind)")
+                        if kind != detection.piece { secondScores += 1 }
+                    } else if score < CoreMLBoardRecognizer.leastKindScore - 1e-4 {
+                        #expect(have == nil, "\(file) piece \(index) \(kind)")
+                    }
+                }
+                pieces += 1
+            }
+        }
+        print("piece scores: \(pieces) pieces, \(secondScores) scores for a kind other than the piece's own")
+        #expect(pieces >= 40)
+        // At least one score beside a piece's own was compared (a king that
+        // might be a queen, on test_004005.jpg with the models at hand).
+        // Without one, only the top score of each box has been checked.
+        #expect(secondScores >= 1)
     }
 
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))

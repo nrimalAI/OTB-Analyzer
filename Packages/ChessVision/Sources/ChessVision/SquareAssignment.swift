@@ -8,10 +8,46 @@ struct PieceDetection {
     let color: Piece.Color
     let confidence: Float
     let boundingBox: CGRect  // image coordinates, origin top-left
+    /// The model's score for each kind it considered for this piece, the
+    /// larger of the two colours; a kind without an entry counts as 0
+    /// (`kind_scores` in `chess_pipeline.one_king_a_side`). Empty where
+    /// nothing is known beyond the kind the piece was taken for.
+    let kindScores: [Piece.Kind: Double]
+    /// What the user is shown as the confidence, where that is not
+    /// `confidence`: a piece that a rule took for another kind than the model
+    /// did (`OneKingASide`) is shown with the model's score for that kind,
+    /// so that the app marks it for the user to check. `confidence` stays
+    /// the model's score for its own first choice, as in the Python, and
+    /// goes on deciding which of two pieces on a square stays.
+    let shownConfidence: Float?
+
+    init(
+        piece: Piece.Kind, color: Piece.Color, confidence: Float, boundingBox: CGRect,
+        kindScores: [Piece.Kind: Double] = [:], shownConfidence: Float? = nil
+    ) {
+        self.piece = piece
+        self.color = color
+        self.confidence = confidence
+        self.boundingBox = boundingBox
+        self.kindScores = kindScores
+        self.shownConfidence = shownConfidence
+    }
 
     /// The piece's contact point with the board.
     var anchor: CGPoint {
         CGPoint(x: boundingBox.midX, y: boundingBox.maxY)
+    }
+
+    /// The same detection taken for another kind or side: confidence, box
+    /// and scores stay. Taken for another kind, it is shown with the model's
+    /// score for that kind (0 where it gave none worth the name).
+    func taken(for piece: Piece.Kind? = nil, color: Piece.Color? = nil) -> PieceDetection {
+        let kind = piece ?? self.piece
+        return PieceDetection(
+            piece: kind, color: color ?? self.color,
+            confidence: confidence, boundingBox: boundingBox, kindScores: kindScores,
+            shownConfidence: kind == self.piece
+                ? shownConfidence : Float(OneKingASide.score(of: kind, for: self)))
     }
 }
 
@@ -92,7 +128,7 @@ enum SquareAssignment {
     private static func recognized(_ det: PieceDetection, at square: Square) -> RecognizedPiece {
         RecognizedPiece(
             piece: Piece(det.piece, color: det.color, square: square),
-            confidence: det.confidence
+            confidence: det.shownConfidence ?? det.confidence
         )
     }
 }
