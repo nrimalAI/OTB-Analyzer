@@ -309,9 +309,11 @@ import Testing
     /// pipeline: with corners up to 0.74 squares off, as the model in
     /// `Models/` has them on `test_000000.jpg`, the pieces of the far rank
     /// stand on the lines between squares, and each one that slips costs two
-    /// squares. That photo reads 58 of 64 on the Mac mini's Neural Engine and
-    /// 60 on its CPU and on the CI runner, from the same pixels: a count on a
-    /// coin toss, not a measure of the corners.
+    /// squares. With the piece model before `pieces_s_render3` that photo
+    /// read 58 of 64 on the Mac mini's Neural Engine and 60 on its CPU and
+    /// on the CI runner, from the same pixels (with `pieces_s_render3`, 60
+    /// on the Neural Engine): a count on a coin toss, not a measure of the
+    /// corners.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testCornerModelAloneReadsTheFixtures() async throws {
         try await expectFixturesRead(

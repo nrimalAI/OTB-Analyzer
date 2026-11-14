@@ -59,16 +59,20 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     pieces in the photo where they contradict the piece model for
     ///     more than a share of the pieces (`PieceSides`). Off unless asked
     ///     for: on the second held-out test set the rule as it is loses 12
-    ///     points of squares on one source with the retrained piece model
-    ///     it was made for, and gains nothing lasting with the model in
-    ///     `Models/` (`docs/RECOGNITION.md`). It is kept for the reference's
-    ///     next version of the rule.
+    ///     points of squares on one source with `pieces_s_render1`, the
+    ///     piece model it was made for, and gains nothing lasting with the
+    ///     piece model before that (`docs/RECOGNITION.md`, "What the colour step is
+    ///     worth"; not measured with the one in `Models/` now). It is kept
+    ///     for the reference's next version of the rule.
     ///   - oneKing: exactly one king a side, from the scores the piece model
-    ///     gave each piece for every kind (`OneKingASide`). On: no
-    ///     development set loses by it in total, with either piece model it
-    ///     was tried with, the pair in `Models/` gains on all three, and the
-    ///     second held-out test set does not contradict that
-    ///     (`docs/RECOGNITION.md`, "What one king a side is worth").
+    ///     gave each piece for every kind (`OneKingASide`). On: when it was
+    ///     chosen no development set lost by it in total, with either piece
+    ///     model it was tried with, and the second held-out test set did
+    ///     not contradict that (`docs/RECOGNITION.md`, "What one king a
+    ///     side is worth"). With the piece model in `Models/` now it is
+    ///     worth 80 boards fully right of that set's 1,619, and costs a
+    ///     board on Fenit A, on positions set up without two kings ("What
+    ///     the app reads now").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
