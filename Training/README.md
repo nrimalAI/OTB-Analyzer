@@ -397,13 +397,32 @@ model before. Wrong pieces that get the mark, model before against render3
 test 53% against 38% (30 and 25 unmarked); Fenit A 63% against 22% (382 and
 342 unmarked). Right pieces marked fall too: board B 40% against 22%. The
 threshold is the owner's to set (`App/Sources/AppModel.swift`);
-`app_check --flag-below` shows what other values would mark.
+`app_check --flag-below` shows what other values would mark. On the second
+test set (app-side session, same build): 40% of wrong pieces and 8.8% of
+right ones marked, 2.7 squares a photo (first pair 79%, 48%, 11.3); at 0.7
+20% and 3.3%, at 0.5 7.8% and 1.3%.
+
+**What the app-side steps are worth with it** (app-side session, the build
+of ae9dd12; tables in `docs/RECOGNITION.md`, "What the app reads now";
+per-photo outputs `runs/app_check/render3_switches/`). The rule for the
+kings off: ChessReD test 288 boards exact (the same), board B 88.45% and 5
+(on: 88.55% and 6), Fenit A 184 (on: 183; both losses are positions without
+two kings), second test set 88.31% and 218 (on: 88.49% and 298): the rule
+is worth 80 boards there. Grid fit, a1 from the pieces and the rule all
+off: ChessReD test 246, board B 46.88% and no board found in 36 of 100,
+second test set 46.69% and 0 exact.
 
 Two things about how it was trained, for the next run. Mosaic was off for
 the whole run: `train.py` leaves ultralytics' `close_mosaic` at 10 epochs
 and the run had 10 (render2, with 12, had it for two). And about 2% of the
 relative-palette renders have a "White" side darker than L* 40 against a
 near-black one, before exposure: two dark sides, a little label noise.
+
+**"The first pair"** below is what was in `Models/` from midday on
+2026-11-13 until pull request #15: `main`'s corner model and the baseline
+piece weights exported with NMS across classes. Everything in this file
+measured "with the pair in `Models/`" before 2026-11-14 was measured with
+it; the corner model is still the same.
 
 **The earlier candidate `pieces_s_render2`** (exports in
 `runs/export_render2/`, weights `runs/detect/pieces_s_render2/weights/last.pt`)
@@ -421,9 +440,9 @@ replacing a model as `CLAUDE.md` words it: on the held-out board B it changes
 nothing, and on ChessReD test it is not shown better. Through `app_check`
 (the decode-once binary, app defaults, colour step off; measured by the
 app-side session, per-photo outputs in `runs/app_check/decode_once/`),
-pair in `Models/` against candidate:
+the first pair against the candidate:
 
-| | Pair in `Models/` | With `pieces_s_render1` |
+| | First pair | With `pieces_s_render1` |
 |---|---|---|
 | ChessReD test (306), boards exact | 279 | 285 |
 | Fenit board B (100) | 84.6% of squares, 0 exact | 84.3%, 1 exact |
@@ -849,13 +868,14 @@ than nothing. Scored with the `.pt` weights on the CPU, letterboxed
 
 - **Baseline**: `baseline/corners_yolo11n_chessred2k.pt` and
   `baseline/pieces_yolo11n_chessred2k.pt` as they are.
-- **In `Models/` now** (since b546e6a): the same two weights, the piece model
-  exported with NMS across classes (`--one-piece-per-spot 0.7` stands in for it).
+- **First pair** (in `Models/` from b546e6a until pull request #15): the same
+  two weights, the piece model exported with NMS across classes
+  (`--one-piece-per-spot 0.7` stands in for it).
 - **exp3**: `baseline/corners_yolo11s_exp3.pt` with the same pieces: the pair
   that was in `Models/` for a few hours on 2026-11-13 and came out again
   because it turns the G033 endgames.
 
-| Part | Photos | Empty | Baseline | In `Models/` now | exp3 corners | exp3 + `--a1-from-pieces 6` |
+| Part | Photos | Empty | Baseline | First pair | exp3 corners | exp3 + `--a1-from-pieces 6` |
 |---|---|---|---|---|---|---|
 | `chessq` | 50 | 68.9% | 37.4% / 0%, board not found in 18 | 38.0% / 0%, board not found in 18 | 74.5% / 0% | 74.5% / 0% |
 | `ylichess`, `wood180` | 102 | 57.5% | 0% / 0%, board not found in 102 | 0% / 0%, board not found in 102 | 69.9% / 0% | 65.1% / 0% |
@@ -869,12 +889,12 @@ evening; test only. `app_check` at pull request #10, i.e. before the rim fix
 and the two-kings rule, and with the chess-cv photos still read through a
 thumbnail path (pull request #14 reads them from one full decode: with
 today's defaults the chess-cv row is 80.65%; 0 and 89.72%; 21, no board in
-13). The app's defaults of that build, colour step off; the pair in `Models/` against the same corner model with the
+13). The app's defaults of that build, colour step off; the first pair against the same corner model with the
 candidate piece model; measured by the app-side session, per-photo outputs
 in `runs/app_check/decode_once/`). Squares right; boards exact; photos with
 no board found:
 
-| Part | Photos | Pair in `Models/` | With `pieces_s_render1` | Photo by photo |
+| Part | Photos | First pair | With `pieces_s_render1` | Photo by photo |
 |---|---|---|---|---|
 | `ylichess` | 200 | 70.1%; 1; 6 | 78.0%; 0; 6 | more squares right on 95, fewer on 97 |
 | `chessq` | 50 | 64.6%; 1; 10 | 69.7%; 6; 10 | 25 against 12 (p = 0.05) |
@@ -935,7 +955,7 @@ steps, 0.5 -> 0.25: Y-LIChess game positions 77.9% -> 81.8% of squares and
 0 -> 10 of 102 boards exact; layouts 76.2% -> 84.9%, 0 -> 11 of 98; ChessQ
 72.0% -> 72.3%; chesscog 93.7% -> 93.9%; samryan 84.1% -> 84.3%; chess-cv
 89.6% -> 89.6% (`runs/scores/heldout2_1280_*.txt` against
-`heldout2_1280_m025_*.txt`). Through the app with the pair in `Models/`
+`heldout2_1280_m025_*.txt`). Through the app with the first pair
 (app-side session): Y-LIChess 70.1% -> 72.4%, the other parts and the three
 development sets within 0.6 points. The same constant is used when labels
 are built (`derive_corners.check_pieces`, `build_dataset.py`'s corner
@@ -958,7 +978,7 @@ chess-cv 89.6% -> 89.8% and 11 -> 13 boards exact; ChessQ 72.25% -> 72.22%
 always in the right direction. The app has it since pull request #12, on by
 default, with the model's own score for every label of a box (Vision's
 label confidence times the observation's confidence; scores under 0.02 left
-out). Through the app, off -> on: the pair in `Models/` ChessReD test 279 ->
+out). Through the app, off -> on: the first pair ChessReD test 279 ->
 280 boards exact, Fenit B 0 -> 1, Fenit A 16 -> 32 of 286, this set 76.00%
 -> 76.08% of squares (3 exact both); with `pieces_s_render1` this set
 86.40% -> 86.62% and 49 -> 68 boards exact (the chess-cv photos read from
@@ -1020,7 +1040,7 @@ placement JSON per source from `datasets/heldout2/positions.json`, then
   This is a measurement, not a reason to pick another prior on these photos.
 - `samryan` (straight down) and the layouts score below an empty board with
   every pair.
-- **Both app-side steps on the pair in `Models/` now** (`--grid-corners
+- **Both app-side steps on the first pair** (`--grid-corners
   --a1-from-pieces 6`, in Python; the four smaller parts, `now_steps.txt`).
   The grid fit's thresholds and the prior were chosen on board B, Fenit A
   and ChessReD, so this is their first score on boards they have not seen:
