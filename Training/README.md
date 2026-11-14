@@ -320,7 +320,7 @@ full-size photos; for a piece model trained on the copies use `score.sh`.
 | `pieces_s_crop1` | continues render1's `last.pt`, 12 epochs, `merged_all_crop` (`crop_boards.py`: the 7,370 photos of `merged_all` with a corner label, cut down to the board) | Finished 2026-11-14 02:20. Scored with `--crop-board`, against `pieces_s_render2` (same start, same 12 epochs, whole photos). Labelled corners (`scores/pieces_s_crop1_last.txt`): board B 92.5% / 2 of 98 exact against 90.9% / 0; ChessReD test 99.97% / 98.4% against 99.96% / 98.4%; Fenit A (trained on) 94% exact against 88%. End to end in Python with `main`'s corner model, grid fit, a1 prior 6, one king a side (`scores/endtoend_crop1_vs_render2.txt`): board B 84.3% / 2 of 100 against 82.9% / 0; ChessReD test 298 against 297 of 306. A small gain on board B and none on ChessReD: not by itself worth the change in the app. The side is still what is wrong on board B (P read as p 145 times, was 243) |
 | `pieces_s_render3` | continues render2's `last.pt`, 10 epochs, `merged_all3` (as `merged_all`, with 4,000 more renders whose two sides are two shades of one list, the lighter one White, and more views from above: 19,438 photos) | Finished 2026-11-14 08:17. `last.pt`, labelled corners (`scores/pieces_s_render3_last.txt`): **board B 94.7% / 8 of 98 exact** (render2 90.9% / 0), Fenit A (trained on) 99.8% / 92%, ChessReD test 99.94% / 96.7% (296 of 306; render2 301). On board B, P read as p 132 times (render2 243); during the run it moved between 111 and 175 from one epoch to the next. **In `Models/`**: see below |
 | `pieces_s_tone1` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos), `--side-tone 0.35` (`side_tone.py`: a third of the training photos shown in another tone, so that a cream side looks tan or brown beside a darker one) | queued after `corners_s_canon1`. Two changes in one run (more renders, the tone), to save six hours of the GPU: if it gains, which of the two did it is not known |
-| `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | running since 08:17 on 2026-11-14 |
+| `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | Finished 2026-11-14 11:12. `last.pt` (`scores/corners_s_canon1_last.txt`), median corner error in squares: **board B 0.27** (exp4 0.91; within half a square 83% against 32%), ChessReD test **0.14** (exp4 0.19, baseline 0.31), Fenit A 0.11. Which corner is a1 it gets right on ChessReD (301 of 306) and wrong on board B (11 of 93; the app takes a1 from the pieces). The first learned corner model that passes the package's tests (103 of 103, the G033 endgame fixture read right with the grid fit off). The candidate described below |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
 **In `Models/` since 2026-11-14: the piece model `pieces_s_render3`**
@@ -417,6 +417,42 @@ the whole run: `train.py` leaves ultralytics' `close_mosaic` at 10 epochs
 and the run had 10 (render2, with 12, had it for two). And about 2% of the
 relative-palette renders have a "White" side darker than L* 40 against a
 near-black one, before exposure: two dark sides, a little label noise.
+
+**A corner model that is not in `Models/`: `corners_s_canon1`** (FP16 export
+`runs/export_canon1/BoardCorners-fp16.mlpackage`, the corners turned to a1
+order inside the model so the app sees the tensor it always saw; with
+`pieces_s_render3` in `runs/app_check/models_canon1/`; weights
+`runs/pose/corners_s_canon1/weights/last.pt`). It is not put in because on
+board B, which is what the rule in `CLAUDE.md` names, its gain is within
+the noise. Through `app_check` with the app's defaults against the pair in
+`Models/` (same piece model, same build; `runs/app_check/canon1/last_*.txt`,
+`final_h2/canon1_*.txt`; `compare_app_check.py`). Squares right; boards
+exact; photos with no board found:
+
+| | Pair in `Models/` | With `corners_s_canon1` | Photo by photo |
+|---|---|---|---|
+| Fenit board B (100; held out) | 88.55%; 6; 4 | 90.41%; 6; 0 | more squares right on 8 photos, fewer on 6; +1.9 points, interval -1.0 to +5.3: **within noise** |
+| ChessReD test (306) | 99.68%; 288; 0 | 99.79%; 291; 0 | 5 boards gained, 2 lost: not worse |
+| Fenit A (286; trained on) | 95.32%; 183; 0 | 97.83%; 217; 0 | 34 boards gained, none lost |
+| Second test set: `ylichess` (200) | 85.73%; 45; 6 | 87.96%; 42; 0 | +2.2 points (0.3 to 4.5) |
+| `chessq` (50) | 71.66%; 14; 10 | 93.81%; 16; 0 | +22.2 points; more right on 15 photos, fewer on none |
+| `chesscog_real` (29) | 98.44%; 10; 0 | 98.44%; 10; 0 | no photo differs |
+| `samryan` (500) | 84.85%; 58; 16 | 95.03%; 76; 0 | +10.2 points; 135 photos against 14 |
+| `chesscv_games` (840) | 91.97%; 171; 13 | 97.46%; 186; 0 | +5.5 points; 96 photos against none |
+| Second test set, all 1,619 | 88.49%; 298; 45 | **95.44%; 330; 0** | +7.0 points (6.0 to 7.9); 255 photos against 22; 37 boards gained, 5 lost |
+
+On boards nobody trained or tuned on it finds every board (45 were not
+found) and gains 7 points of squares; on board B the old corner model with
+the grid fit was already close, and the 4 boards it did not find are the
+whole gain. It goes in with a piece model that carries the pair past board
+B, or when the owner says the second test set counts (the notes, "Needs
+the owner"). Two things seen on the way: the weight of the model's own a1
+(`--a1-prior`) hardly matters with it (board B 91.0% / 90.7% / 90.4% /
+89.9% and ChessReD test 288 / 290 / 291 / 291 boards for 0 / 3 / 6 / 12), so
+6 stays; and with the grid fit off the pair is worse on board B (87.75%
+after 7 epochs), so the fit stays too. In the package's tests the fixtures
+read as portrait photos give 95.3% of squares with it (100% with the corner
+model in `Models/`), inside what that test asks.
 
 **"The first pair"** below is what was in `Models/` from midday on
 2026-11-13 until pull request #15: `main`'s corner model and the baseline
