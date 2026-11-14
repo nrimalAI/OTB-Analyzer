@@ -259,6 +259,16 @@ Corner labels of the labelled boards are the same in all of them; `merged_synth`
 and `merged_rf` add corner photos to train only. `merge` refuses
 to rebuild a folder a running job reads.
 
+**The training process leaks memory on Apple's GPU.** Its footprint (nearly
+all of it compressed and swapped out, so `ps` shows under 1 GB; look with
+`top -o mem`) grows with every batch: `pieces_s_render2` held 85 GB after
+four hours, swap had grown to 36 GB on disk, epochs took 50 minutes instead
+of 16, and a run left alone ends with exit 137 (`pieces_s_rf`). `queue.sh`
+therefore stops a run that holds more than `MEM_LIMIT_GB` (30) just after
+its next epoch is saved and continues it in a new process (`queue.log` says
+when). A run started by hand has no such guard: start runs through the
+queue.
+
 **Running jobs.** Start them detached and awake, so no session has to stay
 open: `nohup caffeinate -i ./venv/bin/python -u train.py ... > runs/<name>.log 2>&1 &`.
 `queue.sh` chains runs: it takes `runs/queue.txt` top to bottom, keeps
@@ -801,14 +811,30 @@ square of 26,000 fewer end to end, while 0.1 starts to lose real rim pieces
 only, `pieces_s_render1` in Python with `--max-side 1280` and the app-side
 steps, 0.5 -> 0.25: Y-LIChess game positions 77.9% -> 81.8% of squares and
 0 -> 10 of 102 boards exact; layouts 76.2% -> 84.9%, 0 -> 11 of 98; ChessQ
-72.0% -> 72.3%; chesscog 93.7% -> 93.9% (`runs/scores/heldout2_1280_*.txt`
-against `heldout2_1280_m025_*.txt`; samryan and chess-cv are in the second
-file when it is complete). Through the app with the pair in `Models/`
+72.0% -> 72.3%; chesscog 93.7% -> 93.9%; samryan 84.1% -> 84.3%; chess-cv
+89.6% -> 89.6% (`runs/scores/heldout2_1280_*.txt` against
+`heldout2_1280_m025_*.txt`). Through the app with the pair in `Models/`
 (app-side session): Y-LIChess 70.1% -> 72.4%, the other parts and the three
 development sets within 0.5 points. The same constant is used when labels
 are built (`derive_corners.check_pieces`, `build_dataset.py`'s corner
 orientation): a dataset rebuilt now can keep or drop a few other photos
 than the folders on disk, which were built with 0.5.
+
+**Exactly two kings (`one_king_a_side`, `evaluate.py --one-king`,
+2026-11-13).** With fewer than two kings on the board, a side that has
+pieces and no king gets its best king candidate; with more than two, a
+side's extra kings become their next kind; a board with two kings is left
+alone. Development sets (`pieces_s_render1`, labelled corners): Fenit B
+91.45% -> 91.52% of squares, Fenit A 244 -> 246 of 270 boards exact,
+ChessReD test unchanged. On this set, test only, same settings as the
+paragraph above with `EDGE_MARGIN` 0.25, without -> with the rule: Y-LIChess
+game positions 81.8% -> 82.1% of squares and 10 -> 15 of 102 boards exact;
+layouts 84.9% -> 85.1%; chesscog 93.9% -> 94.4%; samryan 84.25% -> 84.29%;
+chess-cv 89.6% -> 89.8% and 11 -> 13 boards exact; ChessQ 72.25% -> 72.22%
+(two squares fewer, the same 8 boards exact)
+(`runs/scores/heldout2_1280_m025_king_render1.txt`). Small and nearly
+always in the right direction; the app can do the same from the confidences
+Vision gives for every label of a box.
 
 **The app-side steps on this set, through the app's own code, 2026-11-13 midday** (measured with
 `app_check` before it decoded each photo once; with the later binary the two

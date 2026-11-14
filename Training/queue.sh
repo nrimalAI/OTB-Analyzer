@@ -60,6 +60,54 @@ print("resume" if c.get("optimizer") is not None and c.get("epoch", -1) >= 0 els
 EOF
 }
 
+# Training on Apple's GPU leaks: the process's memory (nearly all of it
+# compressed and swapped out) grows with every batch, about 20 GB an hour on
+# a large dataset. Swap fills the disk, and in the end the system kills the
+# process (exit 137; pieces_s_rf on 2026-11-13) or the machine crawls. So a
+# run that holds more than MEM_LIMIT_GB is stopped just after its next epoch
+# has been saved and continued in a new process, as often as it takes.
+MEM_LIMIT_GB="${MEM_LIMIT_GB:-30}"
+
+# Memory of a process in whole GB as top reports it (resident + compressed).
+mem_gb() {
+  top -l 1 -pid "$1" -stats mem 2>/dev/null | tail -n 1 | awk '{
+    v = $1; sub(/[+-]$/, "", v); u = substr(v, length(v)); n = substr(v, 1, length(v) - 1) + 0
+    if (u == "G") print int(n); else if (u == "T") print int(n * 1024); else print 0 }'
+}
+
+# run_guarded <run name> <last.pt> <command...>: runs the command with its
+# output added to the run's log. Returns its exit code, or 99 when it was
+# stopped after an epoch because of its memory.
+run_guarded() {
+  local name="$1" last="$2"; shift 2
+  "$@" >> "runs/$name.log" 2>&1 &
+  local job=$! py over=0 stamp now
+  while kill -0 "$job" 2>/dev/null; do
+    sleep 30
+    # The python process itself (capital P: not the caffeinate line).
+    py="$(pgrep -f "Python -u train\.py .*--name $name( |\$)" | head -n 1)"
+    [ -z "$py" ] && continue
+    if [ "$over" = 0 ]; then
+      if [ "$(mem_gb "$py")" -ge "$MEM_LIMIT_GB" ]; then
+        over=1
+        stamp="$(stat -f %m "$last" 2>/dev/null)"
+        log "$name holds more than $MEM_LIMIT_GB GB: to be continued in a new process after this epoch"
+      fi
+    else
+      now="$(stat -f %m "$last" 2>/dev/null)"
+      if [ -n "$now" ] && [ "$now" != "$stamp" ]; then
+        sleep 10   # let the save finish
+        # The last save of a run that is ending must not be interrupted.
+        [ "$(state_of "$last")" = done ] && { over=0; continue; }
+        kill "$py" 2>/dev/null
+        wait "$job" 2>/dev/null
+        return 99
+      fi
+    fi
+  done
+  wait "$job"
+}
+
 while true; do
   while training; do sleep 30; done
   if [ -s runs/queue.current ]; then
@@ -87,8 +135,8 @@ while true; do
     # Through train.py, which sets up what the run needs beyond its saved
     # settings (canonical_corners.py). --name is not read there: it puts the
     # run's name on the command line, so pkill -f "name <run name>" finds it.
-    caffeinate -i ./venv/bin/python -u train.py resume --model "$dir/weights/last.pt" \
-      --name "$name" >> "runs/$name.log" 2>&1
+    run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py resume \
+      --model "$dir/weights/last.pt" --name "$name"
     rc=$?
   elif [ "$cut_off" = 0 ] && [ -d "$dir" ]; then
     # A run of that name already exists (and later lines may use its
@@ -101,9 +149,19 @@ while true; do
     [ -d "$dir" ] && mv "$dir" "$dir.cut-$(date +%s)"
     log "start $name: $args"
     # shellcheck disable=SC2086
-    caffeinate -i ./venv/bin/python -u train.py $args --device mps --name "$name" > "runs/$name.log" 2>&1
+    : > "runs/$name.log"
+    run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py $args \
+      --device mps --name "$name"
     rc=$?
   fi
+  # A run stopped for its memory goes on in a new process until it ends.
+  while [ "$rc" = 99 ]; do
+    if [ "$(state_of "$dir/weights/last.pt")" = done ]; then rc=0; break; fi
+    log "continue $name in a new process (memory)"
+    run_guarded "$name" "$dir/weights/last.pt" caffeinate -i ./venv/bin/python -u train.py resume \
+      --model "$dir/weights/last.pt" --name "$name"
+    rc=$?
+  done
   log "end $name (exit $rc)"
   if [ "$rc" = 0 ]; then echo "$line" >> runs/queue.done; else echo "$line" >> runs/queue.failed; fi
   rm -f runs/queue.current
