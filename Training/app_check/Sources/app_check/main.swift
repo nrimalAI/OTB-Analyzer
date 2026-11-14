@@ -39,6 +39,10 @@
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
 //   --verbose       one line per photo, not only the wrong ones.
+//   --upright PHOTO OUT.png  run nothing: write the photo as every other
+//                   mode reads it (turned as its EXIF orientation says) to
+//                   OUT.png, to hold it against another reader, e.g.
+//                   PIL's ImageOps.exif_transpose(Image.open(PHOTO)).
 //
 // Needs only the Command Line Tools (no Xcode, no XCTest).
 import ChessKit
@@ -126,6 +130,7 @@ var sidesFromColourGiven = false
 var oneKing: Bool?
 var flagBelow: [Float] = [0.85]
 var coloursPath: String?
+var uprightPaths: (photo: String, out: String)?
 var arguments = Array(CommandLine.arguments.dropFirst())
 while !arguments.isEmpty {
     let flag = arguments.removeFirst()
@@ -167,8 +172,22 @@ while !arguments.isEmpty {
         }
         a1PriorGiven = true
     case "--verbose": verbose = true
+    case "--upright":
+        guard arguments.count >= 2 else { fail("--upright takes a photo and the PNG to write") }
+        uprightPaths = (arguments.removeFirst(), arguments.removeFirst())
     default: fail("unknown argument \(flag)")
     }
+}
+if let uprightPaths {
+    // The pixels as the recognizer will have them: one full decode.
+    guard let image = upright(URL(fileURLWithPath: uprightPaths.photo)).map(DecodedImage.once),
+          let destination = CGImageDestinationCreateWithURL(
+              URL(fileURLWithPath: uprightPaths.out) as CFURL, "public.png" as CFString, 1, nil)
+    else { fail("could not load \(uprightPaths.photo) or write \(uprightPaths.out)") }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else { fail("could not write \(uprightPaths.out)") }
+    print("\(image.width) x \(image.height) written to \(uprightPaths.out)")
+    exit(0)
 }
 if coloursPath != nil && (gridPath != nil || redraw != nil || portrait) {
     fail("--colours reads the photos as they are: it goes with neither --grid, --redraw nor --portrait")
@@ -211,7 +230,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--flag-below C] [--colours FILE] [--verbose]")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--flag-below C] [--colours FILE] [--verbose] | app_check --upright PHOTO OUT.png")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,

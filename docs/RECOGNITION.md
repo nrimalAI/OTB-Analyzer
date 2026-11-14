@@ -239,9 +239,14 @@ photos by itself.
   macOS, not yet on iOS, where it decides only the app's rare path of an
   upright photo of 3072 px or less. And a photo with an EXIF orientation
   tag: `app_check` decodes it once in full and moves the pixels to where
-  the tag says, none of them changed (checked against PIL's and OpenCV's
-  upright decode on a photo with tag 6 and one with tag 8: the difference
-  is what the JPEG decoders differ by). Every chess-cv photo of the second
+  the tag says, none of them changed. Checked by the reviewer of pull
+  request #14 for every tag from 1 to 8: a PNG comes out byte for byte as
+  PIL's `exif_transpose` and `cv2.imread` give it, and JPEGs (also grey,
+  CMYK, with a Display P3 profile) and PNGs with alpha, a palette or 16
+  bits come out as the plain full decode with its pixels moved; on chess-cv
+  and samryan photos the difference to PIL and OpenCV is what the JPEG
+  decoders differ by (0.07 and 0.02 levels on average, 7 at most). To do it
+  again: `app_check --upright PHOTO OUT.png` writes what `app_check` reads. Every chess-cv photo of the second
   held-out set has such a tag (840, orientation 6) and two of samryan's
   500. **Until pull request #14 `app_check` loaded those through ImageIO's
   thumbnail call**, a decode of its own making, about a fifth of the bytes
@@ -363,13 +368,15 @@ in which no board was found.
 | chess-cv games (840) | 53.5%; 0; 32 | 80.6%; 0; 12 | 89.3%; 9; 12 |
 | **all (1,619)** | **46.2%; 0; 340** | **75.9%; 3; 44** | **86.3%; 45; 44** |
 
-(This table is from before pull requests #12 and #14: Vision's share as a
-piece's confidence, no rule for the kings, and chess-cv's photos, which
-carry an EXIF orientation, read through ImageIO's thumbnail call and not
-from one full decode. Its chess-cv row and its totals are therefore a
-little off: by a tenth of a point of squares and a few boards exact, going
-by what the change of path does to today's defaults. The current figures
-are in "What one king a side is worth".)
+(This table and the points under it are from before pull requests #12 and
+#14: Vision's share as a piece's confidence, no rule for the kings, and
+chess-cv's photos, which carry an EXIF orientation, read through ImageIO's
+thumbnail call and not from one full decode, whatever the line above the
+table says of each photo. The chess-cv row and the totals are therefore a
+little off: by a tenth of a point of squares, a few boards exact and one
+photo without a board (44 is 45 from the full decode), going by what the
+change of path does to today's defaults. The current figures are in "What
+one king a side is worth".)
 
 - The two app-side steps take the pair in `Models/` from 46% to 76% of
   squares on boards nobody has seen, and from no board in 340 photos to 44.
@@ -411,14 +418,17 @@ against the default. Squares right; boards exact.
 | chesscog (29) | 73.49%; 0 -> 73.71%; 0 | 93.21%; 0 -> 93.59%; 0 |
 | samryan (500) | 70.95%; 0 -> 71.12%; 0 | 83.23%; 16 -> 83.32%; 18 |
 | chess-cv games (840) | 80.60%; 0 -> 80.65%; 0 | 89.43%; 13 -> 89.72%; 21 |
-| **all (1,619)** | **76.01%; 3 -> 76.08%; 3** | **86.40%; 49 -> 86.62%; 68** |
+| **all (1,619)** | **76.00%; 3 -> 76.08%; 3** | **86.40%; 49 -> 86.62%; 68** |
 
 (chess-cv and samryan as re-scored for pull request #14, their photos with
 an EXIF orientation turned from one full decode. Through the thumbnail
 call, as first measured, chess-cv was 80.55%; 0 -> 80.62%; 0 and 89.31%; 9
--> 89.62%; 16, and the totals 75.98%; 3 -> 76.06%; 3 and 86.34%; 45 ->
-86.57%; 63. No board is found in 45 photos in every column; through the
-thumbnail call it was 44.)
+-> 89.62%; 16, and the totals 75.98%; 3 -> 76.07%; 3 and 86.34%; 45 ->
+86.56%; 63 (given at first as 76.06% and 86.57%, from the rounded parts;
+the totals here are from the squares counted). No board is found in 45
+photos in every column; through the thumbnail call it was 44. The outputs
+for every photo are kept outside the repository, on the Mac mini, in
+`Training/runs/app_check/one_king/` and `exif_full_decode/`.)
 
 - **On by default.** The three development sets say so: no set loses in
   total with either piece model, and the pair in `Models/` gains on all
@@ -527,7 +537,8 @@ their marks came from a build with a temporary switch back to the share.)
 
   With the share at 0.85 the same sets had 0.03, 1.9, 1.1 and 1.8 squares
   marked a photo with the pair in `Models/`, and 0.03, 1.3, 0.08 and 1.3
-  with `pieces_s_render1`. No threshold marks most of the wrong pieces and
+  with `pieces_s_render1` (the last of each for the second held-out set
+  with chess-cv through the thumbnail call). No threshold marks most of the wrong pieces and
   few of the right ones: on a board the model has not seen, its scores for
   right and wrong pieces overlap. Nothing of this was tried in the app on a
   phone.
