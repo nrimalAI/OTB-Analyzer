@@ -26,7 +26,12 @@ The tests and the description of the steps hold for any pair.
 **Since 2026-11-14 a1 is taken to be a dark square** (step 7). The tables
 of the three pairs were measured before that rule and are left as they
 were; what the rule changes with the third pair is in "What a dark a1 is
-worth", which is the section for what the app reads now.
+worth".
+
+**Since 2026-11-15 the corner model picks the grid fit's window** (step
+3). What that changes, on top of the dark a1, is in "What the model's
+choice of window is worth", which is the section for what the app reads
+now.
 
 ## The steps (`CoreMLBoardRecognizer.recognize`)
 
@@ -40,6 +45,18 @@ worth", which is the section for what the app reads now.
    no board and the fit accepts, the fit's corners are used alone. Only when
    both fail is there no board. The fit needs no training, so it works on
    boards no model has seen, where learned corners are a square or so off.
+   **The model picks the fit's window** (`GridCorners.windowByModel`, port
+   of `chess_pipeline.window_by_model`): the fit finds the lines of the grid
+   and has to choose which 8×8 squares of it are the board, and a border
+   that looks like a rank of squares makes it choose a window one rank or
+   file off. So where both found the board, the model's corners are looked
+   at in the fit's own board frame: when all four lie within 0.75 squares
+   of the same shift by one square (a rank, a file or both), the fit's
+   window is moved by it, along the fit's own lines. Nothing is moved when
+   the model's corners are nearer the fit's than half a square on average,
+   when they are more than a square off, or when the four do not agree on
+   one shift. The steps after this one (the dark a1, the pieces) see the
+   window as moved.
 4. Piece model: boxes, each with the model's score for every class. The
    class with the highest score is what the piece is taken for, and that
    score is its confidence (see "The scores of a piece" below).
@@ -101,11 +118,12 @@ worth", which is the section for what the app reads now.
    `EDGE_MARGIN`); further out it is a captured or spare piece standing
    beside the board and gets no square.
 
-Steps 3, 6 and 7 can be switched off, the dark a1 of step 7 by itself, and
-step 5 on
-(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:)`).
-How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
-and it is what `Training/evaluate.py --grid-corners` does.
+Steps 3, 6 and 7 can be switched off, the model's choice of window of step
+3 and the dark a1 of step 7 each by itself, and step 5 on
+(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:fitWindow:)`).
+How the two sets of corners combine is
+`CoreMLBoardRecognizer.corners(model:in:gridFit:fitWindow:)`, and it is what
+`Training/evaluate.py --grid-corners --fit-window` does.
 
 ### The scores of a piece
 
@@ -305,6 +323,31 @@ before.
   Two places where the Swift arithmetic is not NumPy 1.26's to the last
   bit are named in `GridSquareColours.swift`; neither changed an answer
   on the 2,311 photos compared.
+- `Training/swift_reference.py window-cases` writes
+  `Fixtures/window_cases.json`: what `window_by_model` makes of 220 pairs
+  of a fit's corners and a model's, built from a few numbers on four fits
+  (a board seen from above, at a slant, from low down, and one whose
+  corners run the other way round): the model's corners near the fit's, a
+  square on in each of the eight directions, two squares on, one corner
+  unlike the other three, the model's corners a rotation on from the
+  fit's, tolerances of 0.5 and 0.95, 80 random ones, and each threshold
+  from both sides (a mean of 0.4999 and 0.5001 of a square, of 1.4999 and
+  1.5001, a corner 0.7499 and 0.7501 from the shift, on each axis and to
+  each side); and where 44 windows lie when moved on purpose
+  (`evaluate.py --shift-fit`). `GridFitWindowTests` replays them: the
+  shift must be the Python's and the corners within a millionth of a
+  pixel; a window left alone is the very corners given. No case hangs on
+  the last bits (the script refuses one within 0.00002 of a threshold),
+  because the two do not share them: the Python gets the fit's
+  homography from a singular value decomposition, the Swift by
+  elimination. More tests move a window on purpose and require the model
+  to move it back, give corners that are no board, and go through the
+  recognizer's own code on a drawn board: the fit's lines with the
+  model's window where the model has the board a rank on, the fit's
+  window where the rule is off, and no move where the fit stands alone or
+  rejects itself. One builds the recognizer as the app does and with the
+  rule switched off and requires the two to differ there, since the four
+  fixture photos read the same either way.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -372,6 +415,11 @@ before.
   For the dark a1, on the corners the app ends with:
   `app_check --models M --list L.json --dark sw.json`,
   `swift_reference.py dark --swift sw.json --list L.json`.
+  For the fit's window, on the corners the app's corner model and its
+  grid fit give (with `--shift-fit FILES,RANKS`: after the fit's window
+  was moved on purpose):
+  `app_check --models M --list L.json --window sw.json [--shift-fit 0,1]`,
+  `swift_reference.py window --swift sw.json`.
 
 ### How close the Swift grid fit is to the Python
 
@@ -539,6 +587,113 @@ so for the third pair it is no longer a set that nothing was chosen on.)
   Much as with the second pair: 2.7 squares a photo on unseen boards, half
   of the wrong pieces among them. The threshold is the owner's to move.
 
+## What the model's choice of window is worth
+
+The rule of step 3: where the corner model and the grid fit both find the
+board, the fit's window is moved by one square when all four of the model's
+corners lie within 0.75 squares of that same shift. It came from the
+reference (`Training/README.md`, "The corner model picks the grid fit's
+window": the tolerance was chosen there on board B, in Python). Measured on
+the Mac mini on 2026-11-15 with the third pair through `app_check`,
+everything else as the app runs it (the dark a1 on), the rule off and on
+through the same binary; with it off every photo reads as in the last
+column of "What a dark a1 is worth". The development sets were run first;
+the second held-out set was then run once, as a test. Squares right; boards
+exact; boards exact or half a turn away; and, of the photos where the model
+and the fit both found the board, how many windows the rule moved.
+
+| Set (photos) | Without the rule | **With it, as the app runs it now** | Windows moved |
+|---|---|---|---|
+| ChessReD test (306) | 99.80%; 295; 297 | **99.80%; 295; 297** | 0 of 288 |
+| Fenit board B (100) | 94.48%; 16; 19 | **94.48%; 16; 19** | 0 of 95 |
+| Fenit A (286) | 98.09%; 233; 255 | **98.14%; 234; 256** | 1 of 274 |
+| *second held-out set:* | | | |
+| Y-LIChess (200) | 89.80%; 55; 63 | **94.81%; 60; 68** | 18 of 194 |
+| ChessQ (50) | 93.44%; 14; 16 | **93.44%; 14; 16** | 0 of 35 |
+| chesscog (29) | 98.17%; 8; 8 | **98.17%; 8; 8** | 0 of 29 |
+| samryan (500) | 96.50%; 115; 123 | **96.50%; 115; 123** | 0 of 360 |
+| chess-cv games (840) | 97.99%; 267; 267 | **97.99%; 267; 267** | 0 of 744 |
+| **all (1,619)** | 96.38%; 459; 477 | **97.00%; 464; 482** | 18 of 1,362 |
+
+- **Only photos whose window moved read differently**: 19 of 2,311, and
+  every other photo reads as before, square for square. As 3:4 photos
+  ChessReD test and board B read as before too (99.68%; 282; 284 and
+  94.45%; 16; 19).
+- **The 18 of Y-LIChess** are the photos where the fit took a window one
+  rank off ("What a dark a1 is worth", "The 16 the rule made"). All 16
+  full boards named there are among them: read at 19 to 24 squares of 64
+  before, a rank off and turned by a quarter, they now have 61 to 64
+  right, five of them all 64 (`wood_0150`, `0156`, `0158`, `0165`,
+  `0178`) and the others one to three squares short. `wood_0148` (Black's pieces alone) goes from 43 to 63. In all,
+  17 photos gain 665 squares.
+- **The one that loses squares is mended too.** `wood_0202` is a layout
+  with every piece on one half of the board, kinds and sides in no order a
+  game has. It goes from 24 squares to 0: before, a rank off and a quarter
+  turn off; now on the right squares and half a turn round, 62 of 64 once
+  turned, which is one tap in the app. The pieces of such a layout say
+  nothing true about where White sits. It is not counted among the boards
+  "exact or half a turn away", since two squares are wrong.
+- **Fenit A's one** is an endgame of six pieces
+  (`7r_8_8_6k1_R6p_6pK_8_8 w.jpg`) on which the app's fit took a window
+  one file off: 55 squares before, all 64 now. It is the photo that was
+  left a quarter off on Fenit A under the dark a1. The reference, from its
+  own reading of the corner model and its own fit, moves no window on the
+  development sets; the app moves this one.
+- **Readings a quarter off**, counted as in "What a dark a1 is worth".
+  By where the pieces land: the second held-out set 19 -> 1 (Y-LIChess 18
+  -> 0), Fenit A 1 -> 0. By squares: the second held-out set 10 -> 1
+  (Y-LIChess 9 -> 0), Fenit A 1 -> 0. The one left by either count is
+  ChessQ `0011`, a photo whose square colours say nothing and on which
+  only one of the model and the fit finds the board, so that this rule
+  has no say.
+- **How near the rule came to moving a window it should not.** It needs
+  the mean of the four corners' offsets to round to a square, so to be
+  over half a square. Of the 2,000 photos left alone on which both found
+  the board, four have a mean over 0.4: two of board B (0.85 and 0.62) and
+  two of ChessQ (0.69 and 0.59). On each the model's worst corner is a
+  square and more from the fit's (4.2, 2.7, 1.5 and 1.4 squares) and the
+  four corners do not agree on one shift, so nothing moves. On every other photo the mean is 0.32 or less. Nothing
+  here says what a corner model that is itself a whole square off would
+  do: the rule would then move a right window, and no photo of these sets
+  shows it.
+- **Windows moved on purpose** (`app_check --window F --shift-fit 0,1`; a
+  window is moved back when every corner of the model lies within 0.75
+  squares of where the fit had it, so each of the four directions gives
+  the same count): board B 80 of 95, Fenit A 273 of 274, ChessReD test 287
+  of 288. In Python the reference counts 60 of 93, 272 of 278 and 287 of
+  289: the app's corner model, fed by Vision's resize, lies nearer the fit
+  on board B than the Python's reading of the same model does. With 0.5
+  and 0.95 for the tolerance the app's count on board B is 68 and 88
+  (Python 46 and 66). On the second held-out set (not to be chosen on,
+  and it was not) 0.5 and 0.95 would move the same 18 windows.
+- **The Swift against the Python on the same corners** (`app_check
+  --window`, `swift_reference.py window`): the same shift on all 2,019
+  photos where both found the board, and on the 657 of the development
+  sets again with the window moved on purpose; the corners within a
+  millionth of a pixel. The Python
+  counted 14 windows moved on Y-LIChess from its own corners and its own
+  fit, the app 18 from its own: the difference is in what the two are
+  given, not in the rule.
+- **Against the goal** on boards nobody trained on: 464 of 1,619 photos
+  fully right (29%) and still 16 of board B's 100; the goal is 85%.
+- **What the app marks** (confidence under 0.85) on the second held-out
+  set: 58% of the wrong pieces (52% without the rule: the wrong pieces
+  fall from 3,038 to 2,717 and the marked ones among them stay 1,581,
+  so the pieces the window put right were hardly ever marked), 8.3% of
+  the right ones, 2.7 squares a photo.
+- **Time**: none that can be measured; the rule is two four-point
+  homographies. Processor time over a set with the rule against without:
+  ChessReD test 65.8 s against 65.2 s, Fenit A 89.6 s against 89.7 s.
+  Single runs on a Mac mini that was training; nothing was timed on a
+  phone.
+- **What it cannot do.** It moves a window by one square, not two. It has
+  no say where only one of the two finds the board (257 of the 1,619
+  photos of the second held-out set: the fit alone, or the model's
+  corners where the fit rejects itself), or where the model is off by a
+  rank as well. And it trusts the
+  corner model to be less than a whole square off: true of this one on
+  these sets, and to be measured again with every new corner model.
+
 ## What a dark a1 is worth
 
 The rule of step 7: the colours of the squares leave two of the four ways
@@ -625,7 +780,9 @@ by a quarter.
     the corners came. Their squares do not show it: 20 to 25 of 64 before,
     19 to 24 after, 357 and 358 in all. The eight full boards that lose
     a square or two, above, are all among them. For the user it is a
-    reading that was useless and is now useless and turned.
+    reading that was useless and is now useless and turned. (Since
+    2026-11-15 the corner model moves the window on all 16: "What the
+    model's choice of window is worth".)
   - The other three: two Y-LIChess layouts, `wood_0148` (Black's pieces
     alone; a quarter off with and without the rule, 48 squares against
     43) and `wood_0202` (half a turn off without the rule, a quarter off
