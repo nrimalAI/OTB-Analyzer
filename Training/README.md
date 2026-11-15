@@ -615,6 +615,56 @@ on board B windows moved on purpose come back on 68 / 80 / 88 of 95 at
 0.5 / 0.75 / 0.95, so a wider tolerance is an open choice for the
 development sets.
 
+**The side of single pieces (2026-11-15; in the reference, `chess_pipeline.odd_sides`
+and `evaluate.py --odd-sides`; not in the app yet, off by default).** Through
+the app the pair in `Models/` reads 30 of board B's 100 photos with one
+square wrong and 16 with two, and of those 62 squares 28 are a white piece
+read as black (20 of them pawns). The model is right about most pieces of
+such a photo, so its own answers say what colour each side has there: the
+median colour of the pieces it calls White and of those it calls Black. A
+piece called Black whose colour is twice as near White's as the other Black
+pieces' is made White. Three guards: the two colours must be three spreads
+apart and White's the lighter; a piece with another standing in front of the
+patch its colour is measured on is left out (without that, five pieces of
+ChessReD test were changed, all wrongly, all behind a piece of the other
+side); and it works one way only, Black to White, because a light piece in a
+shadow is as dark as a black one and little makes a dark piece light.
+
+End to end in Python with the pair in `Models/` (`--one-piece-per-spot 0.7
+--grid-corners --fit-window --a1-from-pieces 6 --a1-dark --one-king`,
+`runs/dumps/tone1.txt` -> `runs/scores/odd_sides_tone1.txt`): **board B
+94.28% -> 94.98% of squares, 19 -> 36 boards exact**, 48 pieces changed on
+38 photos, every one of them rightly; Fenit A (231 of 286) and ChessReD test
+(297 of 306): not one piece changed.
+
+What it does to pieces that are right was measured where the sides are
+known: the 9,178 real photos of `merged_all5` with their labelled boxes
+(eleven sources; `runs/dumps/truth_all5.jsonl`). Changing sides both ways,
+the rule changes a right piece on 301 photos (3.3%), and four in five of the
+408 pieces are light pieces made Black: chesscog's light wood in the shadow
+of its spot lamps (229), then the tournament photos of
+`chess-vision-ljby5`, where hands cover pieces. One way, it is 65 photos
+(0.7%): 48 of ljby5's 1,500 and 17 of the other 7,678 (0.2%). Of white
+pieces relabelled Black one at a time it puts 76% back. Stricter numbers
+change fewer right pieces and mend fewer wrong ones: `nearer` 3 takes the
+65 photos to 42 and board B's 36 boards to 30; `apart` 6, to 55 and 34;
+both, to 37 and 28. The numbers stay where board B had them.
+
+Then the second test set, as a test, in Python with the same flags for both
+(`runs/scores/heldout2_pair_tone1_canon1_spot07_base.txt` against
+`..._oddsides_oneway.txt`): 53 pieces changed on 50 photos (47 on samryan, 5
+on the Y-LIChess layouts, 1 on ChessQ; none on the Y-LIChess games, chesscog
+or the chess-cv games); boards exact the same on every part (14, 24, 21, 13,
+33 and 43), samryan 15 squares more, the rest not a square different (the
+changes on Y-LIChess and ChessQ are pieces standing beside the board). So on
+nineteen boards it has not seen it mends next to nothing and breaks
+nothing: the gain is board B's, the board whose fault it was written for.
+The two-way rule, run there first, changed 71 pieces for 14 squares more
+and one board fewer; that it was no better than a coin there is what sent
+me to the training photos, where the shadow showed. These are Python
+figures (with one box a spot samryan and the chess-cv games read lower here
+than through the app): the app's are the ones that count, once it is ported.
+
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
 read as p 8 times, a black pawn on an empty square 6, Q as q 3, K as k 3,
@@ -1182,6 +1232,11 @@ that the count is known:
    part before any pull request. It had already lost 22 boards on Fenit
    board A, a development set, which alone would have kept it out; here it
    loses 17 boards on Y-LIChess and 24 in all, and that settled it.
+7. The side rule for single pieces (`odd_sides`) was run here twice in
+   Python: first changing sides both ways, where it gained nothing, and,
+   after it was made one-way on the training photos' labelled sides, again.
+   The first run is why the wrong changes were looked for; they were looked
+   for and counted on training photos, not here.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else

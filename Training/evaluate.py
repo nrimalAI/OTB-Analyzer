@@ -32,7 +32,7 @@ from pathlib import Path
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, board_crop, colour_patch, fen_placement_to_board, homography, project,
-    one_king_a_side, orient_by_pieces, sides_from_colour, window_by_model, WINDOW_NEAR,
+    odd_sides, one_king_a_side, orient_by_pieces, sides_from_colour, window_by_model, WINDOW_NEAR,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -356,6 +356,15 @@ def main():
                     help="decide White and Black from the colours of the detected "
                          "pieces where the model's answer does not fit them "
                          "(chess_pipeline.sides_from_colour)")
+    ap.add_argument("--odd-sides", action="store_true",
+                    help="make White the single pieces called Black whose colour is "
+                         "plainly the White side's in this photo (chess_pipeline.odd_sides)")
+    ap.add_argument("--dump-pieces", metavar="FILE",
+                    help="write one JSON line a photo to FILE: the photo, the labelled "
+                         "board, the homography used, and every piece as it is given to "
+                         "the squares (class, confidence, box, colour as piece_colours "
+                         "measures it), to try a rule on the pieces without running the "
+                         "models again")
     ap.add_argument("--grid-corners", action="store_true",
                     help="replace the corners by the classical grid fit "
                          "(grid_corners.py) where it accepts its own result; the "
@@ -451,6 +460,8 @@ def main():
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
     exact_or_flipped = grid_rejected = grid_alone = sides_changed = kings_changed = 0
+    dump = open(args.dump_pieces, "w") if args.dump_pieces else None
+    odd_changed = odd_boards = 0
     a1_colour_unclear = a1_colour_moved = windows_moved = 0
     confusion = Counter()
 
@@ -545,6 +556,11 @@ def main():
             before = [d.cls for d in detections]
             detections = sides_from_colour(detections, piece_colours(src, detections))
             sides_changed += any(d.cls != c for d, c in zip(detections, before))
+        if args.odd_sides and not args.gt_boxes:
+            before = [d.cls for d in detections]
+            detections = odd_sides(detections, piece_colours(src, detections))
+            odd_changed += sum(d.cls != c for d, c in zip(detections, before))
+            odd_boards += any(d.cls != c for d, c in zip(detections, before))
         if args.one_king and not args.gt_boxes:
             before = [d.cls for d in detections]
             detections = one_king_a_side(detections, kind_scores_of(detections, every_box))
@@ -565,6 +581,13 @@ def main():
             H = homography(orient_by_pieces(kpts, detections, args.pull,
                                             prior=args.a1_from_pieces, turns=turns))
         predicted = assign_squares(H, detections, pull=args.pull)
+        if dump is not None:
+            colours = piece_colours(src, detections)
+            dump.write(json.dumps({
+                "photo": str(src), "homography": [[float(v) for v in row] for row in H],
+                "board": {f"{f},{r}": letter for (f, r), letter in gt.items()},
+                "pieces": [{"cls": d.cls, "confidence": d.confidence, "bbox": list(d.bbox),
+                            "lab": c} for d, c in zip(detections, colours)]}) + "\n")
         pred_letters = {sq: FEN_LETTER[cls] for sq, (cls, _) in predicted.items()}
 
         # 3. score all 64 squares
@@ -601,6 +624,8 @@ def main():
         if args.limit and boards >= args.limit:
             break
 
+    if dump is not None:
+        dump.close()
     if boards == 0:
         print("No images evaluated — check --split / paths.")
         return
@@ -624,6 +649,8 @@ def main():
             print(f"grid fit's window moved by a square to where the corner model has the board: {windows_moved}")
         print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
         print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
+    if args.odd_sides:
+        print(f"single pieces made White by their colour: {odd_changed} on {odd_boards} boards")
     if args.sides_from_colour:
         print(f"sides taken from the pieces' colours on: {sides_changed} boards")
     if args.one_king:
