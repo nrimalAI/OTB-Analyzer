@@ -117,8 +117,8 @@ import Testing
     /// The corner model picks the grid fit's window: on unless switched off
     /// (`docs/RECOGNITION.md`, "What the model's choice of window is worth"),
     /// and the recognizer hands its own setting on to where the two sets of
-    /// corners meet (`corners(model:in:)`, the method `recognize` calls
-    /// through `locate`). The fixture photos read the same with the rule and
+    /// corners meet (`corners(model:in:)`, the method `recognize` calls).
+    /// The fixture photos read the same with the rule and
     /// without, so they would not notice it missing: here a drawn board and
     /// a model that has it one rank on.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))

@@ -224,6 +224,12 @@ struct GridFitWindowTests {
             #expect(GridCorners.windowByModel(fit: board, model: on).moved)
             for bad in [CGFloat.nan, .infinity, -.infinity] {
                 for corner in 0..<4 {
+                    // (of the fit's too, as the Python)
+                    var broken = board
+                    broken[corner].x = bad
+                    #expect(GridCorners.windowByModel(fit: broken, model: on).files == 0)
+                    #expect(GridCorners.windowByModel(fit: broken, model: on).ranks == 0)
+                    #expect(GridCorners.shifted(broken, files: 0, ranks: 1) == nil)
                     var model = on
                     model[corner].x = bad
                     var window = GridCorners.windowByModel(fit: board, model: model)

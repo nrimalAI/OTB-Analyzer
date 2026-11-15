@@ -35,7 +35,9 @@ extension GridCorners {
     /// `near` squares of the same shift by one square (one rank, one file or
     /// both), the window is moved by it. Otherwise nothing changes: when the
     /// model's corners are near the fit's, and when they are too far off or
-    /// too unlike a shift to be believed.
+    /// too unlike a shift to be believed. What it gets wrong: a model whose
+    /// four corners all lie more than half a square off the same way moves
+    /// a window that was right.
     public static func windowByModel(
         fit: [CGPoint], model: [CGPoint], near: Double = windowNear
     ) -> Window {
@@ -45,8 +47,9 @@ extension GridCorners {
         // How far each of the model's corners lies from the fit's, in squares.
         var offsets: [(x: Double, y: Double)] = []
         for (corner, at) in zip(model, Self.frame) {
-            // (A corner on the fit's horizon, or one that is not a number:
-            // the Python goes on with numbers that are none and fails.)
+            // (A corner that is not a number: left alone, as in the
+            // Python. One on the fit's horizon: the Python goes on with
+            // numbers that are none and fails.)
             guard let p = h.project(corner), p.x.isFinite, p.y.isFinite else { return same }
             offsets.append((p.x - at.x, p.y - at.y))
         }
