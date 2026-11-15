@@ -25,7 +25,9 @@ import Vision
 /// Black from the colours of the pieces where the piece model's own answer
 /// does not fit them (`PieceSides`), is there but switched off: on boards
 /// nobody tuned its rule on, it fails with the piece model it was made for.
-/// A fourth sees to it that each side has one king (`OneKingASide`).
+/// A fourth sees to it that each side has one king (`OneKingASide`). And a1
+/// is a dark square: the pieces choose between the two ways round that the
+/// colours of the squares allow (`GridCorners.squareColours`).
 ///
 /// The photo's pixels are decoded once for all of it (`DecodedImage`).
 /// Both models see the photo letterboxed into a square (`Letterbox`), as in
@@ -46,6 +48,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let sidesFromColour: Bool
     /// Internal for testing.
     let oneKing: Bool
+    /// Internal for testing.
+    let a1Dark: Bool
 
     /// - Parameters:
     ///   - a1Prior: which corner is a1 is checked against the pieces
@@ -74,6 +78,13 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     80 boards fully right of that set's 1,619 with
     ///     `pieces_s_render3`, 109 with `pieces_s_tone1` ("What the app
     ///     reads with the third pair").
+    ///   - a1Dark: a1 is a dark square, so where the colours of the squares
+    ///     can be told apart the pieces choose between two ways round, half
+    ///     a turn apart, and can no longer turn a board by a quarter
+    ///     (`GridCorners.squareColours`). Has no effect where which corner
+    ///     is a1 is not checked against the pieces (`a1Prior` nil and the
+    ///     corners the model's). A board set up with a light square on a1
+    ///     is read a quarter turn off.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -82,7 +93,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         a1Prior: Double? = 6,  // = BoardOrientation.appPrior
         gridFit: Bool = true,
         sidesFromColour: Bool = false,
-        oneKing: Bool = true
+        oneKing: Bool = true,
+        a1Dark: Bool = true
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
@@ -92,6 +104,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.gridFit = gridFit
         self.sidesFromColour = sidesFromColour
         self.oneKing = oneKing
+        self.a1Dark = a1Dark
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -138,23 +151,17 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             throw RecognitionError.boardNotFound
         }
 
-        // Corners: the model's, the grid fit's, or both (see `corners(model:in:gridFit:)`).
-        var modelCorners: [CGPoint]?
-        do {
-            let found = try detectCorners(in: square, letterbox: letterbox)
-            if Homography(corners: found) != nil {
-                modelCorners = found
-            }
-        } catch RecognitionError.boardNotFound {
-            // The grid fit may still find the board.
-        }
-        guard let located = Self.corners(model: modelCorners, in: image, gridFit: gridFit) else {
-            throw RecognitionError.boardNotFound
-        }
+        // The photo at the grid fit's working size, shrunk once for the fit
+        // and for the square colours.
+        let whole = gridFit || (a1Dark && a1Prior != nil) ? GridCorners.workingImage(of: image) : nil
+        guard let located = try locate(
+            in: image, square: square, letterbox: letterbox, whole: whole)
+        else { throw RecognitionError.boardNotFound }
         let detections = try detectPieces(in: square, letterbox: letterbox)
         guard let placed = Self.place(
             detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
-            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: a1Prior, pull: pull)
+            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: a1Prior, a1Dark: a1Dark,
+            pull: pull, whole: whole)
         else { throw RecognitionError.boardNotFound }
 
         return RecognitionResult(
@@ -164,11 +171,30 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         )
     }
 
+    /// The corners: the model's, the grid fit's, or both (see
+    /// `corners(model:in:gridFit:)`); nil for no board.
+    private func locate(
+        in image: CGImage, square: CGImage, letterbox: Letterbox, whole: GrayImage.Working? = nil
+    ) throws -> (corners: [CGPoint], fromModel: Bool)? {
+        var modelCorners: [CGPoint]?
+        do {
+            let found = try detectCorners(in: square, letterbox: letterbox)
+            if Homography(corners: found) != nil {
+                modelCorners = found
+            }
+        } catch RecognitionError.boardNotFound {
+            // The grid fit may still find the board.
+        }
+        return Self.corners(model: modelCorners, in: image, gridFit: gridFit, whole: whole)
+    }
+
     /// What follows the two models, in `evaluate.py`'s order: the sides from
     /// the colours first, since the kings are counted by side and which
     /// corner is a1 is read from sides and kinds; then one king a side; then
-    /// a1; then the squares. Returns the corners as finally turned and the
-    /// board; nil when the corners are not a board. Internal for testing.
+    /// a1, among the ways round the colours of the squares allow; then the
+    /// squares. Returns the corners as finally turned and the board; nil
+    /// when the corners are not a board. `whole`: the photo at the grid
+    /// fit's working size, when the caller has it. Internal for testing.
     static func place(
         _ found: [PieceDetection],
         corners located: [CGPoint],
@@ -177,7 +203,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         sidesFromColour: Bool,
         oneKing: Bool,
         a1Prior: Double?,
-        pull: Double
+        a1Dark: Bool,
+        pull: Double,
+        whole: GrayImage.Working? = nil
     ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
         var corners = located
         var detections = found
@@ -188,8 +216,13 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             detections = OneKingASide.apply(detections)
         }
         if let prior = orientationPrior(fromModel: cornersFromModel, configured: a1Prior) {
+            // As `evaluate.py --a1-dark`: on the corners as they are by now,
+            // the grid fit's where it stands, the model's where it does not.
+            let turns = a1Dark
+                ? GridCorners.squareColours(in: image, corners: corners, whole: whole).rotations
+                : nil
             corners = BoardOrientation.orient(
-                corners: corners, detections: detections, pull: pull, prior: prior)
+                corners: corners, detections: detections, pull: pull, prior: prior, turns: turns)
         }
         guard let homography = Homography(corners: corners) else { return nil }
         return (corners, SquareAssignment.assign(
@@ -205,6 +238,22 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             imageSize: CGSize(width: image.width, height: image.height))
         guard let square = letterbox.render(image) else { return [] }
         return PieceSides.diagnose(try detectPieces(in: square, letterbox: letterbox), in: image)
+    }
+
+    /// The corners the recognizer ends with before which of them is a1 is
+    /// checked against the pieces, and what the colours of the squares say
+    /// of them, whether or not that is switched on: for checking it against
+    /// the Python (`app_check --dark`). Nil for no board.
+    public func diagnoseSquareColours(
+        _ photo: CGImage
+    ) throws -> (corners: [CGPoint], colours: GridCorners.SquareColours)? {
+        let image = DecodedImage.once(photo)
+        let letterbox = Letterbox(
+            imageSize: CGSize(width: image.width, height: image.height))
+        guard let square = letterbox.render(image),
+              let located = try locate(in: image, square: square, letterbox: letterbox)
+        else { return nil }
+        return (located.corners, GridCorners.squareColours(in: image, corners: located.corners))
     }
 
     // MARK: - Grid fit
@@ -223,9 +272,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///   pieces alone).
     /// - Neither: nil, no board.
     static func corners(
-        model: [CGPoint]?, in image: CGImage, gridFit: Bool
+        model: [CGPoint]?, in image: CGImage, gridFit: Bool, whole: GrayImage.Working? = nil
     ) -> (corners: [CGPoint], fromModel: Bool)? {
-        let fit = gridFit ? GridCorners.find(in: image) : nil
+        let fit = gridFit ? GridCorners.find(in: image, whole: whole) : nil
         switch (model, fit) {
         case let (model?, fit?):
             return (GridCorners.turned(fit.corners, nearestTo: model), true)
