@@ -588,6 +588,19 @@ ChessReD test falls from 97.7% of boards exact to 91.5 / 88.2 / 83.0 /
 `runs/scores/drop_inside_tone1.txt`). Boxes cannot tell the two apart; the
 model has to.
 
+**Also tried and not taken: no more of a kind on a side than a set has.**
+Through the app the pair in `Models/` reads a second queen, a third knight
+or the like on 32 of board B's 100 boards (9 of Fenit A's 286, 5 of
+ChessReD test's 306), and no position of these sets has one. A rule after
+the two-kings rule that renames the surplus pieces to the kind the model
+scored next best (kings never) can only act where the model gave a second
+score, and for most of them it gives none: it is sure of its second queen.
+With labelled corners and `pieces_s_tone1` it changes 4 boards of board B
+(96.83% -> 96.88% of squares, no board gained), none of Fenit A and 2 of
+ChessReD test (299 -> 301 boards exact; `runs/scores/set_limits_tone1.txt`).
+Too little for a rule that reads a promoted piece wrong; not in the
+reference.
+
 The goal is still far: 16% of boards fully right on board B and 28% on the
 second test set (27% before a1 on a dark square), where the target is 85%. What is wrong on board B now,
 with labelled corners: P read as p 39 times, kings read as queens 23 times,
