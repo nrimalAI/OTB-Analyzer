@@ -617,8 +617,8 @@ on board B windows moved on purpose come back on 68 / 80 / 88 of 95 at
 development sets.
 
 **The side of single pieces (2026-11-15; in the reference, `chess_pipeline.odd_sides`
-and `evaluate.py --odd-sides`; in the app since pull request #28, off by
-default there too until it is measured through `app_check`).** Through
+and `evaluate.py --odd-sides`; in the app and on by default there since
+pull request #30; `evaluate.py` leaves it off unless asked).** Through
 the app the pair in `Models/` reads 30 of board B's 100 photos with one
 square wrong and 16 with two, and of those 62 squares 28 are a white piece
 read as black (20 of them pawns). The model is right about most pieces of
@@ -683,12 +683,26 @@ differs on any of the 1,619 photos. The app changes fewer pieces than the
 Python (41 against 48 on board B, none against 53 on the second test set)
 because it reads the photos better to begin with. So the rule is worth
 fifteen boards on board B and nothing, either way, on the nineteen boards
-of the second test set: asked to be on by default in the app.
+of the second test set: on by default in the app since pull request #30.
+
+What it costs, found by the app-side session when it switched it on
+(`docs/RECOGNITION.md`, "What the side of single pieces is worth"): drawn
+as 3:4 photos, ChessReD test loses one square on one photo (G000_IMG064, 63
+-> 62; 282 boards exact either way; board B as 3:4 gains as above, 16 ->
+31). A black rook stands behind a white knight; as the photo is taken the
+piece model finds the knight, the rook counts as hidden and is left alone;
+drawn as 3:4 it does not find the knight, nothing stands in front of the
+rook for the rule, and the rook, whose patch shows the knight, is made
+White. So the guard depends on the piece model finding the piece in front.
+The second test set served this rule as a gate (items 7 and 9 of its list
+of uses): the run through the app tests for harm only. And the rule mends
+a fault of this piece model: it is to be measured again whenever the piece
+model changes.
 
 **A side without a king takes its queen (2026-11-15; in the reference,
 `one_king_a_side(..., queen_for_king=True)` and `evaluate.py
---queen-for-king`; ported in pull request #29, off by default, and to
-stay off: see the end of this entry).** With the sides
+--queen-for-king`; in the app since pull request #29, off by default in
+both, and to stay off: see the end of this entry).** With the sides
 mended (the paragraphs above, Python), board B has 36 boards right, 21 one
 square off and 13 two off, and of those 47 squares 15 are the black king
 read as a queen and 2 the white one. `one_king_a_side` leaves them: it
@@ -967,16 +981,22 @@ tests, and the first corner model does not. Until pull request #15 the piece
 model beside it was the baseline piece weights exported with NMS across
 classes.
 
-**What a new model has to beat** (through `app_check` built from 0b9cd6f
+**What a new model has to beat** (through `app_check` built from 00fd9b1
 or later, with the app's defaults: grid fit on, its window where the corner
-model has the board, a1 on a dark square, head start 6, one king a side,
-colour step off, each photo decoded once; the pair in `Models/`,
-`runs/app_check/window/now_*.txt`, and `window_h2/now_*.txt` for the second
-test set): ChessReD test 295 of 306 boards exact, two more once turned by
-180 degrees; Fenit board B 94.48% of squares, 16 boards exact, every board
+model has the board, a1 on a dark square, head start 6, the side of single
+pieces, one king a side, the whole-board colour step and the queen for a
+king off, each photo decoded once; the pair in `Models/`,
+`runs/app_check/now30/now_*.txt`, and `window_h2/now_*.txt` for the second
+test set, where the side of single pieces changes no reading): ChessReD
+test 295 of 306 boards exact, two more once turned by 180 degrees; Fenit
+board B 94.94% of squares, 31 boards exact (35 once turned), every board
 found; Fenit A 98.14% of squares, 234 of 286 exact; second test set 97.00%
-and 464 of 1,619; as 3:4 photos (`window/now_*_portrait.txt`) ChessReD
-test 282, board B 94.45%. Outputs
+and 464 of 1,619; as 3:4 photos (`now30/now_*_portrait.txt`) ChessReD
+test 282, board B 94.91% and 31. Before the side of single pieces (builds
+up to b3e18dd with it off, `runs/app_check/window/`): board B 94.48% and
+16, the rest the same. The side of single pieces mends a fault of the
+piece model in `Models/`: with another piece model, run it off and on
+(`app_check --odd-sides off|on`) before counting on it. Outputs
 in `runs/app_check/dark*/` and `tone1/` are from earlier builds: re-run the
 pair in `Models/` with the build a candidate is run with. Compare two models only through the same
 build of `app_check`: every app-side step moved these numbers a little, and

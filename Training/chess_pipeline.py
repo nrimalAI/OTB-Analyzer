@@ -482,7 +482,7 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR, queen_for_king=Fa
     becomes its best-scoring other kind (a queen when it has no other score).
     A piece keeps its side, confidence and box.
 
-    `queen_for_king` (off unless asked for; not in the app): where a side
+    `queen_for_king` (off unless asked for, in the app too): where a side
     without a king has no piece with a "king" score of `floor`, its queen is
     made the king, and of several queens the one the model is least sure of.
     A king the model is sure is a queen is the commonest thing left wrong on
