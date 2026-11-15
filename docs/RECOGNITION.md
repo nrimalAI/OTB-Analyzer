@@ -81,8 +81,10 @@ worth", which is the section for what the app reads now.
    two only. They are half a turn apart, so the pieces can still turn a
    board round and can no longer turn it by a quarter, which is what they
    did to boards with few pieces and what the app's flip button does not
-   mend. The head start still goes to the corners as they came, when those
-   are one of the two. The colours say nothing, and all four rotations stay,
+   mend. (A reading can still come out a quarter off where the colours
+   themselves mislead: corners a square off the board, or a board set up
+   the wrong way, below.) The head start still goes to the corners as they
+   came, when those are one of the two. The colours say nothing, and all four rotations stay,
    when fewer than 40 cells are seen, when the lighter and the darker cells
    are less than 15 grey levels apart, or when the two colours do not split
    cleanly (each cell is called light or dark; the share of light cells
@@ -563,7 +565,8 @@ by a quarter.
 | chess-cv games (840) | 97.99%; 267; 267; 0 | **97.99%; 267; 267; 0** |
 | **all (1,619)** | 95.86%; 439; 451; 26 | **96.38%; 459; 477; 0** |
 
-- **No set loses, and the quarter turns are gone.** On the second held-out
+- **No set loses, and no board is left that is right once turned by a
+  quarter.** On the second held-out
   set 85 photos read differently: 58 have more squares right (606 squares)
   and 13 fewer (63); the other 14 have as many right as before, read
   another way round. Y-LIChess 27 better and 12 worse, samryan 29 and 1,
@@ -587,6 +590,22 @@ by a quarter.
   0, 0 and 4 after, one of them now exact once turned by half). The last, and samryan's, are
   endgames that were a quarter off and are now half a turn off with one
   square fewer. No board that was fully right is lost.
+- **Not every quarter turn is gone.** The pieces can no longer cause one;
+  the colours can, where the corners are a square off the board (its
+  colours are then the other way round and the rule forces a quarter turn)
+  or the board is set up with a light a1. Counting every photo that has
+  more squares right once its reading is turned by a quarter than as read
+  or turned by half, whether or not it is then fully right: the second
+  held-out set 77 without the rule and 10 with it (Y-LIChess 40 -> 9,
+  ChessQ 4 -> 1, samryan 33 -> 0), Fenit A 10 -> 1, board B 4 -> 0,
+  ChessReD test none either way. Of the 11 that remain, eight are
+  readings that are wrong whichever way they are turned, a square or two
+  apart between rotations: seven full Y-LIChess boards at 20 to 25
+  squares (six of them among the full boards above) and a Fenit A endgame
+  at 55 to 57. Three fit clearly better a quarter on: two Y-LIChess
+  layouts (`wood_0148`, 48 squares against 43; `wood_0202`, 32 against 24)
+  and one ChessQ photo (`0011`, 52 against 35, read the same with and
+  without the rule). Found by the reviewer of pull request #23.
 - **Against the goal** on boards nobody trained on: 459 of 1,619 photos
   fully right (28%; 27% without the rule) and still 16 of board B's 100;
   the goal is 85%.
