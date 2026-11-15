@@ -26,6 +26,8 @@ struct OneKingASideTests {
         }
         let detections: [Detection]
         let out: [String]
+        /// The same with `queen_for_king`.
+        let out_queen: [String]
     }
 
     static func kind(named name: String) -> Piece.Kind? {
@@ -56,7 +58,7 @@ struct OneKingASideTests {
             [Recorded].self, from: Data(contentsOf: fixtures.appending(path: "king_cases.json")))
         #expect(cases.count >= 250)
 
-        var given = 0, taken = 0, alone = 0
+        var given = 0, taken = 0, alone = 0, crowned = 0
         for (number, recorded) in cases.enumerated() {
             let detections = try recorded.detections.enumerated().map { index, d in
                 try Self.detection(d.cls, confidence: d.confidence, index: index, scores: d.scores)
@@ -77,11 +79,28 @@ struct OneKingASideTests {
             let kings = detections.filter { $0.piece == .king }.count
             let changed = Self.labels(detections) != recorded.out
             if kings == 2 { alone += 1 } else if changed && kings < 2 { given += 1 } else if changed { taken += 1 }
+
+            // The same with a side without a king taking its queen.
+            let withQueen = OneKingASide.apply(detections, queenForKing: true)
+            #expect(Self.labels(withQueen) == recorded.out_queen, "case \(number), queen for king")
+            for (before, after) in zip(detections, withQueen) {
+                #expect(after.color == before.color && after.confidence == before.confidence
+                    && after.boundingBox == before.boundingBox && after.kindScores == before.kindScores,
+                    "case \(number), queen for king")
+                #expect(after.shownConfidence == (after.piece == before.piece
+                    ? nil : Float(before.kindScores[after.piece] ?? 0)), "case \(number), queen for king")
+            }
+            if recorded.out_queen != recorded.out { crowned += 1 }
+            // Switched off by name it is the rule as it was.
+            #expect(Self.labels(OneKingASide.apply(detections, queenForKing: false)) == recorded.out,
+                    "case \(number)")
         }
         // The cases cover each branch of the rule.
         #expect(given >= 50)
         #expect(taken >= 50)
         #expect(alone >= 20)
+        #expect(crowned >= 30)
+        print("one king: \(cases.count) cases as in Python; with a queen for a king \(crowned) of them differ")
     }
 
     // MARK: - By hand
@@ -155,6 +174,98 @@ struct OneKingASideTests {
             ("white_king", ["king": 0.9]), ("white_king", ["king": 0.8, "queen": 0.1]),
             ("white_king", ["king": 0.7]), ("black_queen", ["king": 0.6]),
         ]) == ["white_king", "white_queen", "white_queen", "black_queen"])
+    }
+
+    /// `queenForKing`: a side without a king, and without a piece the model
+    /// gave a "king" score of the floor, takes its queen.
+    @Test func testASideWithoutAKingTakesItsQueen() throws {
+        func crowned(_ pieces: [(String, Float, [String: Double])], queenForKing: Bool = true) throws -> [String] {
+            let detections = try pieces.enumerated().map { index, piece in
+                try Self.detection(piece.0, confidence: piece.1, index: index, scores: piece.2)
+            }
+            return Self.labels(OneKingASide.apply(detections, queenForKing: queenForKing))
+        }
+        // One queen; without the switch nothing.
+        let one: [(String, Float, [String: Double])] = [
+            ("white_king", 0.9, ["king": 0.9]), ("black_queen", 0.9, [:]), ("black_rook", 0.9, ["king": 0.01]),
+        ]
+        #expect(try crowned(one) == ["white_king", "black_king", "black_rook"])
+        #expect(try crowned(one, queenForKing: false) == ["white_king", "black_queen", "black_rook"])
+        // A piece with a "king" score on the floor comes first.
+        #expect(try crowned([
+            ("white_king", 0.9, ["king": 0.9]), ("black_queen", 0.9, [:]), ("black_rook", 0.9, ["king": 0.02]),
+        ]) == ["white_king", "black_queen", "black_king"])
+        #expect(try crowned([
+            ("white_king", 0.9, ["king": 0.9]), ("black_queen", 0.9, [:]),
+            ("black_rook", 0.9, ["king": 0.02 - 1e-9]),
+        ]) == ["white_king", "black_king", "black_rook"])
+        // Several queens: the one the model is least sure of, by the
+        // confidence and not by the "queen" score; equally sure, the first.
+        #expect(try crowned([
+            ("white_queen", 0.9, ["queen": 0.2]), ("white_queen", 0.4, ["queen": 0.9]),
+            ("white_queen", 0.6, [:]), ("white_pawn", 0.3, [:]),
+        ]) == ["white_queen", "white_king", "white_queen", "white_pawn"])
+        #expect(try crowned([
+            ("white_queen", 0.7, [:]), ("white_queen", 0.5, [:]), ("white_queen", 0.5, [:]),
+        ]) == ["white_queen", "white_king", "white_queen"])
+        // No queen: nothing.
+        #expect(try crowned([("white_rook", 0.2, [:]), ("white_pawn", 0.9, ["king": 0.019])])
+            == ["white_rook", "white_pawn"])
+        // Neither side has a king: each takes its own queen.
+        #expect(try crowned([
+            ("white_queen", 0.9, [:]), ("black_queen", 0.9, [:]), ("black_queen", 0.26, [:]),
+            ("white_rook", 0.9, [:]),
+        ]) == ["white_king", "black_queen", "black_king", "white_rook"])
+        // Two kings on one side: left alone. Three: more than two kings on
+        // the board, and the other side's queen stays.
+        #expect(try crowned([
+            ("white_king", 0.9, ["king": 0.9]), ("white_king", 0.9, ["king": 0.8]), ("black_queen", 0.9, [:]),
+        ]) == ["white_king", "white_king", "black_queen"])
+        #expect(try crowned([
+            ("white_king", 0.9, ["king": 0.9]), ("white_king", 0.9, ["king": 0.8, "queen": 0.1]),
+            ("white_king", 0.9, ["king": 0.7]), ("black_queen", 0.9, [:]),
+        ]) == ["white_king", "white_queen", "white_queen", "black_queen"])
+        // The queen crowned is shown with the model's score for "king":
+        // none here, so the app marks it.
+        let queen = try Self.detection("black_queen", confidence: 0.97)
+        let king = try #require(OneKingASide.apply([queen], queenForKing: true).first)
+        #expect(king.piece == .king && king.confidence == 0.97 && king.shownConfidence == 0)
+    }
+
+    /// In the recognizer the queen is crowned only with one king a side
+    /// switched on, of which it is a part. White's king on e1, Black's
+    /// queen on d8 and a rook on a8, no piece of Black's with a "king"
+    /// score.
+    @Test func testTheRecognizerCrownsTheQueenOnlyWithOneKingASide() throws {
+        let image = try PieceSidesTests.drawnPawns().image
+        let found = Self.kingAndQueen()
+        func placement(oneKing: Bool, queenForKing: Bool) throws -> String {
+            let placed = try #require(CoreMLBoardRecognizer.place(
+                found, corners: Self.rightWayUp, cornersFromModel: true, in: image,
+                sidesFromColour: false, oddSides: false, oneKing: oneKing, queenForKing: queenForKing,
+                a1Prior: nil,  // a1 as given
+                a1Dark: false, pull: SquareAssignment.defaultPull))
+            return FENBuilder.placement(placed.pieces.mapValues(\.piece))
+        }
+        #expect(try placement(oneKing: true, queenForKing: true) == "r2k4/8/8/8/8/8/8/4K3")
+        #expect(try placement(oneKing: true, queenForKing: false) == "r2q4/8/8/8/8/8/8/4K3")
+        #expect(try placement(oneKing: false, queenForKing: true) == "r2q4/8/8/8/8/8/8/4K3")
+    }
+
+    /// Three pieces for `EndToEndFixtureTests`: White's king, and Black's
+    /// queen and rook without a "king" score.
+    static func kingAndQueen() -> [PieceDetection] {
+        [
+            PieceDetection(
+                piece: .king, color: .white, confidence: 0.9, boundingBox: box(file: 4, rank: 1),
+                kindScores: [.king: 0.9]),
+            PieceDetection(
+                piece: .queen, color: .black, confidence: 0.9, boundingBox: box(file: 3, rank: 8),
+                kindScores: [.queen: 0.9]),
+            PieceDetection(
+                piece: .rook, color: .black, confidence: 0.9, boundingBox: box(file: 0, rank: 8),
+                kindScores: [.rook: 0.9]),
+        ]
     }
 
     @Test func testAScoreThatIsNotANumberCountsAsNone() throws {
@@ -261,7 +372,7 @@ struct OneKingASideTests {
 
     // MARK: - In the recognizer
 
-    private static func box(file: Int, rank: Int) -> CGRect {
+    static func box(file: Int, rank: Int) -> CGRect {
         CGRect(x: Double(file) * 100 + 20, y: 800 - Double(rank) * 100 + 20, width: 60, height: 60)
     }
     private static let rightWayUp = [
@@ -288,7 +399,8 @@ struct OneKingASideTests {
         func place(oneKing: Bool) throws -> (corners: [CGPoint], placement: String) {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: Self.rightWayUp, cornersFromModel: false, in: image,
-                sidesFromColour: false, oddSides: false, oneKing: oneKing, a1Prior: 6, a1Dark: false,
+                sidesFromColour: false, oddSides: false, oneKing: oneKing, queenForKing: false, a1Prior: 6,
+                a1Dark: false,
                 pull: SquareAssignment.defaultPull))
             return (placed.corners, FENBuilder.placement(placed.pieces.mapValues(\.piece)))
         }
@@ -316,7 +428,8 @@ struct OneKingASideTests {
         func placement(sidesFromColour: Bool, oneKing: Bool) throws -> String {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: Self.rightWayUp, cornersFromModel: true, in: image,
-                sidesFromColour: sidesFromColour, oddSides: false, oneKing: oneKing, a1Prior: nil,  // a1 as given
+                sidesFromColour: sidesFromColour, oddSides: false, oneKing: oneKing, queenForKing: false,
+                a1Prior: nil,  // a1 as given
                 a1Dark: false, pull: SquareAssignment.defaultPull))
             return FENBuilder.placement(placed.pieces.mapValues(\.piece))
         }

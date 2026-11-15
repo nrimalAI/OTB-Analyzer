@@ -176,6 +176,37 @@ import Testing
         #expect(try whites(asked) == 8)
     }
 
+    /// A queen for a king is off unless asked for, as the side of single
+    /// pieces is, and the recognizer hands its own setting on to what
+    /// follows the models.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testQueenForKingIsOffByDefaultAndReachesWhatFollowsTheModels() throws {
+        let models = try Self.models.get()
+        let asBuilt = try makeRecognizer()
+        let asked = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, queenForKing: true)
+        #expect(asBuilt.queenForKing == false && CoreMLBoardRecognizer.Default.queenForKing == false)
+        #expect(asked.queenForKing == true && asked.oneKing == true)
+
+        let image = try PieceSidesTests.drawnPawns().image
+        let found = OneKingASideTests.kingAndQueen()
+        let corners = [
+            CGPoint(x: 0, y: 800), CGPoint(x: 0, y: 0), CGPoint(x: 800, y: 0), CGPoint(x: 800, y: 800),
+        ]
+        func kings(_ recognizer: CoreMLBoardRecognizer) throws -> Int {
+            let placed = try #require(
+                recognizer.place(found, corners: corners, cornersFromModel: true, in: image))
+            #expect(placed.pieces.count == 3)
+            return placed.pieces.values.filter { $0.piece.kind == .king }.count
+        }
+        #expect(try kings(asBuilt) == 1)
+        #expect(try kings(asked) == 2)
+        // With one king a side switched off it has nothing to act in.
+        let alone = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oneKing: false, queenForKing: true)
+        #expect(try kings(alone) == 1)
+    }
+
     /// What `app_check --window` is given (`diagnoseFitWindow`) is what the
     /// recognizer itself makes of the two sets of corners: the fit's in the
     /// model's order where the rule is off, the window the model picks
