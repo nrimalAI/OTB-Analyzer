@@ -13,6 +13,7 @@ is checked against this folder's Python and not against a second opinion.
     python swift_reference.py colours --swift swift_colours.json [--list photos.json]
     python swift_reference.py dark --swift swift_dark.json [--list photos.json]
     python swift_reference.py window --swift swift_window.json
+    python swift_reference.py pieces --swift swift_pieces.json
 
 orientation: random boards seen in perspective with their corners given in a
 random rotation, some pieces missed, misread or found twice, some boxes beside
@@ -96,6 +97,17 @@ app ends with before a1 is checked (the grid fit's or the model's) and what
 the colours of the squares say of them; this reads that file, asks
 grid_corners.dark_corner_rotations about the same corners and counts where
 the two differ.
+
+pieces: what follows the pieces, on photos, Swift against Python on what the
+app has in hand. `app_check --pieces` writes, for each photo of a list, the
+corners before a1 is taken from the pieces, what the square colours say of
+them, every piece as it stands just before one king a side with the scores
+that step sees, and the placement the app then reads. This replays one king
+a side, a1 from the pieces and the squares with this folder's functions
+(replay_pieces: one_king_a_side, orient_by_pieces, assign_squares), with the
+switches the file says the app ran with, and counts the photos whose
+placement differs. replay_pieces is also the place to try another rule on
+the app's own scores: `from swift_reference import replay_pieces`.
 
 window: the fit's window, on photos, Swift against Python on the same
 corners. `app_check --window` writes, for each photo of a list where the
@@ -1471,6 +1483,50 @@ def compare_window(swift_path):
           + (f"; the window moved on purpose: max {off_given.max():.2e}" if any(purpose) else ""))
 
 
+def replay_pieces(found, settings, one_king=None):
+    """The placement the reference reads from one photo's entry of an
+    `app_check --pieces` file: one king a side, a1 from the pieces among
+    the rotations the square colours allow, and the squares, on the pieces,
+    scores and corners the app had. None for no board. `one_king`: another
+    rule to try in place of one_king_a_side(detections, kind_scores); it is
+    given the detections and, for each, the dict of scores by kind."""
+    if found["corners"] is None:
+        return None
+    detections = [Detection(p["cls"], p["confidence"], tuple(p["box"])) for p in found["pieces"]]
+    scores = [p["kind_scores"] for p in found["pieces"]]
+    if one_king is not None:
+        detections = one_king(detections, scores)
+    elif settings["one_king"]:
+        detections = one_king_a_side(detections, scores, queen_for_king=settings["queen_for_king"])
+    corners = found["corners"]
+    pull = settings["pull"]
+    # (the corner model's own a1 gets the head start; the fit alone has none)
+    prior = settings["a1_prior"] if found["corners_from_model"] else 0.0
+    if prior is not None:
+        turns = found["rotations"] if settings["a1_dark"] else None
+        corners = orient_by_pieces(corners, detections, pull, prior=prior, turns=turns)
+    return board_to_fen_placement(assign_squares(homography(corners), detections, pull=pull))
+
+
+def compare_pieces(swift_path):
+    """What follows the pieces, of the same pieces and corners in Python and in Swift."""
+    sw = json.loads(Path(swift_path).read_text())
+    settings = sw["settings"]
+    photos = same = boards = exact = 0
+    for photo in sorted(sw["photos"]):
+        found = sw["photos"][photo]
+        mine = replay_pieces(found, settings)
+        photos += 1
+        boards += mine is not None
+        same += mine == found["got"]
+        exact += mine == found["expected"]
+        if mine != found["got"]:
+            print(f"  {Path(photo).name}: Python {mine}, Swift {found['got']}")
+    print(f"{photos} photos, a board on {boards}; settings {settings}")
+    print(f"the placement read from the app's pieces and corners: the same in Python and Swift on {same} "
+          f"of {photos}; boards exact by the Python's reading: {exact}")
+
+
 def grid_reference(list_path, out_path, limit):
     import cv2
     from grid_corners import find_grid
@@ -1609,7 +1665,8 @@ def compare_colours(swift_path, list_path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "dark-cases",
-                                     "window-cases", "odd-cases", "grid", "compare", "colours", "dark", "window"])
+                                     "window-cases", "odd-cases", "grid", "compare", "colours", "dark", "window",
+                                     "pieces"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
@@ -1617,7 +1674,8 @@ def main():
     ap.add_argument("--swift", help="compare: file written by `app_check --grid`; "
                                     "colours: file written by `app_check --colours`; "
                                     "dark: file written by `app_check --dark`; "
-                                    "window: file written by `app_check --window`")
+                                    "window: file written by `app_check --window`; "
+                                    "pieces: file written by `app_check --pieces`")
     ap.add_argument("--count", type=int, default=120)
     ap.add_argument("--seed", type=int, default=20261113)
     args = ap.parse_args()
@@ -1644,6 +1702,8 @@ def main():
         compare_dark(args.swift, args.list)
     elif args.what == "window":
         compare_window(args.swift)
+    elif args.what == "pieces":
+        compare_pieces(args.swift)
     elif args.what == "grid":
         grid_reference(args.list, args.out, args.limit)
     elif args.what == "colours":
