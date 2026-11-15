@@ -220,29 +220,22 @@ import Testing
         let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
             [String: String].self, from: Data(contentsOf: fixtures.appending(path: "expected.json")))
-        // With both colour steps off, and as the app runs it but with the
-        // queen for a king asked for.
-        let recognizers = [
-            try CoreMLBoardRecognizer(
-                cornerModel: models.corners, pieceModel: models.pieces, oddSides: false),
-            try CoreMLBoardRecognizer(
-                cornerModel: models.corners, pieceModel: models.pieces, queenForKing: true),
-            try makeRecognizer(),
-        ]
+        // As the app runs it; and with the colour steps off and a1 left
+        // where the corners have it, so that the corners `recognize` ends
+        // with are the corners before a1 is chosen.
+        let asBuilt = try makeRecognizer()
+        let plain = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, a1Prior: nil, oddSides: false)
         for file in manifest.keys.sorted() {
             let source = try #require(
                 CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
             let photo = DecodedImage.once(try #require(CGImageSourceCreateImageAtIndex(source, 0, nil)))
-            for recognizer in recognizers {
+            var labels: [[String]] = []
+            for recognizer in [asBuilt, plain] {
                 let read = try await recognizer.recognize(photo)
                 let found = try recognizer.diagnosePieces(photo)
                 #expect(found.placement == FENBuilder.placement(read.pieces.mapValues(\.piece)), "\(file)")
-                // The corners before a1 is chosen: the same ring, from
-                // whichever corner.
                 let corners = try #require(found.corners)
-                #expect((0..<4).contains { turn in
-                    Array(corners[turn...] + corners[..<turn]) == read.corners
-                }, "\(file)")
                 #expect(found.squareColours == GridCorners.squareColours(in: photo, corners: corners), "\(file)")
                 #expect(found.pieces.count >= read.pieces.count && !found.pieces.isEmpty, "\(file)")
                 for piece in found.pieces {
@@ -262,14 +255,24 @@ import Testing
                         == piece.modelLabel.split(separator: "_").last, "\(file)")
                     #expect((piece.colour?.count ?? 3) == 3, "\(file)")
                 }
+                labels.append(found.pieces.map(\.label))
+                if recognizer.oddSides {
+                    // a1 may have been turned: the same ring, from whichever corner.
+                    #expect((0..<4).contains { turn in
+                        Array(corners[turn...] + corners[..<turn]) == read.corners
+                    }, "\(file)")
+                } else {
+                    // The very corners, and the pieces as the model read them.
+                    #expect(corners == read.corners, "\(file)")
+                    #expect(found.pieces.allSatisfy { $0.label == $0.modelLabel }, "\(file)")
+                }
             }
-            // With the colour steps off a piece stands as the model read it.
-            let plain = try recognizers[0].diagnosePieces(photo)
-            #expect(plain.pieces.allSatisfy { $0.label == $0.modelLabel }, "\(file)")
             // On the fixtures the side of single pieces changes nothing.
-            let asBuilt = try recognizers[2].diagnosePieces(photo)
-            #expect(asBuilt.pieces.map(\.label) == plain.pieces.map(\.label), "\(file)")
-            #expect(asBuilt.placement == plain.placement, "\(file)")
+            #expect(labels[0] == labels[1], "\(file)")
+            // The corners shown are those before a1 is chosen: with the
+            // check of a1 on, the ones the recognizer without it ends with.
+            #expect(try asBuilt.diagnosePieces(photo).corners == plain.diagnosePieces(photo).corners,
+                    "\(file)")
         }
     }
 

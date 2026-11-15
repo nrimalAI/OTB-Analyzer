@@ -456,7 +456,13 @@ before.
   of single pieces on, and with the queen for a king on as well, and on
   board B also with one king a side, the dark a1 and the head start all
   off and with the grid fit off: the same placement on every one of
-  2,276 readings. A test requires that the dump's placement is
+  2,276 readings. What those readings do not exercise: the fit standing
+  alone and a photo with no board (neither occurs in them), the whole
+  board's colour step on, a head start other than 6, 0 or off. On
+  ChessReD test no variant of one king a side, a1 or the dark a1 changes
+  a reading, so its 918 readings test the squares only; the steps act on
+  board B (one king a side on 15 photos, a1 from the pieces on 57) and on
+  Fenit A (2 and 26), by the reviewer's count. A test requires that the dump's placement is
   `recognize`'s on the fixture photos and that its scores are those one
   king a side is given. `replay_pieces` takes another rule in place of
   `one_king_a_side`, to try one on the app's own scores before it is
@@ -716,10 +722,16 @@ Measured with the third pair through `app_check`, everything else as the
 app runs it, the step off and on through the same binary; with it off
 every photo reads as in "What the model's choice of window is worth". The
 development sets were run here and again by the training session, with
-the same readings; the second held-out set was run once, as a test, by
-the training session (`Training/runs/app_check/odd_h2/`), and its files
-were recounted here. Squares right; boards exact; boards exact or half a
-turn away.
+the same readings; the second held-out set was run through the app once,
+as a test, by the training session (`Training/runs/app_check/odd_h2/`),
+and its files were recounted here. That run tests for harm only, since
+nothing changes there; and it was not the set's first use for this rule:
+the reference ran a two-way form of the rule on it in Python, whose
+failure there is why the rule is one-way, and the run through the app
+came before the step was asked to be switched on, so it served as a gate
+(`Training/README.md`, "Second held-out test set", items 7 and 9). No
+number of the rule was set on that set. Squares right; boards exact;
+boards exact or half a turn away.
 
 | Set (photos) | Without the step | **With it, as the app runs it now** | Readings that differ |
 |---|---|---|---|
@@ -734,14 +746,23 @@ turn away.
 | chess-cv games (840) | 97.99%; 267; 267 | **97.99%; 267; 267** | none |
 | **all (1,619)** | 97.00%; 464; 482 | **97.00%; 464; 482** | none |
 
-- **Everything it does is on board B.** Of the 2,211 photos of the other
-  sets not one reads differently, the 1,619 of the second held-out set
-  among them: on boards the model reads well, and on the unseen boards of
-  that set, the rule finds no piece to change. So it costs nothing that
-  was measured, and what it is known to mend is one board, the one its
-  numbers were chosen on (brown "white" pieces, some of which the piece
-  model calls Black). Whether it mends other boards with that fault is
-  not known: no other set here has it.
+- **Everything it does, as the photos are taken, is on board B.** Of the
+  2,211 photos of the other sets not one reads differently, the 1,619 of
+  the second held-out set among them. (On Fenit A and ChessReD test the
+  rule changes no piece at all; on the second held-out set only the
+  readings were compared.) What it is known to mend is one board, the
+  one its numbers were chosen on (brown "white" pieces, some of which
+  the piece model calls Black). Whether it mends other boards with that
+  fault is not known: no other set here has it.
+- **What it costs.** In these runs, one square on one photo drawn as a
+  3:4 photo (below). And it is known to change pieces that are right:
+  on the 9,178 real training photos, with their labelled sides, the
+  reference counts a right piece changed on 65 photos, 0.7%
+  (`Training/README.md`, "The side of single pieces"); and in the Python
+  it changed 53 pieces on 50 photos of the second held-out set, 47 of
+  them on samryan, with no board gained or lost, on readings the README
+  says are poorer than the app's (full-size photos shrunk without
+  smoothing).
 - **Against the goal** on boards nobody trained on: board B 31 of 100
   fully right (16 without the step); the second held-out set 464 of
   1,619 (29%) as before; the goal is 85%.
@@ -772,16 +793,30 @@ turn away.
 - **As 3:4 photos**, which is what a phone takes: board B 94.45% ->
   94.91%; 16 -> 31; 19 -> 35 (35 photos read differently, 32 with more
   squares right, the same endgame with fewer). Fenit A reads every photo
-  as without the step (98.14%; 234; 256). **ChessReD test loses one
-  square on one photo**: 99.68% -> 99.67%; 282; 284 either way.
-  `G000_IMG064.jpg`, 63 squares -> 62: a black rook standing behind a
-  white knight, whose patch shows the knight, is made White. In the photo
-  as it is taken a second box the model draws over the same piece counts
-  as standing in front of the rook and the rule leaves it out; drawn as a
-  3:4 photo the rule does not leave it out. It is the one reading in
-  these runs that the step makes worse on a board the model reads well,
-  and it is the case the "piece in front" test is there for: that test
-  looks at boxes, and a box can be missing.
+  as without the step (98.14%; 234; 256). The Fenit photos are 3:4
+  already, so for them this is nearly a repeat and not a second test;
+  ChessReD's are square, and drawn as 3:4 the board is three quarters
+  the size for the models. **ChessReD test loses one square on one
+  photo**: 99.68% -> 99.67%; 282; 284 either way. `G000_IMG064.jpg`, 63
+  squares -> 62: a black rook on e4 standing behind the white knight on
+  d4, whose patch shows the knight, is made White. In the photo as it is
+  taken the piece model finds the knight (at 0.39), its box counts as
+  standing in front, and the rule leaves the rook out; the photo reads
+  all 64. Drawn as a 3:4 photo the model does not find the knight, d4 is
+  empty with the step and without, which is the 63, and nothing stands
+  in front of the rook for the rule. It is the one reading in these runs
+  that the step makes worse on a board the model reads well.
+- **The "piece in front" test depends on the piece model finding the
+  piece in front.** A white piece the model misses, standing in front of
+  a black one, whitens the black one; such a photo has a wrong square
+  already. How much that test holds back as the photos are taken: with
+  no piece ever counted as in front the rule would change 4 pieces on 4
+  photos of ChessReD test (none with the test), none on Fenit A, and 46
+  on board B against 41.
+- **To be measured again with every new piece model**: the rule mends a
+  fault of this one, on one board. And a piece whose side it changed is
+  not marked for the user (above); marking it would flag a wrong
+  whitening, and is a design choice for the owner.
 
 ## A queen for a king: off, and what it does on the development sets
 
@@ -863,7 +898,7 @@ before the set was run. Squares right; boards
 exact; boards exact or half a turn away; and, of the photos where the model
 and the fit both found the board, how many windows the rule moved.
 
-| Set (photos) | Without the rule | **With it, as the app runs it now** | Windows moved |
+| Set (photos) | Without the rule | **With it, as the app ran it then** | Windows moved |
 |---|---|---|---|
 | ChessReD test (306) | 99.80%; 295; 297 | **99.80%; 295; 297** | 0 of 288 |
 | Fenit board B (100) | 94.48%; 16; 19 | **94.48%; 16; 19** | 0 of 95 |
@@ -981,7 +1016,7 @@ as a test. Squares right; boards exact; boards exact or half a turn away
 (one tap in the app); boards that are wrong as read and exact once turned
 by a quarter.
 
-| Set (photos) | Without the rule | **With it, as the app runs it now** |
+| Set (photos) | Without the rule | **With it, as the app ran it then** |
 |---|---|---|
 | ChessReD test (306) | 99.80%; 295; 297; 0 | **99.80%; 295; 297; 0** |
 | Fenit board B (100) | 94.36%; 16; 19; 0 | **94.48%; 16; 19; 0** |

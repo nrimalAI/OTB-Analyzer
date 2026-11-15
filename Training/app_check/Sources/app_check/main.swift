@@ -76,7 +76,9 @@
 //                   label it gave one (the highest first; a label left out
 //                   has 0), the scores one king a side sees, its colour and
 //                   whether it stands behind another; and the placement the
-//                   app then reads. For `swift_reference.py pieces`, which
+//                   app then reads. It goes with --portrait and --redraw:
+//                   boxes, corners and colours are then of the photo as
+//                   drawn. For `swift_reference.py pieces`, which
 //                   replays one king a side, a1 and the squares in Python on
 //                   the same and compares the placements.
 //   --grid FILE     run no model: write what the classical grid fit
@@ -282,9 +284,8 @@ if darkPath != nil && (gridPath != nil || coloursPath != nil || redraw != nil ||
 if windowPath != nil && (gridPath != nil || coloursPath != nil || darkPath != nil || redraw != nil || portrait) {
     fail("--window reads the photos as they are: it goes with neither --grid, --colours, --dark, --redraw nor --portrait")
 }
-if piecesPath != nil
-    && (gridPath != nil || coloursPath != nil || darkPath != nil || windowPath != nil || redraw != nil || portrait) {
-    fail("--pieces reads the photos as they are: it goes with neither --grid, --colours, --dark, --window, --redraw nor --portrait")
+if piecesPath != nil && (gridPath != nil || coloursPath != nil || darkPath != nil || windowPath != nil) {
+    fail("--pieces goes with neither --grid, --colours, --dark nor --window")
 }
 if shiftFit != nil && windowPath == nil {
     fail("--shift-fit goes with --window")
@@ -542,8 +543,21 @@ if let piecesPath {
         let url = path.hasPrefix("/")
             ? URL(fileURLWithPath: path)
             : listURL.deletingLastPathComponent().appending(path: path)
-        guard let image = upright(url), let expected = FENBuilder.pieces(fromPlacement: placement)
+        guard var image = upright(url), let expected = FENBuilder.pieces(fromPlacement: placement)
         else { fail("could not load \(path) or its placement") }
+        if portrait || redraw != nil {
+            image = DecodedImage.once(image)  // as the scoring below
+        }
+        if portrait {
+            guard let canvas = draw(image, width: image.width, height: image.width * 4 / 3)
+            else { fail("could not draw \(path)") }
+            image = canvas
+        }
+        if let redraw {
+            guard let canvas = draw(image, width: redraw, height: redraw)
+            else { fail("could not draw \(path)") }
+            image = canvas
+        }
         let found: PiecesDiagnosis
         do {
             found = try recognizer.diagnosePieces(image)
@@ -579,6 +593,8 @@ if let piecesPath {
         ] as [String: Any]
     }
     let settings: [String: Any] = [
+        "portrait": portrait,
+        "redraw": redraw ?? NSNull(),
         "pull": CoreMLBoardRecognizer.Default.pull,
         "a1_prior": a1Prior ?? NSNull(),
         "grid_fit": gridFit,
