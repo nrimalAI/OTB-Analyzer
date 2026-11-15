@@ -510,8 +510,15 @@ these sets has one. And where the grid is found one square off, the colours
 are the other way round and the rule forces a quarter turn on a reading
 that was wrong already: that is 8 of the 13 photos of the second test set
 that read worse with it (Y-LIChess full boards, 21-25 squares before, 19-24
-after). "No quarter turns" holds for boards that are exact once turned; one
-photo there (`wood_0148`) still fits better a quarter turn on.
+after). On those boards the rule makes a quarter turn where there was none:
+16 Y-LIChess full boards that were read the right way round and one rank
+off are a quarter turn off as well with it (app-side session's count; the
+squares hardly move, 357 before and 358 after, so the scores do not show
+it). "No quarter turns" holds for boards that are exact once turned.
+Counted by where the pieces land, readings a quarter turn off go from 56 to
+19 on the second test set (Y-LIChess 20 -> 18, samryan 32 -> 0, ChessQ 4 ->
+1), from 10 to 1 on Fenit A and from 2 to 0 on board B. The cure for the
+rest is not in this rule but in the grid fit's choice of window (below).
 
 Through the app (app-side session's port, `CoreMLBoardRecognizer(a1Dark:)`,
 `app_check --a1-dark on|off`; `docs/RECOGNITION.md`, "What a dark a1 is
@@ -522,8 +529,8 @@ set, once, as a test: 95.86% -> 96.38% of squares, 439 -> 459 boards exact,
 boards a quarter turn off 26 -> 0, no fully right board lost. Swift and
 Python give the same answer on all 2,311 photos.
 
-With quarter turns gone, the head start for the model's own a1 only trades
-half turns, and stays at 6. In Python with `--a1-dark`, head start 0 / 6 /
+With the pieces no longer able to turn a board by a quarter, the head start
+for the model's own a1 only trades half turns, and stays at 6. In Python with `--a1-dark`, head start 0 / 6 /
 12 / 20 / 40 (`runs/scores/a1_prior_dark.txt`, `a1_dark_pair.txt`): Fenit
 A, a board the corner model knows, 228 / 231 / 245 / 250 / 253 boards
 exact; board B, one it does not, 94.28 / 94.28 / 94.08 / 93.70 / 93.06% of
