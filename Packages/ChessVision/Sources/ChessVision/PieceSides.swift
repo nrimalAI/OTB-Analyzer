@@ -291,6 +291,12 @@ public struct PieceSideDiagnosis: Sendable {
     public let colourSide: String?
     /// The class after the step.
     public let finalLabel: String
+    /// Whether another piece stands in front of the middle of the box
+    /// (`OddSides.patchHidden`).
+    public let hidden: Bool
+    /// The class after the other colour step, the side of single pieces
+    /// (`OddSides`), on the model's own answers.
+    public let oddLabel: String
 }
 
 extension PieceSides {
@@ -300,11 +306,11 @@ extension PieceSides {
         name(detection.color) + "_" + name(detection.piece)
     }
 
-    private static func name(_ side: Piece.Color) -> String {
+    static func name(_ side: Piece.Color) -> String {
         side == .white ? "white" : "black"
     }
 
-    private static func name(_ kind: Piece.Kind) -> String {
+    static func name(_ kind: Piece.Kind) -> String {
         switch kind {
         case .pawn: return "pawn"
         case .knight: return "knight"
@@ -319,6 +325,7 @@ extension PieceSides {
         let colours = colours(of: detections, in: image)
         let byColour = sidesByColour(colours)
         let final = fromColour(detections, colours: colours)
+        let odd = OddSides.apply(detections, colours: colours)
         return detections.indices.map { index in
             PieceSideDiagnosis(
                 label: label(detections[index]),
@@ -326,7 +333,9 @@ extension PieceSides {
                 box: detections[index].boundingBox,
                 colour: colours[index].map { [$0.l, $0.a, $0.b] },
                 colourSide: byColour?[index].map(name),
-                finalLabel: label(final[index]))
+                finalLabel: label(final[index]),
+                hidden: OddSides.patchHidden(detections, index),
+                oddLabel: label(odd[index]))
         }
     }
 }

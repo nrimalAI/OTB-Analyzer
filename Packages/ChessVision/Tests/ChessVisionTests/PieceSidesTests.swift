@@ -407,7 +407,8 @@ struct PieceSidesTests {
         func place(sidesFromColour: Bool) throws -> (corners: [CGPoint], placement: String) {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: upsideDown, cornersFromModel: false, in: image,
-                sidesFromColour: sidesFromColour, oneKing: false, a1Prior: 6, a1Dark: false,
+                sidesFromColour: sidesFromColour, oddSides: false, oneKing: false, queenForKing: false,
+                a1Prior: 6, a1Dark: false,
                 pull: SquareAssignment.defaultPull))
             return (placed.corners, FENBuilder.placement(placed.pieces.mapValues(\.piece)))
         }

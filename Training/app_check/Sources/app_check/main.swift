@@ -24,9 +24,16 @@
 //   --sides-from-colour on|off  White and Black from the colours of the
 //                   pieces where they contradict the piece model (default
 //                   off, as in the app).
+//   --odd-sides on|off  a piece called Black becomes White when its colour is
+//                   plainly the White side's in this photo (the app's
+//                   default: on).
 //   --one-king on|off  exactly one king a side, from the scores the piece
 //                   model gave each piece for every kind (the app's default:
 //                   on).
+//   --queen-for-king on|off  with one king a side: a side left without a
+//                   king, and without a piece the model gave a "king"
+//                   score, takes its queen for one (default off, as in the
+//                   app). Does nothing with --one-king off.
 //   --a1-dark on|off  a1 is a dark square: where the colours of the squares
 //                   can be told apart the pieces choose between two ways
 //                   round only (the app's default: on).
@@ -38,9 +45,12 @@
 //                   count how many of the right and of the wrong pieces that
 //                   marks, for each threshold given (default 0.85).
 //   --colours FILE  score nothing: write, for each photo, what the piece model
-//                   finds, the colour of each piece and the sides the colour
-//                   step gives, for `swift_reference.py colours` to compare
-//                   with the Python on the same boxes.
+//                   finds, the colour of each piece, the sides the colour
+//                   step gives, whether another piece stands in front of it
+//                   and what the side of single pieces makes of it, for
+//                   `swift_reference.py colours` to compare with the Python
+//                   on the same boxes. Both steps are asked whatever
+//                   --sides-from-colour and --odd-sides say.
 //   --dark FILE     score nothing: write, for each photo, the corners the app
 //                   ends with before a1 is checked against the pieces and
 //                   what the colours of the squares say of them, for
@@ -56,6 +66,21 @@
 //                   many the model moves back. The rule is asked whatever
 //                   --fit-window, --grid-fit and --a1-prior say: they play
 //                   no part here.
+//   --pieces FILE   score nothing: write, for each photo, everything the app
+//                   has in hand just before one king a side, with the
+//                   switches as given here (so with --odd-sides on, the
+//                   pieces after that step): the corners before a1 is
+//                   taken from the pieces and what the square colours say
+//                   of them, every piece with its class, the model's own
+//                   class, its confidence, box, the model's score for every
+//                   label it gave one (the highest first; a label left out
+//                   has 0), the scores one king a side sees, its colour and
+//                   whether it stands behind another; and the placement the
+//                   app then reads. It goes with --portrait and --redraw:
+//                   boxes, corners and colours are then of the photo as
+//                   drawn. For `swift_reference.py pieces`, which
+//                   replays one king a side, a1 and the squares in Python on
+//                   the same and compares the placements.
 //   --grid FILE     run no model: write what the classical grid fit
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
@@ -149,10 +174,13 @@ var gridFitGiven = false
 var sidesFromColour = CoreMLBoardRecognizer.Default.sidesFromColour
 var sidesFromColourGiven = false
 var oneKing: Bool?
+var oddSides: Bool?
+var queenForKing: Bool?
 var a1Dark: Bool?
 var darkPath: String?
 var fitWindow: Bool?
 var windowPath: String?
+var piecesPath: String?
 var shiftFit: (files: Int, ranks: Int)?
 var flagBelow: [Float] = [0.85]
 var coloursPath: String?
@@ -177,10 +205,18 @@ while !arguments.isEmpty {
         sidesFromColour = value == "on"
         sidesFromColourGiven = true
     case "--colours": coloursPath = arguments.isEmpty ? nil : arguments.removeFirst()
+    case "--odd-sides":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--odd-sides takes on or off") }
+        oddSides = value == "on"
     case "--one-king":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--one-king takes on or off") }
         oneKing = value == "on"
+    case "--queen-for-king":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--queen-for-king takes on or off") }
+        queenForKing = value == "on"
     case "--a1-dark":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--a1-dark takes on or off") }
@@ -195,6 +231,9 @@ while !arguments.isEmpty {
     case "--window":
         guard !arguments.isEmpty else { fail("--window takes the file to write") }
         windowPath = arguments.removeFirst()
+    case "--pieces":
+        guard !arguments.isEmpty else { fail("--pieces takes the file to write") }
+        piecesPath = arguments.removeFirst()
     case "--shift-fit":
         let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Int($0) }
         guard values.count == 2, let files = values[0], let ranks = values[1], (files, ranks) != (0, 0)
@@ -245,6 +284,9 @@ if darkPath != nil && (gridPath != nil || coloursPath != nil || redraw != nil ||
 if windowPath != nil && (gridPath != nil || coloursPath != nil || darkPath != nil || redraw != nil || portrait) {
     fail("--window reads the photos as they are: it goes with neither --grid, --colours, --dark, --redraw nor --portrait")
 }
+if piecesPath != nil && (gridPath != nil || coloursPath != nil || darkPath != nil || windowPath != nil) {
+    fail("--pieces goes with neither --grid, --colours, --dark nor --window")
+}
 if shiftFit != nil && windowPath == nil {
     fail("--shift-fit goes with --window")
 }
@@ -286,7 +328,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--a1-dark on|off] [--fit-window on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--window FILE [--shift-fit FILES,RANKS]] [--verbose] | app_check --upright PHOTO OUT.png")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--odd-sides on|off] [--one-king on|off] [--queen-for-king on|off] [--a1-dark on|off] [--fit-window on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--window FILE [--shift-fit FILES,RANKS]] [--pieces FILE] [--verbose] | app_check --upright PHOTO OUT.png")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -341,7 +383,9 @@ do {
         sidesFromColour: sidesFromColour,
         oneKing: oneKing ?? CoreMLBoardRecognizer.Default.oneKing,
         a1Dark: a1Dark ?? CoreMLBoardRecognizer.Default.a1Dark,
-        fitWindow: fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow)
+        fitWindow: fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow,
+        oddSides: oddSides ?? CoreMLBoardRecognizer.Default.oddSides,
+        queenForKing: queenForKing ?? CoreMLBoardRecognizer.Default.queenForKing)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -356,7 +400,7 @@ else { fail("could not read \(listPath) as a JSON object of photo -> placement")
 if let coloursPath {
     // What the piece model finds and what the colour step makes of it.
     var out: [String: Any] = [:]
-    var changed = 0
+    var changed = 0, oddPieces = 0, oddPhotos = 0
     for path in list.keys.sorted() {
         let url = path.hasPrefix("/")
             ? URL(fileURLWithPath: path)
@@ -371,6 +415,9 @@ if let coloursPath {
         if pieces.contains(where: { $0.label != $0.finalLabel }) {
             changed += 1
         }
+        let odd = pieces.filter { $0.label != $0.oddLabel }.count
+        oddPieces += odd
+        oddPhotos += odd > 0 ? 1 : 0
         out[path] = pieces.map { piece in
             [
                 "cls": piece.label, "confidence": Double(piece.confidence),
@@ -378,6 +425,8 @@ if let coloursPath {
                 "colour": piece.colour ?? NSNull(),
                 "colour_side": piece.colourSide ?? NSNull(),
                 "final": piece.finalLabel,
+                "hidden": piece.hidden,
+                "odd": piece.oddLabel,
             ] as [String: Any]
         }
     }
@@ -387,7 +436,9 @@ if let coloursPath {
     } catch {
         fail("could not write \(coloursPath): \(error)")
     }
-    print("\(out.count) photos; the colours changed a side on \(changed); written to \(coloursPath)")
+    print("\(out.count) photos; the colours changed a side on \(changed); "
+        + "single pieces made White by their colour: \(oddPieces) on \(oddPhotos) photos; "
+        + "written to \(coloursPath)")
     exit(0)
 }
 
@@ -484,6 +535,88 @@ if let windowPath {
     exit(0)
 }
 
+if let piecesPath {
+    // Everything in hand before one king a side, and what the app reads.
+    var out: [String: Any] = [:]
+    var boards = 0, pieces = 0, exact = 0
+    for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : listURL.deletingLastPathComponent().appending(path: path)
+        guard var image = upright(url), let expected = FENBuilder.pieces(fromPlacement: placement)
+        else { fail("could not load \(path) or its placement") }
+        if portrait || redraw != nil {
+            image = DecodedImage.once(image)  // as the scoring below
+        }
+        if portrait {
+            guard let canvas = draw(image, width: image.width, height: image.width * 4 / 3)
+            else { fail("could not draw \(path)") }
+            image = canvas
+        }
+        if let redraw {
+            guard let canvas = draw(image, width: redraw, height: redraw)
+            else { fail("could not draw \(path)") }
+            image = canvas
+        }
+        let found: PiecesDiagnosis
+        do {
+            found = try recognizer.diagnosePieces(image)
+        } catch {
+            fail("\(path): \(error)")
+        }
+        boards += found.corners != nil ? 1 : 0
+        pieces += found.pieces.count
+        // Through FENBuilder, so that both are written the same way.
+        let want = FENBuilder.placement(expected)
+        exact += found.placement == want ? 1 : 0
+        out[path] = [
+            "expected": want,
+            "got": found.placement ?? NSNull(),
+            "corners": found.corners.map { $0.map { [Double($0.x), Double($0.y)] } } ?? NSNull(),
+            "corners_from_model": found.cornersFromModel,
+            "rotations": found.squareColours?.rotations ?? NSNull(),
+            "strength": found.squareColours?.strength ?? NSNull(),
+            "pieces": found.pieces.map { piece in
+                [
+                    "cls": piece.label, "model_cls": piece.modelLabel,
+                    "confidence": Double(piece.confidence),
+                    "box": [piece.box.minX, piece.box.minY, piece.box.maxX, piece.box.maxY].map { Double($0) },
+                    // (Vision hands out a score for each of the model's 80
+                    // class slots; a label left out here has a score of 0.)
+                    "scores": piece.scores.filter { $0.score > 0 }
+                        .map { [$0.label, Double($0.score)] as [Any] },
+                    "kind_scores": piece.kindScores,
+                    "colour": piece.colour ?? NSNull(),
+                    "hidden": piece.hidden,
+                ] as [String: Any]
+            },
+        ] as [String: Any]
+    }
+    let settings: [String: Any] = [
+        "portrait": portrait,
+        "redraw": redraw ?? NSNull(),
+        "pull": CoreMLBoardRecognizer.Default.pull,
+        "a1_prior": a1Prior ?? NSNull(),
+        "grid_fit": gridFit,
+        "sides_from_colour": sidesFromColour,
+        "odd_sides": oddSides ?? CoreMLBoardRecognizer.Default.oddSides,
+        "one_king": oneKing ?? CoreMLBoardRecognizer.Default.oneKing,
+        "queen_for_king": queenForKing ?? CoreMLBoardRecognizer.Default.queenForKing,
+        "a1_dark": a1Dark ?? CoreMLBoardRecognizer.Default.a1Dark,
+        "fit_window": fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow,
+    ]
+    do {
+        try JSONSerialization.data(
+            withJSONObject: ["settings": settings, "photos": out], options: [.sortedKeys]
+        ).write(to: URL(fileURLWithPath: piecesPath))
+    } catch {
+        fail("could not write \(piecesPath): \(error)")
+    }
+    print("\(out.count) photos, a board on \(boards), \(pieces) pieces, \(exact) boards exact; "
+        + "written to \(piecesPath)")
+    exit(0)
+}
+
 /// 64 squares, a8 first, turned by a quarter (clockwise as printed).
 func quarterTurned(_ squares: [Character]) -> [Character] {
     var out = squares
@@ -573,7 +706,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oddSides.map { ", odd sides \($0 ? "on" : "off")" } ?? "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(queenForKing.map { ", queen for king \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))

@@ -103,9 +103,11 @@ def window_by_model(fit_corners, model_corners, near=WINDOW_NEAR):
     four lie within `near` squares of the same shift by one square (one rank,
     one file or both), the window is moved by it. Otherwise nothing changes:
     when the model's corners are near the fit's, and when they are too far
-    off or too unlike a shift to be believed. (What it gets wrong: a model
-    whose four corners all lie more than half a square off the same way
-    moves a window that was right.)
+    off or too unlike a shift to be believed. (What it gets wrong: a window
+    that was right is moved when the model's corners lie, on average, more
+    than half a square off along a rank or file and each of them within
+    `near` of the whole square, i.e. every corner at least a quarter of a
+    square off the same way at 0.75.)
 
     Returns (corners, (files, ranks)): the four corners in the order given,
     and the shift made, (0, 0) for none."""
@@ -349,6 +351,103 @@ def sides_from_colour(detections, colours, chroma=CHROMA_WEIGHT,
     return out
 
 
+# The side of single pieces: a piece called Black becomes White when its
+# colour is this many times nearer White's colour than the other Black
+# pieces' ...
+SIDE_NEARER = 2.0
+# ... and the two sides' colours are at least this many spreads apart (the
+# spread: the median distance of a piece from its own side's colour, and not
+# less than SIDE_SPREAD_FLOOR).
+SIDE_APART = 3.0
+SIDE_SPREAD_FLOOR = 3.0
+# A piece is left out when another piece stands in front of it over more
+# than this share of the patch its colour is measured on.
+SIDE_HIDDEN = 0.2
+
+
+def patch_hidden(detections, k, cover=SIDE_HIDDEN):
+    """Whether another piece stands in front of piece k where its colour is
+    measured: a box whose foot is lower in the picture than piece k's and
+    that covers more than `cover` of piece k's COLOUR_PATCH (the patch as
+    fractions of the box, not cut to the picture). What is measured there is
+    then the colour of the piece in front."""
+    x1, y1, x2, y2 = detections[k].bbox
+    w, h = x2 - x1, y2 - y1
+    l, r, t, b = COLOUR_PATCH
+    px1, py1, px2, py2 = x1 + l * w, y1 + t * h, x1 + r * w, y1 + b * h
+    area = (px2 - px1) * (py2 - py1)
+    if area <= 0:
+        return True
+    for j, other in enumerate(detections):
+        if j == k or other.bbox[3] <= y2:
+            continue
+        ox1, oy1, ox2, oy2 = other.bbox
+        iw = min(px2, ox2) - max(px1, ox1)
+        ih = min(py2, oy2) - max(py1, oy1)
+        if iw > 0 and ih > 0 and iw * ih > cover * area:
+            return True
+    return False
+
+
+def odd_sides(detections, colours, chroma=CHROMA_WEIGHT, nearer=SIDE_NEARER,
+              apart=SIDE_APART, cover=SIDE_HIDDEN):
+    """The detections with every piece the model calls Black made White
+    whose colour is plainly the White side's.
+
+    The model's own answers say what colour each side is in this photo: the
+    median colour of the pieces it calls White and of those it calls Black
+    (`colours` as for colour_sides, compared as (L*, chroma a*, chroma b*)).
+    A piece called Black whose colour is `nearer` times closer to White's
+    median than to the median of the other Black pieces becomes White; it
+    keeps its kind and confidence. Unlike sides_from_colour nothing is split
+    by colour alone and no piece is changed because others are: the model is
+    taken to be right about most pieces, and only the odd one out moves.
+
+    One way only. A light piece in a shadow is as dark as a black one, so a
+    piece called White is never made Black by its colour: on the 9,178 real
+    training photos, with the labelled sides, four in five of the pieces a
+    two-way rule changed were light pieces in shadow made Black. Little
+    makes a dark piece light: a hand over it, a blur.
+
+    Nothing is changed when a side has fewer than two pieces with a colour,
+    when the pieces called White are not the lighter ones, or when the two
+    medians are less than `apart` spreads from each other (the spread: the
+    median distance of a piece from its side's median, at least
+    SIDE_SPREAD_FLOOR). A piece with another standing in front of its colour
+    patch (patch_hidden) is neither counted nor changed.
+
+    The numbers were chosen on Fenit board B (brown "white" pieces, some of
+    which the model calls Black), where the boards read fully right are the
+    same from 1.5 to 2 for `nearer`, 3 to 5 for `chroma`, 2 to 4 for `apart`
+    and 0.1 to 0.2 for `cover` (outside that they change by a board or a
+    few), and on the real training photos with their labelled sides
+    (side_rule_check.py), where stricter numbers change fewer right pieces
+    and mend fewer wrong ones (Training/README.md, "The side of single
+    pieces")."""
+    idx = [k for k, c in enumerate(colours)
+           if c is not None and not patch_hidden(detections, k, cover)]
+    point = {k: np.array([colours[k][0], chroma * colours[k][1], chroma * colours[k][2]])
+             for k in idx}
+    side = {k: detections[k].cls.split("_", 1)[0] for k in idx}
+    groups = {s: [k for k in idx if side[k] == s] for s in ("white", "black")}
+    if min(len(groups["white"]), len(groups["black"])) < 2:
+        return list(detections)
+    centre = {s: np.median([point[k] for k in groups[s]], axis=0) for s in groups}
+    if centre["white"][0] <= centre["black"][0]:
+        return list(detections)
+    spread = max(SIDE_SPREAD_FLOOR,
+                 float(np.median([np.linalg.norm(point[k] - centre[side[k]]) for k in idx])))
+    if np.linalg.norm(centre["white"] - centre["black"]) < apart * spread:
+        return list(detections)
+    out = list(detections)
+    for k in groups["black"]:
+        own = np.median([point[j] for j in groups["black"] if j != k], axis=0)
+        if nearer * np.linalg.norm(point[k] - centre["white"]) < np.linalg.norm(point[k] - own):
+            det = detections[k]
+            out[k] = Detection("white_" + det.cls.split("_", 1)[1], det.confidence, det.bbox)
+    return out
+
+
 # --------------------------------------------------------------------------
 # One king a side
 
@@ -358,7 +457,7 @@ KINDS = ("king", "queen", "rook", "bishop", "knight", "pawn")
 KING_FLOOR = 0.02
 
 
-def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
+def one_king_a_side(detections, kind_scores, floor=KING_FLOOR, queen_for_king=False):
     """The detections with one king on each side, where the model's scores
     allow it. Every position of a game has exactly two kings, and a king read
     as a queen (or a third "king") is what a piece model gets wrong on a set
@@ -383,7 +482,14 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
     if that is at least `floor`. With more than two, a side with several
     kings keeps the one with the highest "king" score and each of the others
     becomes its best-scoring other kind (a queen when it has no other score).
-    A piece keeps its side, confidence and box."""
+    A piece keeps its side, confidence and box.
+
+    `queen_for_king` (off unless asked for, in the app too): where a side
+    without a king has no piece with a "king" score of `floor`, its queen is
+    made the king, and of several queens the one the model is least sure of.
+    A king the model is sure is a queen is the commonest thing left wrong on
+    Fenit board B once the sides are right; on a board set up without a king
+    it turns a real queen into one."""
     out = list(detections)
     total = sum(1 for d in out if d.cls.endswith("_king"))
     if total == 2:
@@ -396,7 +502,12 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
         kings = [k for k in idx if out[k].cls == side + "_king"]
         if total < 2 and not kings:
             best = max(idx, key=lambda k: (king_score[k], -k))
-            if king_score[best] >= floor:
+            if king_score[best] < floor and queen_for_king:
+                queens = [k for k in idx if out[k].cls == side + "_queen"]
+                best = min(queens, key=lambda k: (out[k].confidence, k)) if queens else None
+            elif king_score[best] < floor:
+                best = None
+            if best is not None:
                 out[best] = Detection(side + "_king", out[best].confidence, out[best].bbox)
         elif total > 2 and len(kings) > 1:
             keep = max(kings, key=lambda k: (king_score[k], -k))

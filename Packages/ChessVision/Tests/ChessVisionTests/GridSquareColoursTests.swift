@@ -311,7 +311,8 @@ struct GridSquareColoursTests {
     ) throws -> [CGPoint] {
         try #require(CoreMLBoardRecognizer.place(
             found, corners: corners, cornersFromModel: fromModel, in: image,
-            sidesFromColour: false, oneKing: false, a1Prior: a1Prior, a1Dark: a1Dark, pull: 0)).corners
+            sidesFromColour: false, oddSides: false, oneKing: false, queenForKing: false, a1Prior: a1Prior,
+            a1Dark: a1Dark, pull: 0)).corners
     }
 
     /// The pieces cannot turn a board by a quarter. A drawn board whose true
