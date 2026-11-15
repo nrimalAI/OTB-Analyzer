@@ -435,16 +435,26 @@ Much less than before, and on two sets they cost:
   The head start given to the model's own a1 (`--a1-prior`, 6 in the app)
   at 6 / 12 / 20 / 40 / pieces off: Fenit A 231 / 243 / 251 / 255 / 255
   boards; board B 94.36 / 94.36 / 93.83 / 92.20 / 76.50% of squares;
-  ChessReD test 295 at every value. So 12 costs nothing on these three
-  sets and gains 12 boards on Fenit A, **and it stays at 6**: tried on the
-  second test set as a test (app-side session, 2026-11-14), 12 is worse on
-  25 photos and better on 5 (95.86% -> 95.71% of squares; Y-LIChess 2
-  against 14, samryan 1 against 10). On a board the corner model has not
-  seen its own a1 is wrong often enough that the pieces must be able to
-  overrule it; Fenit A is a board it was trained on, and board B did not
-  show it. The lever, if there is one, is telling a board the corner model
-  knows from one it does not, not the head start. No value mends the two
-  G033 endgames: they score better turned at any head start.
+  ChessReD test 295 at every value from 6 up (0 / 3 give 292 / 294, and
+  Fenit A 214 / 223). So 12 costs nothing on these three sets and gains 12
+  boards on Fenit A, **and it stays at 6**: tried on the second test set as
+  a test (app-side session, 2026-11-14; `docs/RECOGNITION.md` has the
+  account), 12 gives 95.71% of squares against 95.86% and 440 boards exact
+  against 439. What it does there is turn boards, not misread pieces: 24
+  photos upright at 6 are turned at 12 (23 of them by a quarter, which the
+  app's flip button does not undo), 5 the other way. The photos that change
+  have few pieces (35 of 36 have nine or fewer), and on them the corner
+  model's own a1 is wrong on 31 and right on 5; on Fenit A, a board it was
+  trained on, it is right on 12 of 13. The 25 worse photos are not 25
+  independent ones (runs of neighbouring positions from two sources; by
+  run about 8 worse and 3 better), so the sign test over photos overstates
+  it; the decision needs no p-value: no gain on unseen boards. 6 is the
+  incumbent, not shown to be the best value: the development sets cannot
+  place it any more (board B reads the same from 0 to 12; the other two are
+  boards the corner model knows). Choosing again needs an unseen
+  development board with sparse positions, not another look at the second
+  test set. No value mends the two G033 endgames: they score better turned
+  at any head start.
 - *The grid fit.* It mends board B (+131 squares on 11 photos, 2 lost) and
   changes one Fenit A photo for the worse. On the second test set it
   changes nothing on three parts, mends ChessQ, and on Y-LIChess 54 photos
