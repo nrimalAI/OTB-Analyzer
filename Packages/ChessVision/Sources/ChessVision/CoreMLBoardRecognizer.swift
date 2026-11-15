@@ -61,18 +61,19 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     for: on the second held-out test set the rule as it is loses 12
     ///     points of squares on one source with `pieces_s_render1`, the
     ///     piece model it was made for, and gains nothing lasting with the
-    ///     piece model before that (`docs/RECOGNITION.md`, "What the colour step is
-    ///     worth"; not measured with the one in `Models/` now). It is kept
-    ///     for the reference's next version of the rule.
+    ///     piece model before that (`docs/RECOGNITION.md`, "What the colour
+    ///     step is worth"; not measured with any piece model since, neither
+    ///     `pieces_s_render3` nor `pieces_s_tone1`). It is kept for the
+    ///     reference's next version of the rule.
     ///   - oneKing: exactly one king a side, from the scores the piece model
     ///     gave each piece for every kind (`OneKingASide`). On: when it was
     ///     chosen no development set lost by it in total, with either piece
     ///     model it was tried with, and the second held-out test set did
     ///     not contradict that (`docs/RECOGNITION.md`, "What one king a
-    ///     side is worth"). With the piece model in `Models/` now it is
-    ///     worth 80 boards fully right of that set's 1,619, and costs a
-    ///     board on Fenit A, on positions set up without two kings ("What
-    ///     the app reads now").
+    ///     side is worth"). With the piece models since it is worth more:
+    ///     80 boards fully right of that set's 1,619 with
+    ///     `pieces_s_render3`, 109 with `pieces_s_tone1` ("What the app
+    ///     reads with the third pair").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
