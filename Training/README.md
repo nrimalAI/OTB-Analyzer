@@ -466,7 +466,7 @@ Much less than before, and on two sets they cost:
   boards of the second test set are exact once turned by a quarter (12 by a
   half), and 8 against 16 on Fenit A.
 
-**a1 is a dark square (2026-11-14; in the reference, not yet in the app).**
+**a1 is a dark square (2026-11-14; in the reference and, since pull request #22, in the app, on by default).**
 Quarter turns are the larger part of what is left on unseen boards, and no
 head start mends them. The square colours do, without any model: on a board
 set up as the rules say a1 is dark, so of the four ways the board can lie
@@ -500,7 +500,26 @@ test set: better on three parts, the same on two, three squares worse on
 one. The corners as the model gave them had a light a1 on 34 of board B's
 photos, 107 of samryan's and 40 of the Y-LIChess layouts'. A board set up
 with a light square on a1 would be read a quarter turn off by it; none of
-these sets has one. The app-side session has been asked to port it.
+these sets has one.
+
+Through the app (app-side session's port, `CoreMLBoardRecognizer(a1Dark:)`,
+`app_check --a1-dark on|off`; `docs/RECOGNITION.md`, "What a dark a1 is
+worth"), the pair in `Models/`, off -> on: ChessReD test the same (295
+boards exact); board B 94.36% -> 94.48% of squares, 16 exact both; Fenit A
+231 -> 233 boards exact, 247 -> 255 exact or half a turn away; second test
+set, once, as a test: 95.86% -> 96.38% of squares, 439 -> 459 boards exact,
+boards a quarter turn off 26 -> 0, no fully right board lost. Swift and
+Python give the same answer on all 2,311 photos.
+
+With quarter turns gone, the head start for the model's own a1 only trades
+half turns, and stays at 6. In Python with `--a1-dark`, head start 0 / 6 /
+12 / 20 / 40 (`runs/scores/a1_prior_dark.txt`, `a1_dark_pair.txt`): Fenit
+A, a board the corner model knows, 228 / 231 / 245 / 250 / 253 boards
+exact; board B, one it does not, 94.28 / 94.28 / 94.08 / 93.70 / 93.06% of
+squares, with 14 / 14 / 15 / 17 / 21 boards read half a turn off; ChessReD
+test the same at every value. More trust in the model's a1 mends half
+turns on a known board and makes them on an unknown one, and the unknown
+one is what the app is for.
 
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
@@ -722,14 +741,16 @@ tests, and the first corner model does not. Until pull request #15 the piece
 model beside it was the baseline piece weights exported with NMS across
 classes.
 
-**What a new model has to beat** (through `app_check` with the app's
-defaults as they are since pull request #12: grid fit on, a1 prior 6, one
-king a side, colour step off, each photo decoded once; the pair in
-`Models/`, `runs/app_check/tone1/tone1_canon1_*.txt` and
-`final_h2/tone1_canon1_*.txt`): ChessReD test 295 of 306 boards exact, two
-more once turned by 180 degrees; Fenit board B 94.36% of squares, 16 boards
-exact, every board found; Fenit A 97.79% of squares, 231 of 286 exact;
-second test set (a test only) 95.86% and 439 of 1,619. Compare two models only through the same
+**What a new model has to beat** (through `app_check` built from c8afd31
+or later, with the app's defaults: grid fit on, a1 on a dark square, head
+start 6, one king a side, colour step off, each photo decoded once; the
+pair in `Models/`, `runs/app_check/dark/now_*.txt`): ChessReD test 295 of
+306 boards exact, two more once turned by 180 degrees; Fenit board B 94.48%
+of squares, 16 boards exact, every board found; Fenit A 98.09% of squares,
+233 of 286 exact; second test set (a test only) 96.38% and 459 of 1,619;
+as 3:4 photos ChessReD test 282, board B 94.45%. The outputs in
+`runs/app_check/tone1/` are from the build before a1 on a dark square:
+re-run the pair in `Models/` with the build a candidate is run with. Compare two models only through the same
 build of `app_check`: every app-side step moved these numbers a little, and
 before pull request #9 it read different pixels. And the model has to pass
 the fixture tests of `./Scripts/swift-test.sh`: the four fixtures with the
