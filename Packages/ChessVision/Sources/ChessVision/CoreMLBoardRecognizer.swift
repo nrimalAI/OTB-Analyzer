@@ -54,6 +54,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let fitWindow: Bool
     /// Internal for testing: the app's default must stay off.
     let oddSides: Bool
+    /// Internal for testing: the app's default must stay off.
+    let queenForKing: Bool
 
     /// What the app runs with where nothing else is asked for.
     public enum Default {
@@ -64,6 +66,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         public static let a1Dark = true
         public static let fitWindow = true
         public static let oddSides = false
+        public static let queenForKing = false
     }
 
     /// - Parameters:
@@ -113,6 +116,13 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     pieces called Black (`OddSides`). Off unless asked for: it is in
     ///     the reference to be measured through the app first
     ///     (`Training/README.md`, "The side of single pieces").
+    ///   - queenForKing: with `oneKing`, a side left without a king and
+    ///     without a piece the model gave a "king" score takes its queen
+    ///     for one, of several the one the model is least sure of
+    ///     (`OneKingASide`). Off unless asked for: in the reference to be
+    ///     measured through the app first (`Training/README.md`, "A side
+    ///     without a king takes its queen"). Has no effect with `oneKing`
+    ///     off.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -124,7 +134,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         oneKing: Bool = Default.oneKing,
         a1Dark: Bool = Default.a1Dark,
         fitWindow: Bool = Default.fitWindow,
-        oddSides: Bool = Default.oddSides
+        oddSides: Bool = Default.oddSides,
+        queenForKing: Bool = Default.queenForKing
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
@@ -137,6 +148,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.a1Dark = a1Dark
         self.fitWindow = fitWindow
         self.oddSides = oddSides
+        self.queenForKing = queenForKing
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -235,7 +247,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         Self.place(
             found, corners: corners, cornersFromModel: cornersFromModel, in: image,
             sidesFromColour: sidesFromColour, oddSides: oddSides, oneKing: oneKing,
-            a1Prior: a1Prior, a1Dark: a1Dark, pull: pull, whole: whole)
+            queenForKing: queenForKing, a1Prior: a1Prior, a1Dark: a1Dark, pull: pull, whole: whole)
     }
 
     /// What follows the two models, in `evaluate.py`'s order: the sides from
@@ -254,6 +266,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         sidesFromColour: Bool,
         oddSides: Bool,
         oneKing: Bool,
+        queenForKing: Bool,
         a1Prior: Double?,
         a1Dark: Bool,
         pull: Double,
@@ -272,7 +285,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             }
         }
         if oneKing {
-            detections = OneKingASide.apply(detections)
+            detections = OneKingASide.apply(detections, queenForKing: queenForKing)
         }
         if let prior = orientationPrior(fromModel: cornersFromModel, configured: a1Prior) {
             // As `evaluate.py --a1-dark`: on the corners as they are by now,
