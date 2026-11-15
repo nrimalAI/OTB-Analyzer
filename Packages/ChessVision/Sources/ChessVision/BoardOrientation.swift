@@ -10,7 +10,10 @@ enum BoardOrientation {
 
     /// How much the corner model's own choice of a1 counts against the
     /// pieces in the app (`CoreMLBoardRecognizer`). Chosen on the ChessReD
-    /// test split (`Training/README.md`, `docs/RECOGNITION.md`).
+    /// test split (`Training/README.md`, `docs/RECOGNITION.md`). With the
+    /// corner model `corners_s_canon1` 12 was tried and not taken: it gains
+    /// boards on a board the model was trained on and turns boards with few
+    /// pieces on ones it was not ("What the app reads with the third pair").
     static let appPrior = 6.0
 
     /// How much a board looks like one seen with White at ranks 1-2: White's
