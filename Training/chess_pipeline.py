@@ -80,6 +80,47 @@ def project(H, point):
     return p[0] / p[2], p[1] / p[2]
 
 
+# How far, in squares, each of the corner model's corners may lie from a
+# whole-square shift of the grid fit's window for the window to be moved.
+# With the fit's window moved one rank on purpose on Fenit board B, a board
+# the corner model has not seen, 0.5 / 0.75 / 0.95 move 46 / 60 / 66 of 93
+# windows back; on a fit left alone none of them moves a window on board B,
+# Fenit A or ChessReD test (692 photos).
+WINDOW_NEAR = 0.75
+
+
+def window_by_model(fit_corners, model_corners, near=WINDOW_NEAR):
+    """The grid fit's corners, moved by one square where the corner model
+    says the board is the neighbouring 8x8 window of the same grid.
+
+    The classical fit finds the lines of the grid more exactly than a model
+    does, but it has to choose which 8x8 squares of the grid are the board,
+    and a border that looks like a rank of squares makes it choose a window
+    one rank or file off. The corner model is less exact and seldom a whole
+    square off. So the fit keeps the lines and the model picks the window:
+    seen in the fit's own board frame, each of the model's corners (given in
+    the same order as the fit's) lies some way from the fit's corner; if all
+    four lie within `near` squares of the same shift by one square (one rank,
+    one file or both), the window is moved by it. Otherwise nothing changes:
+    when the model's corners are near the fit's, and when they are too far
+    off or too unlike a shift to be believed.
+
+    Returns (corners, (files, ranks)): the four corners in the order given,
+    and the shift made, (0, 0) for none."""
+    fit = [tuple(map(float, c)) for c in fit_corners]
+    H = homography(fit)
+    frame = [(0.0, 0.0), (0.0, 8.0), (8.0, 8.0), (8.0, 0.0)]
+    offsets = np.array([np.subtract(project(H, c), at) for c, at in zip(model_corners, frame)])
+    shift = np.round(offsets.mean(axis=0))
+    if not shift.any() or np.abs(shift).max() > 1:
+        return fit, (0, 0)
+    if np.abs(offsets - shift).max() > near:
+        return fit, (0, 0)
+    back = np.linalg.inv(H)
+    moved = [project(back, (x + shift[0], y + shift[1])) for x, y in frame]
+    return [tuple(map(float, c)) for c in moved], (int(shift[0]), int(shift[1]))
+
+
 def pulled_board_point(H, point, pull=0.30):
     """Project an anchor into board coords with camera-aware correction.
 

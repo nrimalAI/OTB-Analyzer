@@ -539,6 +539,41 @@ test the same at every value. More trust in the model's a1 mends half
 turns on a known board and makes them on an unknown one, and the unknown
 one is what the app is for.
 
+**The corner model picks the grid fit's window (2026-11-15; in the
+reference, not yet in the app).** The classical fit finds the lines of the
+grid more exactly than a model does, but it has to choose which 8x8 squares
+of the grid are the board, and a border that looks like a rank of squares
+makes it take a window one rank off: 16 to 18 photos of the Y-LIChess
+board, which the dark-a1 rule then turns by a quarter as well. The corner
+model is less exact and seldom a whole square off. So the fit keeps the
+lines and the model picks the window: `chess_pipeline.window_by_model`
+looks at the model's four corners in the fit's own board frame and, when
+all four lie within `WINDOW_NEAR` (0.75) squares of the same shift by one
+square, moves the fit's window by it; otherwise nothing changes.
+`evaluate.py --fit-window` switches it on; `--shift-fit FILES,RANKS` moves
+the fit's window on purpose, to test it.
+
+The development sets have no photo with a window off, so it was measured
+there in two ways (Python, the pair in `Models/`, `--a1-dark`;
+`runs/scores/fit_window.txt`). Left alone, the rule never fires on board B,
+Fenit A or ChessReD test (692 photos): no cost. With the window moved one
+rank on purpose, squares right without the rule -> with it: Fenit A 68.2%
+-> 97.7% (272 of 278 windows moved back; 98.1% with no shift), ChessReD
+test 53.0% -> 99.5% (287 of 289), board B 63.2% -> 84.8% (60 of 93; the
+corner model has not seen that board, and at a tolerance of 0.5 it is 46,
+at 0.95 66, which is how 0.75 was chosen; no value fires on a fit left
+alone). The other three directions give the same on board B.
+
+Then once on the second test set, as a test
+(`runs/scores/heldout2_pair_tone1_canon1_a1dark_window.txt` against
+`..._a1dark.txt`): it fires 14 times, all on Y-LIChess. Games 90.18% ->
+98.28% of squares, 35 -> 41 of 102 boards exact; layouts 90.53% -> 90.80%
+(one window moved); ChessQ, chesscog, samryan and chess-cv unchanged, not
+one window moved. What it cannot mend is a photo where the corner model is
+a rank off too, and a model that is consistently one square off would move
+a right window: none was seen. The app-side session has been asked to port
+it.
+
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
 read as p 8 times, a black pawn on an empty square 6, Q as q 3, K as k 3,
