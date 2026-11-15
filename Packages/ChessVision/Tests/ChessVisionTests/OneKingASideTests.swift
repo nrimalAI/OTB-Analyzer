@@ -288,7 +288,8 @@ struct OneKingASideTests {
         func place(oneKing: Bool) throws -> (corners: [CGPoint], placement: String) {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: Self.rightWayUp, cornersFromModel: false, in: image,
-                sidesFromColour: false, oneKing: oneKing, a1Prior: 6, pull: SquareAssignment.defaultPull))
+                sidesFromColour: false, oneKing: oneKing, a1Prior: 6, a1Dark: false,
+                pull: SquareAssignment.defaultPull))
             return (placed.corners, FENBuilder.placement(placed.pieces.mapValues(\.piece)))
         }
 
@@ -316,7 +317,7 @@ struct OneKingASideTests {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: Self.rightWayUp, cornersFromModel: true, in: image,
                 sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: nil,  // a1 as given
-                pull: SquareAssignment.defaultPull))
+                a1Dark: false, pull: SquareAssignment.defaultPull))
             return FENBuilder.placement(placed.pieces.mapValues(\.piece))
         }
         #expect(try placement(sidesFromColour: true, oneKing: true) == "8/ppppkppp/8/8/8/8/PPPKPPPP/8")

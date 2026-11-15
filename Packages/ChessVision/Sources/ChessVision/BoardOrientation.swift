@@ -43,17 +43,22 @@ enum BoardOrientation {
     /// `whiteSideScore`. `prior` is added to the score of the corners as
     /// given, i.e. how much to trust the corner model's own choice (0: not at
     /// all, the default, as in Python). On a tie the earlier rotation wins,
-    /// the corners as given first.
+    /// the corners as given first. `turns`, when given, are the only
+    /// rotations looked at (0: as given, 1: a quarter turn on, ...): the ones
+    /// the square colours allow (`GridCorners.squareColours`). The head start
+    /// still goes to the corners as given, when they are among them.
     static func orient(
         corners: [CGPoint],
         detections: [PieceDetection],
         pull: Double = SquareAssignment.defaultPull,
-        prior: Double = 0
+        prior: Double = 0,
+        turns: [Int]? = nil
     ) -> [CGPoint] {
         guard corners.count == 4 else { return corners }
         var best = corners
         var bestScore: Double?
         for turn in 0..<4 {
+            if let turns, !turns.contains(turn) { continue }
             let turned = Array(corners[turn...] + corners[..<turn])
             guard let homography = Homography(corners: turned) else { continue }
             var score = whiteSideScore(SquareAssignment.assign(

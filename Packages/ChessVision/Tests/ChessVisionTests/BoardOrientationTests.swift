@@ -81,6 +81,37 @@ struct BoardOrientationTests {
         #expect(BoardOrientation.orient(corners: [.zero], detections: []) == [.zero])
     }
 
+    /// `turns`: only the rotations named are looked at, and the head start
+    /// still goes to the corners as given when they are among them.
+    @Test func testOnlyTheRotationsNamedAreLookedAt() throws {
+        let pieces = try Self.detections("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR")
+        let quarter = Self.turned(Self.topDown, by: 1)
+        // The pieces want rotation 3 of `quarter`; it is not on offer.
+        #expect(BoardOrientation.orient(corners: quarter, detections: pieces) == Self.topDown)
+        let kept = BoardOrientation.orient(corners: quarter, detections: pieces, turns: [0, 2])
+        #expect(kept == quarter || kept == Self.turned(quarter, by: 2))
+        #expect(BoardOrientation.orient(corners: quarter, detections: pieces, turns: [1, 3]) == Self.topDown)
+        // All four named is no restriction; none named leaves the corners.
+        #expect(BoardOrientation.orient(
+            corners: quarter, detections: pieces, turns: [0, 1, 2, 3]) == Self.topDown)
+        #expect(BoardOrientation.orient(corners: quarter, detections: pieces, turns: []) == quarter)
+
+        // The head start: +2.5 the right way up, -2.5 turned by half.
+        let few = try Self.detections("7Q/8/1k3p2/4p3/8/p3K3/8/8")
+        let upsideDown = Self.turned(Self.topDown, by: 2)
+        #expect(BoardOrientation.orient(
+            corners: upsideDown, detections: few, prior: 6, turns: [0, 2]) == upsideDown)
+        #expect(BoardOrientation.orient(
+            corners: upsideDown, detections: few, prior: 0, turns: [0, 2]) == Self.topDown)
+        // It is the corners as given that get it, not the first rotation named.
+        let quarterOff = Self.turned(Self.topDown, by: 3)   // rotation 1 of it is the right way up
+        #expect(BoardOrientation.orient(
+            corners: quarterOff, detections: few, prior: 6, turns: [1, 3]) == Self.topDown)
+        #expect(BoardOrientation.orient(
+            corners: Self.turned(Self.topDown, by: 1), detections: few, prior: 6, turns: [1, 3])
+            == Self.topDown)
+    }
+
     // MARK: - Cases written by Training/swift_reference.py
 
     private struct Case: Decodable {
@@ -108,6 +139,10 @@ struct BoardOrientationTests {
             .appending(path: "orientation_cases.json")
         let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: url))
         #expect(cases.count >= 100)
+        struct Allowed: Decodable { let orientation: [String: [Int]] }
+        let allowed = try JSONDecoder().decode(Allowed.self, from: Data(contentsOf: url
+            .deletingLastPathComponent().appending(path: "dark_cases.json"))).orientation
+        #expect(allowed["0,2"]?.count == cases.count && allowed["1,3"]?.count == cases.count)
 
         for (index, recorded) in cases.enumerated() {
             let corners = recorded.corners.map { CGPoint(x: $0[0], y: $0[1]) }
@@ -131,6 +166,16 @@ struct BoardOrientationTests {
             let oriented = BoardOrientation.orient(
                 corners: corners, detections: detections, pull: recorded.pull, prior: recorded.prior)
             #expect(oriented == Self.turned(corners, by: recorded.turn), "case \(index)")
+            // With only two of the four rotations allowed (a1 is a dark
+            // square): the one `orient_by_pieces(turns=)` chose.
+            for (key, turns) in [("0,2", [0, 2]), ("1,3", [1, 3])] {
+                let chosen = try #require(allowed[key])[index]
+                #expect(turns.contains(chosen))
+                #expect(BoardOrientation.orient(
+                    corners: corners, detections: detections, pull: recorded.pull,
+                    prior: recorded.prior, turns: turns) == Self.turned(corners, by: chosen),
+                    "case \(index), turns \(key)")
+            }
             let board = SquareAssignment.assign(
                 detections: detections,
                 homography: try #require(Homography(corners: oriented)),

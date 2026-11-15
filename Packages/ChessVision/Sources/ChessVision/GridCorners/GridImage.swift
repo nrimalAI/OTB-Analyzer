@@ -55,6 +55,19 @@ extension GrayImage {
         let originY: Int
     }
 
+    /// Whether a working image has the origin, the scale and the size of
+    /// `working(from: image, priorBox: nil)`: the check before one that was
+    /// handed in is used in place of shrinking the photo again. (It cannot
+    /// tell two photos of the same size apart.)
+    static func isWhole(_ working: Working, of image: CGImage) -> Bool {
+        let s = min(1.0, Double(workingSide) / Double(max(image.width, image.height)))
+        func side(_ n: Int) -> Int {
+            s < 1 ? Int((Double(n) * s).rounded(.toNearestOrEven)) : n
+        }
+        return working.originX == 0 && working.originY == 0 && working.scale == s
+            && working.gray.width == side(image.width) && working.gray.height == side(image.height)
+    }
+
     /// The part of the photo to search, as grey levels 0...255: the prior box
     /// with a tenth added on each side (or the whole photo), shrunk so that
     /// its long side is at most 1000 pixels.
