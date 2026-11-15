@@ -82,8 +82,9 @@ worth", which is the section for what the app reads now.
    board round and can no longer turn it by a quarter, which is what they
    did to boards with few pieces and what the app's flip button does not
    mend. (A reading can still come out a quarter off where the colours
-   themselves mislead: corners a square off the board, or a board set up
-   the wrong way, below.) The head start still goes to the corners as they
+   themselves mislead, with corners a square off the board or a board set
+   up with a light square on a1, and where they say nothing, below.) The
+   head start still goes to the corners as they
    came, when those are one of the two. The colours say nothing, and all four rotations stay,
    when fewer than 40 cells are seen, when the lighter and the darker cells
    are less than 15 grey levels apart, or when the two colours do not split
@@ -590,22 +591,51 @@ by a quarter.
   0, 0 and 4 after, one of them now exact once turned by half). The last, and samryan's, are
   endgames that were a quarter off and are now half a turn off with one
   square fewer. No board that was fully right is lost.
-- **Not every quarter turn is gone.** The pieces can no longer cause one;
-  the colours can, where the corners are a square off the board (its
-  colours are then the other way round and the rule forces a quarter turn)
-  or the board is set up with a light a1. Counting every photo that has
-  more squares right once its reading is turned by a quarter than as read
-  or turned by half, whether or not it is then fully right: the second
-  held-out set 77 without the rule and 10 with it (Y-LIChess 40 -> 9,
-  ChessQ 4 -> 1, samryan 33 -> 0), Fenit A 10 -> 1, board B 4 -> 0,
-  ChessReD test none either way. Of the 11 that remain, eight are
-  readings that are wrong whichever way they are turned, a square or two
-  apart between rotations: seven full Y-LIChess boards at 20 to 25
-  squares (six of them among the full boards above) and a Fenit A endgame
-  at 55 to 57. Three fit clearly better a quarter on: two Y-LIChess
-  layouts (`wood_0148`, 48 squares against 43; `wood_0202`, 32 against 24)
-  and one ChessQ photo (`0011`, 52 against 35, read the same with and
-  without the rule). Found by the reviewer of pull request #23.
+- **Not every quarter turn is gone, and the rule makes some.** Where the
+  colours are clear the pieces can no longer cause one. The colours can:
+  with corners one square off the board along a rank or a file, the
+  colours of the cells are the other way round, and the rule forces a
+  quarter turn on a reading that was the right way round. It would do the
+  same on a board set up with a light square on a1 (no set here has one).
+  And where the colours say nothing (8 photos of 2,311) all four rotations
+  stay open and a quarter turn can come about as before. Counted two
+  ways, from the readings (no photo or corner label was looked at):
+  - *By squares*: photos with more squares right once the reading is
+    turned by a quarter, either way, than as read or turned by half,
+    whether or not it is then fully right. The second held-out set 77
+    without the rule and 10 with it (Y-LIChess 40 -> 9, ChessQ 4 -> 1,
+    samryan 33 -> 0), Fenit A 10 -> 1, board B 4 -> 0, ChessReD test none
+    either way. Of the 11 with the rule only two were there without it
+    (`wood_0148` of Y-LIChess, `0011` of ChessQ); the rule made the other
+    nine. This count is a floor: a reading a square off has about the same
+    20 to 25 squares right whichever way it is turned.
+  - *By where the pieces land*: the rotation at which most pieces of the
+    reading stand on a square that holds the same piece in the position,
+    the reading moved by up to one square (counted when at least three
+    pieces land and two more than at the other pair of rotations). A
+    quarter off: the second held-out set 56 without the rule and 19 with
+    it (Y-LIChess 20 -> 18, ChessQ 4 -> 1, samryan 32 -> 0), Fenit A 10 ->
+    1, board B 2 -> 0, ChessReD test none.
+  - **The 16 the rule made**: of Y-LIChess's 18, 16 are full boards that
+    were read the right way round and one rank off without the rule (the
+    grid fit accepts a grid a rank off there, "What the app reads with
+    the third pair") and are a quarter turn off as well with it: turned
+    back and moved one rank, every piece found, or all but one or two,
+    stands on its own piece. On all 16 the colours found a light a1 as
+    the corners came. Their squares do not show it: 20 to 25 of 64 before,
+    19 to 24 after, 357 and 358 in all. The eight full boards that lose
+    a square or two, above, are all among them. For the user it is a
+    reading that was useless and is now useless and turned.
+  - The other three: two Y-LIChess layouts, `wood_0148` (Black's pieces
+    alone; a quarter off with and without the rule, 48 squares against
+    43) and `wood_0202` (half a turn off without the rule, a quarter off
+    with it, 32 against 24), both read a rank off as well; and ChessQ
+    `0011` (52 against 35), one of the photos whose colours say nothing,
+    read the same with and without the rule. Fenit A's one is an endgame
+    of which three of six pieces were found, which fit a quarter turn and
+    one file off.
+  - The reviewer of pull request #23 found `wood_0148`; the reviewer of
+    #24 found that the rule turns the boards that are a rank off.
 - **Against the goal** on boards nobody trained on: 459 of 1,619 photos
   fully right (28%; 27% without the rule) and still 16 of board B's 100;
   the goal is 85%.
@@ -617,8 +647,8 @@ by a quarter.
   1): this corner model's a1 is often a quarter off on a board it has not
   seen, and on most of those photos the pieces already turned it right
   without the rule.
-- **Half turns are what is left**: 18 boards of the second held-out set
-  and 22 of Fenit A are right once turned by half. The rule cannot help
+- **Half turns are what one tap can still mend**: 18 boards of the second
+  held-out set and 22 of Fenit A are right once turned by half. The rule cannot help
   there, nor with the endgames of ChessReD game G033 ("Known weak spot"):
   as 3:4 photos ChessReD test reads as before (99.68%; 282; 284), the
   fixture `test_004005.jpg` among the turned ones, and board B 94.45% (was
@@ -643,7 +673,8 @@ by a quarter.
   not mend that; no set here has such a board, so how often people do it
   is not known. Nothing was run on a phone. The head start for the corner
   model's a1 was not looked at again: 12 was not taken because it turned
-  sparse boards by a quarter, which the rule now rules out, so that
+  sparse boards by a quarter, which the rule now rules out where the
+  colours are clear, so that
   question is open again, for the reference first and not for another
   look at the second held-out set.
 
