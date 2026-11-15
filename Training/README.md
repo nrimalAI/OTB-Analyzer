@@ -799,16 +799,19 @@ was in `Models/`, and why it was taken out again.
   `--canonical-corners` run on the labels as they are on disk.
 - `render_boards.py` (runs in Blender 5.x, `brew install --cask blender`):
   rendered positions with exact boxes, corners and position, a new piece set,
-  board, floor, light and camera per image. `datasets/render` holds 20,000:
+  board, floor, light and camera per image. `datasets/render` holds 26,000:
   `--seed 1` and `--seed 2` (4,000 each) with `--palette split`, the first
-  renders' two lists of side colours, and `--seed 3` (4,000) and `--seed 4`
+  renders' two lists of side colours, `--seed 3` (4,000) and `--seed 4`
   (8,000) with `--palette relative --from-above 0.4`, where the two sides
-  are two shades of one list and the lighter is White. `relative` is the
+  are two shades of one list and the lighter is White, and `--seed 5`
+  (6,000) with `--low-views 0.6 --from-above 0.15` as well: six in ten seen
+  from 12 to 32 degrees above the board, where tall pieces stand in front
+  of the ones behind them. `relative` is the
   default now, so give `--palette split` to add to seeds 1 and 2; from
   2026-11-14 each line of `positions.jsonl` says which it was. Source
   `render` in `sources.yaml`; merged into `datasets/merged_render` (seed 1,
   pieces), `merged_rf_render` (corners), `merged_all` (seeds 1-2),
-  `merged_all3` (1-3), `merged_all4` (1-4). In the first 4,000 the sides of
+  `merged_all3` (1-3), `merged_all4` (1-4), `merged_all5` (1-5). In the first 4,000 the sides of
   thick boards carry a warped copy of the board pattern (fixed in the script
   since; the labels are right).
 - `side_tone.py`, `train.py pieces --side-tone P`: an augmentation for the
