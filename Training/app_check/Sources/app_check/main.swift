@@ -27,6 +27,9 @@
 //   --one-king on|off  exactly one king a side, from the scores the piece
 //                   model gave each piece for every kind (the app's default:
 //                   on).
+//   --a1-dark on|off  a1 is a dark square: where the colours of the squares
+//                   can be told apart the pieces choose between two ways
+//                   round only (the app's default: on).
 //   --flag-below C[,C...]  the app marks a square for the user to check
 //                   when its piece's confidence is under 0.85 (AppModel);
 //                   count how many of the right and of the wrong pieces that
@@ -35,6 +38,11 @@
 //                   finds, the colour of each piece and the sides the colour
 //                   step gives, for `swift_reference.py colours` to compare
 //                   with the Python on the same boxes.
+//   --dark FILE     score nothing: write, for each photo, the corners the app
+//                   ends with before a1 is checked against the pieces and
+//                   what the colours of the squares say of them, for
+//                   `swift_reference.py dark` to compare with the Python on
+//                   the same corners.
 //   --grid FILE     run no model: write what the classical grid fit
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
@@ -128,6 +136,8 @@ var gridFitGiven = false
 var sidesFromColour = false
 var sidesFromColourGiven = false
 var oneKing: Bool?
+var a1Dark: Bool?
+var darkPath: String?
 var flagBelow: [Float] = [0.85]
 var coloursPath: String?
 var uprightPaths: (photo: String, out: String)?
@@ -155,6 +165,13 @@ while !arguments.isEmpty {
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--one-king takes on or off") }
         oneKing = value == "on"
+    case "--a1-dark":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--a1-dark takes on or off") }
+        a1Dark = value == "on"
+    case "--dark":
+        guard !arguments.isEmpty else { fail("--dark takes the file to write") }
+        darkPath = arguments.removeFirst()
     case "--flag-below":
         let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Float($0) }
         guard !values.isEmpty, values.allSatisfy({ $0 != nil }) else {
@@ -191,6 +208,9 @@ if let uprightPaths {
 }
 if coloursPath != nil && (gridPath != nil || redraw != nil || portrait) {
     fail("--colours reads the photos as they are: it goes with neither --grid, --redraw nor --portrait")
+}
+if darkPath != nil && (gridPath != nil || coloursPath != nil || redraw != nil || portrait) {
+    fail("--dark reads the photos as they are: it goes with neither --grid, --colours, --redraw nor --portrait")
 }
 if let gridPath, let listPath {
     let listURL = URL(fileURLWithPath: listPath)
@@ -230,7 +250,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--flag-below C] [--colours FILE] [--verbose] | app_check --upright PHOTO OUT.png")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--a1-dark on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--verbose] | app_check --upright PHOTO OUT.png")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -279,11 +299,21 @@ do {
     let pieces = try MLModel(
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
-    if let oneKing {
+    // What is not given stays the app's default, whatever that is.
+    switch (oneKing, a1Dark) {
+    case let (oneKing?, a1Dark?):
+        recognizer = try CoreMLBoardRecognizer(
+            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Dark: a1Dark)
+    case let (oneKing?, nil):
         recognizer = try CoreMLBoardRecognizer(
             cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
             sidesFromColour: sidesFromColour, oneKing: oneKing)
-    } else {
+    case let (nil, a1Dark?):
+        recognizer = try CoreMLBoardRecognizer(
+            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+            sidesFromColour: sidesFromColour, a1Dark: a1Dark)
+    case (nil, nil):
         recognizer = try CoreMLBoardRecognizer(
             cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
             sidesFromColour: sidesFromColour)
@@ -337,10 +367,62 @@ if let coloursPath {
     exit(0)
 }
 
+if let darkPath {
+    // The corners before a1 is checked, and what the square colours say.
+    var out: [String: Any] = [:]
+    var unclear = 0, lightA1 = 0
+    for path in list.keys.sorted() {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : listURL.deletingLastPathComponent().appending(path: path)
+        guard let image = upright(url) else { fail("could not load \(path)") }
+        do {
+            guard let found = try recognizer.diagnoseSquareColours(image) else {
+                out[path] = NSNull()
+                continue
+            }
+            if let rotations = found.colours.rotations {
+                if !rotations.contains(0) { lightA1 += 1 }
+            } else {
+                unclear += 1
+            }
+            out[path] = [
+                "corners": found.corners.map { [Double($0.x), Double($0.y)] },
+                "rotations": found.colours.rotations ?? NSNull(),
+                "strength": found.colours.strength,
+            ] as [String: Any]
+        } catch {
+            fail("\(path): \(error)")
+        }
+    }
+    do {
+        try JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])
+            .write(to: URL(fileURLWithPath: darkPath))
+    } catch {
+        fail("could not write \(darkPath): \(error)")
+    }
+    let boards = out.values.filter { !($0 is NSNull) }.count
+    print("\(out.count) photos, a board on \(boards): square colours unclear on \(unclear); "
+        + "the corners as they came had a light a1 on \(lightA1); written to \(darkPath)")
+    exit(0)
+}
+
+/// 64 squares, a8 first, turned by a quarter (clockwise as printed).
+func quarterTurned(_ squares: [Character]) -> [Character] {
+    var out = squares
+    for row in 0..<8 {
+        for column in 0..<8 {
+            out[row * 8 + column] = squares[(7 - column) * 8 + row]
+        }
+    }
+    return out
+}
+
 var photos = 0
 var squaresRight = 0
 var exact = 0
 var exactTurned = 0  // right once the board is turned 180 degrees
+var exactQuarter = 0  // wrong as read, right once the board is turned by a quarter
 var notFound = 0
 // Pieces the app would mark for the user to check, for each threshold:
 // [right, wrong]; and all pieces put on a square: [right, wrong].
@@ -400,8 +482,12 @@ for (path, placement) in list.sorted(by: { $0.key < $1.key }) {
     squaresRight += right
     if right == 64 { exact += 1 }
     if right == 64 || turned == 64 { exactTurned += 1 }
+    let once = quarterTurned(have)
+    let quarter = right < 64 && turned < 64
+        && (once == want || quarterTurned(quarterTurned(once)) == want)
+    if quarter { exactQuarter += 1 }
     if verbose || right < 64 {
-        let note = right < 64 && turned == 64 ? "  TURNED 180" : ""
+        let note = right < 64 && turned == 64 ? "  TURNED 180" : quarter ? "  TURNED BY A QUARTER" : ""
         print("\(url.lastPathComponent): \(right)/64\(note)  expected \(placement)  got \(got)")
     }
 }
@@ -410,10 +496,11 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
+      boards wrong as read and exact once turned by a quarter: \(exactQuarter)
       board not found: \(notFound)
     """)
 for (k, threshold) in flagBelow.enumerated() {

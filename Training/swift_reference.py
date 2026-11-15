@@ -5,9 +5,11 @@ is checked against this folder's Python and not against a second opinion.
     python swift_reference.py grid-cases
     python swift_reference.py colour-cases
     python swift_reference.py king-cases
+    python swift_reference.py dark-cases
     python swift_reference.py grid --list photos.json --out python_grid.json
     python swift_reference.py compare --python python_grid.json --swift swift_grid.json
     python swift_reference.py colours --swift swift_colours.json [--list photos.json]
+    python swift_reference.py dark --swift swift_dark.json [--list photos.json]
 
 orientation: random boards seen in perspective with their corners given in a
 random rotation, some pieces missed, misread or found twice, some boxes beside
@@ -36,6 +38,17 @@ gets its scores from overlapping boxes (evaluate.kind_scores_of) and the app
 from the class scores of the box itself, so the two cannot be compared on
 photos piece for piece.
 
+dark-cases: a1 is a dark square. What grid_corners.dark_corner_rotations
+makes of chequered pictures that both sides draw from a few numbers (each of
+its three thresholds from both sides: 40 cells seen and 39, on a board turned
+in the picture; contrast; how cleanly the colours split; a cell exactly at
+the middle grey), of the drawn boards of grid-cases and of the four fixture
+photos, each with rings of corners in every rotation and a square off; and
+which rotation chess_pipeline.orient_by_pieces chooses for the cases of
+orientation_cases.json when only two of the four are allowed (turns=).
+Written to Fixtures/dark_cases.json, replayed by GridSquareColoursTests.
+Needs grid_cases.json and orientation_cases.json as they are in Fixtures.
+
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
 the corners before the validity checks, the confidence and the numbers the
@@ -49,6 +62,13 @@ with; this reads that file, measures the colours and decides the sides in
 Python (evaluate.piece_colours, chess_pipeline.sides_from_colour) and counts
 where the two differ. `--list`: the list given to app_check, when its photo
 paths are relative.
+
+dark: a1 is a dark square, on photos, Swift against Python on the same
+corners. `app_check --dark` writes, for each photo of a list, the corners the
+app ends with before a1 is checked (the grid fit's or the model's) and what
+the colours of the squares say of them; this reads that file, asks
+grid_corners.dark_corner_rotations about the same corners and counts where
+the two differ.
 """
 
 import argparse
@@ -711,6 +731,234 @@ def king_cases(seed):
     print(f"{len(cases)} cases written to {path} ({path.stat().st_size // 1024} kB): {tally}")
 
 
+def checker(spec):
+    """The chequered picture of a dark-cases entry, as grey levels: 8x8 cells
+    of `cell` pixels from `origin`, the cells whose column and row add up to
+    an even number at `even`, the others at `odd`, the ones listed in
+    `swapped` the other way round, `background` around them. The Swift test
+    draws the same from the same numbers."""
+    img = np.full((spec["height"], spec["width"]), spec["background"], np.uint8)
+    ox, oy = spec["origin"]
+    c = spec["cell"]
+    swapped = {tuple(t) for t in spec["swapped"]}
+    other = {(i, j): level for i, j, level in spec.get("levels", [])}
+    for j in range(8):
+        for i in range(8):
+            even = ((i + j) % 2 == 0) != ((i, j) in swapped)
+            x0, y0 = max(ox + i * c, 0), max(oy + j * c, 0)
+            img[y0:max(oy + (j + 1) * c, 0), x0:max(ox + (i + 1) * c, 0)] = \
+                other.get((i, j), spec["even"] if even else spec["odd"])
+    return img
+
+
+def turned_checker(spec):
+    """A chequered board turned in the picture, so that the picture's edge
+    cuts across its cells one at a time: the pixel (x, y) lies on the board
+    at u = ((x - cx) cos + (y - cy) sin) / cell + 4,
+    v = (-(x - cx) sin + (y - cy) cos) / cell + 4, in the cell (floor u,
+    floor v) when both are within 0..8. The Swift test computes the same."""
+    cx, cy = spec["centre"]
+    c, s, cell = spec["cos"], spec["sin"], spec["cell"]
+    yy, xx = np.mgrid[0:spec["height"], 0:spec["width"]].astype(np.float64)
+    u = ((xx - cx) * c + (yy - cy) * s) / cell + 4
+    v = (-(xx - cx) * s + (yy - cy) * c) / cell + 4
+    inside = (u >= 0) & (u < 8) & (v >= 0) & (v < 8)
+    even = (np.floor(u) + np.floor(v)) % 2 == 0
+    img = np.where(even, spec["even"], spec["odd"])
+    return np.where(inside, img, spec["background"]).astype(np.uint8)
+
+
+def dark_cases():
+    import cv2
+    from grid_corners import dark_corner_rotations
+    cv2.setNumThreads(1)
+
+    def answer(image_bgr, ring):
+        turns, strength = dark_corner_rotations(image_bgr, ring)
+        return dict(ring=[[float(x), float(y)] for x, y in ring],
+                    rotations=None if turns is None else list(turns), strength=float(strength))
+
+    def turned(ring, k):
+        return list(ring[k:]) + list(ring[:k])
+
+    # 1. chequered pictures drawn from numbers: the thresholds, from both sides
+    def spec(name, even=60, odd=200, width=400, height=400, origin=(40, 40), swapped=(), turn=0,
+             background=128, levels=()):
+        ox, oy = origin
+        ring = [(ox, oy), (ox, oy + 320), (ox + 320, oy + 320), (ox + 320, oy)]
+        s = dict(name=name, width=width, height=height, cell=40, origin=list(origin), even=even,
+                 odd=odd, background=background, swapped=[list(t) for t in swapped],
+                 levels=[list(t) for t in levels])
+        grey = checker(s)
+        s.update(answer(cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR), turned(ring, turn)))
+        return s
+
+    evens = [(i, j) for j in range(8) for i in range(8) if (i + j) % 2 == 0]
+    odds = [(i, j) for j in range(8) for i in range(8) if (i + j) % 2 == 1]
+    checkers = [
+        spec("the first corner on a dark cell"),
+        spec("the first corner on a light cell", even=200, odd=60),
+        spec("a dark first corner, the ring a corner on", turn=1),
+        spec("a dark first corner, the ring two corners on", turn=2),
+        spec("a dark first corner, the ring three corners on", turn=3),
+        spec("15 grey levels apart: enough", even=100, odd=115),
+        spec("14 grey levels apart: too few", even=100, odd=114),
+        spec("three columns off the picture: 40 cells seen, enough", width=240),
+        spec("four columns off the picture: 32 cells seen, too few", width=200),
+        spec("three rows and a bit off the picture, the ring two corners on", height=235, turn=2),
+        spec("a quarter of each colour the other way: split 0.5, enough",
+             swapped=evens[:8] + odds[:8]),
+        spec("one cell more the other way: split under 0.5", swapped=evens[:9] + odds[:8]),
+        spec("the same with the first corner light", even=200, odd=60, swapped=evens[:9] + odds[:8]),
+        spec("a quarter the other way, the first corner light", even=200, odd=60,
+             swapped=evens[:8] + odds[:8], turn=3),
+        spec("nearly all cells one colour", swapped=odds[:27]),
+        spec("one colour all over", even=90, odd=90),
+        # Cells exactly at the middle between the two colours are not light:
+        # with them light the split would be under 0.5.
+        spec("nine cells exactly at the middle grey: not light", swapped=odds[:8],
+             levels=[(i, j, 130) for i, j in evens[:9]]),
+    ]
+    want = {"15 grey levels apart: enough": [0, 2], "14 grey levels apart: too few": None,
+            "three columns off the picture: 40 cells seen, enough": [0, 2],
+            "four columns off the picture: 32 cells seen, too few": None,
+            "a quarter of each colour the other way: split 0.5, enough": [0, 2],
+            "one cell more the other way: split under 0.5": None,
+            "a quarter the other way, the first corner light": [0, 2]}
+    for c in checkers:
+        if c["name"] in want:
+            assert c["rotations"] == want[c["name"]], (c["name"], c["rotations"], c["strength"])
+    assert next(c for c in checkers if c["name"].startswith("a quarter of each"))["strength"] == 0.5
+    assert checkers[-1]["rotations"] == [0, 2] and checkers[-1]["strength"] == 0.75
+
+    # 1b. the same board turned in the picture, the picture cut narrower one
+    # pixel at a time: the edge then takes cells one by one, and the widest
+    # picture with 39 cells seen and the narrowest with 40 are kept (cut along
+    # the board, as above, cells go eight at a time)
+    from grid_corners import _cell_values
+
+    def turned_spec(width):
+        s = dict(width=width, height=560, cell=40, centre=[280.0, 280.0], cos=0.96, sin=0.28,
+                 even=60, odd=200, background=128)
+        cx, cy = s["centre"]
+        ring = [(cx + ((U - 4) * s["cos"] - (V - 4) * s["sin"]) * s["cell"],
+                 cy + ((U - 4) * s["sin"] + (V - 4) * s["cos"]) * s["cell"])
+                for U, V in ((0, 0), (0, 8), (8, 8), (8, 0))]
+        grey = turned_checker(s)
+        v = _cell_values(grey.astype(np.float32), homography(ring), 0, 0, 8, 8)
+        s["seen"] = int((~np.isnan(v).all(axis=2)).sum())
+        s.update(answer(cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR), ring))
+        return s
+
+    by_seen = {}
+    for width in range(560, 200, -1):
+        s = turned_spec(width)
+        by_seen.setdefault(s["seen"], s)             # the widest picture for each count
+        if s["seen"] < 39:
+            break
+    narrowest_40 = [turned_spec(w) for w in range(by_seen[39]["width"] + 1, by_seen[39]["width"] + 3)]
+    turned_boards = [by_seen[64], next(s for s in narrowest_40 if s["seen"] == 40), by_seen[39]]
+    for s in turned_boards:
+        s["name"] = f"turned in the picture, {s['width']} wide: {s['seen']} cells seen"
+    assert [s["seen"] for s in turned_boards] == [64, 40, 39]
+    assert turned_boards[0]["rotations"] == [0, 2] and turned_boards[1]["rotations"] == [0, 2]
+    assert turned_boards[2]["rotations"] is None and turned_boards[2]["strength"] == 0.0
+
+    # 2. the drawn boards of grid-cases (PNG: the same pixels on both sides)
+    recorded = json.loads((FIXTURES / "grid_cases.json").read_text())
+    boards = []
+    for name, seed, pieces, more in (("plain", 1, False, {}), ("pieces", 2, True, {}),
+                                     ("cut", 4, True, dict(offset=(175, 0))),
+                                     ("ten", 5, False, dict(cells=10)),
+                                     ("busy", 6, True, dict(strays=True))):
+        file = f"grid_board_{name}.png"
+        _, corners = drawn_board(seed, pieces, True, **more)
+        if recorded["boards"][name]["truth"] is not None:
+            assert np.allclose(corners, recorded["boards"][name]["truth"])
+        img = cv2.imread(str(FIXTURES / file))
+        to_image = np.linalg.inv(homography(corners))
+        rings = [(f"turned by {k}", turned(corners, k)) for k in range(4)]
+        # a ring one square along (the colours swapped, one line of cells off
+        # the board) and one half a square off (every cell half of each colour)
+        for label, dx, dy in (("one square along", 1, 0), ("one square up", 0, 1),
+                              ("half a square off", 0.5, 0.5)):
+            rings.append((label, [project(to_image, (x + dx, y + dy))
+                                  for x, y in ((0, 0), (0, 8), (8, 8), (8, 0))]))
+        for label, ring in rings:
+            boards.append(dict(file=file, label=label, **answer(img, ring)))
+    img = cv2.imread(str(FIXTURES / "grid_board_clutter.png"))
+    boards.append(dict(file="grid_board_clutter.png", label="no board",
+                       **answer(img, [(150, 100), (150, 500), (650, 500), (650, 100)])))
+
+    # 3. the fixture photos, on the corners the Python's grid fit gives them
+    # (JPEG: the two decoders differ by a grey level here and there)
+    photos = []
+    for name, fit in sorted(recorded["photos"].items()):
+        img = cv2.imread(str(FIXTURES / name))
+        for k in range(4):
+            photos.append(dict(file=name, label=f"turned by {k}", **answer(img, turned(fit["raw"], k))))
+
+    # 4. a1 from the pieces among two rotations only
+    cases = json.loads((FIXTURES / "orientation_cases.json").read_text())
+    chosen = {"0,2": [], "1,3": []}
+    for case in cases:
+        given = [tuple(p) for p in case["corners"]]
+        detections = [Detection(d["cls"], d["confidence"], tuple(d["box"])) for d in case["detections"]]
+        for key, turns in (("0,2", (0, 2)), ("1,3", (1, 3))):
+            oriented = orient_by_pieces(given, detections, case["pull"], case["prior"], turns=turns)
+            k = next(k for k in range(4) if given[k:] + given[:k] == oriented)
+            assert k in turns and case["scores"][k] == max(case["scores"][t] for t in turns)
+            chosen[key].append(k)
+
+    out = dict(checkers=checkers, turned=turned_boards, boards=boards, photos=photos,
+               orientation=chosen)
+    path = FIXTURES / "dark_cases.json"
+    path.write_text(json.dumps(out, separators=(",", ":")) + "\n")
+    for group in ("checkers", "turned", "boards", "photos"):
+        for c in out[group]:
+            print(f"{c.get('name') or c['file'] + ', ' + c['label']}: {c['rotations']} "
+                  f"strength {c['strength']:.4f}")
+    free = [c["turn"] for c in cases]
+    print(f"orientation, {len(cases)} cases: the free choice was allowed in "
+          f"{sum(a == f for a, f in zip(chosen['0,2'], free))} with (0, 2), "
+          f"{sum(a == f for a, f in zip(chosen['1,3'], free))} with (1, 3)")
+    print(f"written to {path} ({path.stat().st_size // 1024} kB)")
+
+
+def compare_dark(swift_path, list_path):
+    """a1 is a dark square, of the same photos and corners in Python and in Swift."""
+    import cv2
+    from grid_corners import dark_corner_rotations
+    cv2.setNumThreads(1)
+    sw = json.loads(Path(swift_path).read_text())
+    base = Path(list_path).resolve().parent if list_path else Path.cwd()
+    photos = same = unclear_py = unclear_sw = moved_py = moved_sw = 0
+    off = []
+    for photo in sorted(sw):
+        found = sw[photo]
+        if found is None:
+            continue                              # no board in the app
+        src = Path(photo) if Path(photo).is_absolute() else base / photo
+        turns, strength = dark_corner_rotations(cv2.imread(str(src)), found["corners"])
+        mine = None if turns is None else list(turns)
+        photos += 1
+        same += mine == found["rotations"]
+        unclear_py += mine is None
+        unclear_sw += found["rotations"] is None
+        moved_py += mine is not None and 0 not in mine
+        moved_sw += found["rotations"] is not None and 0 not in found["rotations"]
+        off.append(abs(strength - found["strength"]))
+        if mine != found["rotations"]:
+            print(f"  {Path(photo).name}: Python {mine} strength {strength:.3f}, "
+                  f"Swift {found['rotations']} strength {found['strength']:.3f}")
+    off = np.array(off) if off else np.zeros(1)
+    print(f"{photos} photos with a board in the app: the same answer on {same}; "
+          f"colours unclear: Python {unclear_py}, Swift {unclear_sw}; "
+          f"a light a1 as the corners came: Python {moved_py}, Swift {moved_sw}")
+    print(f"strength, Swift against Python: median {np.median(off):.4f}, "
+          f"p95 {np.percentile(off, 95):.4f}, max {off.max():.4f}")
+
+
 def grid_reference(list_path, out_path, limit):
     import cv2
     from grid_corners import find_grid
@@ -816,13 +1064,15 @@ def compare_colours(swift_path, list_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "grid", "compare", "colours"])
+    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "dark-cases",
+                                     "grid", "compare", "colours", "dark"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
     ap.add_argument("--python", help="compare: file written by `grid`")
     ap.add_argument("--swift", help="compare: file written by `app_check --grid`; "
-                                    "colours: file written by `app_check --colours`")
+                                    "colours: file written by `app_check --colours`; "
+                                    "dark: file written by `app_check --dark`")
     ap.add_argument("--count", type=int, default=120)
     ap.add_argument("--seed", type=int, default=20261113)
     args = ap.parse_args()
@@ -839,6 +1089,10 @@ def main():
         colour_cases(args.seed)
     elif args.what == "king-cases":
         king_cases(args.seed)
+    elif args.what == "dark-cases":
+        dark_cases()
+    elif args.what == "dark":
+        compare_dark(args.swift, args.list)
     elif args.what == "grid":
         grid_reference(args.list, args.out, args.limit)
     elif args.what == "colours":

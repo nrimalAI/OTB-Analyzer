@@ -60,9 +60,24 @@ public enum GridCorners {
     /// known; without it the photo is searched twice, the second time on the
     /// board found the first time, for more pixels per square.
     public static func find(in image: CGImage, priorBox: CGRect? = nil) -> Fit? {
-        let result = findGrid(image, priorBox: priorBox)
+        find(in: image, priorBox: priorBox, whole: nil)
+    }
+
+    /// As `find`. `whole`: the whole photo at the working size
+    /// (`workingImage(of:)`), when the caller has it already: shrinking a
+    /// large photo takes tens of milliseconds, and the square colours
+    /// (`squareColours`) read the same image. One that does not have the
+    /// whole photo's origin, scale and size is not used.
+    static func find(in image: CGImage, priorBox: CGRect? = nil, whole: GrayImage.Working?) -> Fit? {
+        let result = findGrid(image, priorBox: priorBox, whole: whole)
         guard result.confidence > 0, let corners = result.corners else { return nil }
         return Fit(corners: corners, confidence: result.confidence)
+    }
+
+    /// The whole photo as grey levels at the working size: what the first
+    /// pass of the fit and the square colours read.
+    static func workingImage(of photo: CGImage) -> GrayImage.Working? {
+        GrayImage.working(from: DecodedImage.once(photo), priorBox: nil)
     }
 
     /// As `find`, with the diagnostics.
@@ -152,11 +167,11 @@ public enum GridCorners {
     /// `find_grid`: corners (nil when nothing was found), confidence (0 when
     /// a validity check failed) and the diagnostics of the pass that counts.
     static func findGrid(
-        _ photo: CGImage, priorBox: CGRect?
+        _ photo: CGImage, priorBox: CGRect?, whole: GrayImage.Working? = nil
     ) -> (corners: [CGPoint]?, confidence: Double, info: Info) {
         // Both passes read the same pixels (`DecodedImage`).
         let image = DecodedImage.once(photo)
-        var (corners, info) = detect(image, priorBox: priorBox)
+        var (corners, info) = detect(image, priorBox: priorBox, whole: whole)
         var conf = corners != nil ? confidence(info, withPrior: priorBox != nil) : 0
         if priorBox == nil, let first = corners {
             // second pass on the found board alone: more pixels per square
@@ -186,9 +201,14 @@ public enum GridCorners {
     }
 
     /// `_detect`: one pass over the photo or over the prior box.
-    static func detect(_ image: CGImage, priorBox: CGRect?) -> (corners: [CGPoint]?, info: Info) {
+    /// `whole`: the whole photo at the working size, used when there is no
+    /// prior box.
+    static func detect(
+        _ image: CGImage, priorBox: CGRect?, whole: GrayImage.Working? = nil
+    ) -> (corners: [CGPoint]?, info: Info) {
         var info = Info()
-        guard let working = GrayImage.working(from: image, priorBox: priorBox) else {
+        let handed = whole.flatMap { priorBox == nil && GrayImage.isWhole($0, of: image) ? $0 : nil }
+        guard let working = handed ?? GrayImage.working(from: image, priorBox: priorBox) else {
             return (nil, info)
         }
         let corners = detect(

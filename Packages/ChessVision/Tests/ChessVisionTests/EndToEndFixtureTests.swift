@@ -104,6 +104,43 @@ import Testing
             cornerModel: models.corners, pieceModel: models.pieces, oneKing: false).oneKing == false)
     }
 
+    /// a1 is a dark square: on unless switched off (`docs/RECOGNITION.md`,
+    /// "What a dark a1 is worth").
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testA1DarkIsOnByDefault() throws {
+        let models = try Self.models.get()
+        #expect(try makeRecognizer().a1Dark == true)
+        #expect(try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, a1Dark: false).a1Dark == false)
+    }
+
+    /// The recognizer hands its own `a1Dark` on to what follows the models
+    /// (`place`, the method `recognize` calls). The fixture photos read the
+    /// same with the rule and without, so they would not notice it missing:
+    /// here a drawn board whose corners start on a light square, with
+    /// pieces that say that corner is a1.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testA1DarkReachesWhatFollowsTheModels() throws {
+        let models = try Self.models.get()
+        let (image, light) = try GridSquareColoursTests.plainBoard()
+        let found = try GridSquareColoursTests.pieces(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPP1/RNBQK3", on: light)
+        let without = try #require(try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, a1Dark: false
+        ).place(found, corners: light, cornersFromModel: true, in: image))
+        #expect(without.corners == light)
+        // As the app builds it: a quarter turn away from what the pieces say.
+        let with = try #require(try makeRecognizer().place(
+            found, corners: light, cornersFromModel: true, in: image))
+        #expect(with.corners == Array(light[1...] + light[..<1])
+            || with.corners == Array(light[3...] + light[..<3]))
+        // The working image handed in by `recognize` changes nothing.
+        let whole = try #require(GridCorners.workingImage(of: image))
+        #expect(try #require(try makeRecognizer().place(
+            found, corners: light, cornersFromModel: true, in: image, whole: whole)).corners
+            == with.corners)
+    }
+
     /// The colour step is off unless asked for (`docs/RECOGNITION.md`, "What
     /// the colour step is worth"). Switching it on by default is a decision
     /// to take with scores on a set nothing was tuned on, not in passing.

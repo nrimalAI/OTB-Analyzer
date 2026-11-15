@@ -526,6 +526,11 @@ def build_scene(rng, placement):
 # The share of pictures taken from lower than 70 degrees; the rest are from
 # 70 degrees to straight above (--from-above sets the rest's share).
 HIGH_FROM = 0.7
+# Low side views: (their share, from and to in degrees above the board). A
+# fifth from 22 to 40 unless --low-views asks for more, which then go down
+# to 12 degrees: the height of a phone held a little above a table, where
+# tall pieces stand in front of the ones behind them.
+LOW = (0.2, 22.0, 40.0)
 
 
 def place_camera(scene, rng, border, size):
@@ -542,7 +547,7 @@ def place_camera(scene, rng, border, size):
 
     # From a low side view to straight above, from any side of the board.
     r = rng.random()
-    elevation = (rng.uniform(22, 40) if r < 0.2 else rng.uniform(40, 70) if r < HIGH_FROM
+    elevation = (rng.uniform(LOW[1], LOW[2]) if r < LOW[0] else rng.uniform(40, 70) if r < HIGH_FROM
                  else rng.uniform(70, 90))
     azimuth = rng.uniform(0, 360)
     fill = rng.uniform(0.6, 1.15)      # how much of the short side the board takes up
@@ -647,12 +652,20 @@ def main():
                     help="how the two sides' colours are chosen: relative (two shades of one "
                          "list, the lighter is White) or split (the first renders' two lists)")
     ap.add_argument("--from-above", type=float, default=0.3,
-                    help="share of pictures taken from 70 degrees up to straight above, "
-                         "0 to 0.8 (a fifth are always low side views)")
+                    help="share of pictures taken from 70 degrees up to straight above "
+                         "(at most what the low side views leave: 0.8 without --low-views)")
+    ap.add_argument("--low-views", type=float, default=None, metavar="SHARE",
+                    help="share of pictures taken from 12 to 32 degrees above the board "
+                         "(without it: a fifth, from 22 to 40 degrees; with it "
+                         "none between 32 and 40)")
     args = ap.parse_args(argv)
-    if not 0 <= args.from_above <= 0.8:
-        ap.error("--from-above must be between 0 and 0.8")
-    global PALETTE, HIGH_FROM
+    global PALETTE, HIGH_FROM, LOW
+    if args.low_views is not None:
+        if not 0 <= args.low_views <= 1:
+            ap.error("--low-views must be between 0 and 1")
+        LOW = (args.low_views, 12.0, 32.0)
+    if not 0 <= args.from_above <= 1 - LOW[0] + 1e-9:
+        ap.error(f"--from-above must be between 0 and {1 - LOW[0]:g} (the rest are low side views)")
     PALETTE, HIGH_FROM = args.palette, 1.0 - args.from_above
 
     out = Path(args.out).resolve()
@@ -705,7 +718,8 @@ def main():
         with open(out / "positions.jsonl", "a") as f:
             f.write(json.dumps(dict(stem=stem, placement=placement, corners=corners,
                                     corners_inside=inside, size=size, palette=PALETTE,
-                                    from_above=args.from_above, **view)) + "\n")
+                                    from_above=args.from_above, low_views=args.low_views,
+                                    **view)) + "\n")
         # Last, because this file is what marks an image as done (see the skip above).
         (out / "pieces" / "labels" / f"{stem}.txt").write_text(
             "".join(f"{c} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n" for c, x, y, w, h in boxes))

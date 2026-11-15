@@ -10,7 +10,10 @@ enum BoardOrientation {
 
     /// How much the corner model's own choice of a1 counts against the
     /// pieces in the app (`CoreMLBoardRecognizer`). Chosen on the ChessReD
-    /// test split (`Training/README.md`, `docs/RECOGNITION.md`).
+    /// test split (`Training/README.md`, `docs/RECOGNITION.md`). With the
+    /// corner model `corners_s_canon1` 12 was tried and not taken: it gains
+    /// boards on a board the model was trained on and turns boards with few
+    /// pieces on ones it was not ("What the app reads with the third pair").
     static let appPrior = 6.0
 
     /// How much a board looks like one seen with White at ranks 1-2: White's
@@ -40,17 +43,22 @@ enum BoardOrientation {
     /// `whiteSideScore`. `prior` is added to the score of the corners as
     /// given, i.e. how much to trust the corner model's own choice (0: not at
     /// all, the default, as in Python). On a tie the earlier rotation wins,
-    /// the corners as given first.
+    /// the corners as given first. `turns`, when given, are the only
+    /// rotations looked at (0: as given, 1: a quarter turn on, ...): the ones
+    /// the square colours allow (`GridCorners.squareColours`). The head start
+    /// still goes to the corners as given, when they are among them.
     static func orient(
         corners: [CGPoint],
         detections: [PieceDetection],
         pull: Double = SquareAssignment.defaultPull,
-        prior: Double = 0
+        prior: Double = 0,
+        turns: [Int]? = nil
     ) -> [CGPoint] {
         guard corners.count == 4 else { return corners }
         var best = corners
         var bestScore: Double?
         for turn in 0..<4 {
+            if let turns, !turns.contains(turn) { continue }
             let turned = Array(corners[turn...] + corners[..<turn])
             guard let homography = Homography(corners: turned) else { continue }
             var score = whiteSideScore(SquareAssignment.assign(
