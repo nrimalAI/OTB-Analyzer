@@ -322,6 +322,7 @@ full-size photos; for a piece model trained on the copies use `score.sh`.
 | `pieces_s_tone1` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos), `--side-tone 0.35` (`side_tone.py`: a third of the training photos shown in another tone, so that a cream side looks tan or brown beside a darker one) | Finished 2026-11-14 17:09. `last.pt`, labelled corners (`scores/pieces_s_tone1_last.txt`): **board B 96.8% / 20 of 98 exact** (render3 94.7% / 8), P read as p 39 times (render3 132; after epoch 3 it was 72); Fenit A (trained on) 99.7% / 89%; ChessReD test 99.95% / 97.7% (299 of 306; render3 296). Two changes in one run (8,000 more renders, the tone): which of the two did how much is not known. Mosaic was off for the whole run, as for render3 (8 epochs, `close_mosaic` left at 10). **In `Models/`**: see below |
 | `pieces_s_tone2` | continues tone1's `last.pt`, 8 epochs, `merged_all4`, `--side-tone 0.6` | Finished 2026-11-15 00:04. **Not taken: better on board B, clearly worse on one board of the second test set.** Labelled corners (`scores/pieces_s_tone2_last.txt`): board B 97.2% / 26 of 98 exact (tone1 96.8% / 20), P read as p 16 times (39); ChessReD test 299 of 306 (the same); Fenit A 91% (89%). Through the app with the corner model in `Models/` (`runs/app_check/dark/`, `dark_h2/`; the build of c8afd31, tone1 against tone2): board B 94.48% / 16 -> 94.88% / **27** boards exact (more squares right on 40 photos, fewer on 14; two five-piece endgames that tone1 read upright, at 62 and 61 squares, are read half a turn off at 54); ChessReD test 295 -> 294; Fenit A 233 -> 230; all 115 tests pass. Then the second test set, as a test: 96.38% -> 96.34% of squares, **459 -> 407 boards exact** (108 gained, 160 lost). The whole loss is on one part, the chess-cv games (267 -> 210; 840 photos of eight games on one board and one piece set), and it is the kind of a piece, not its side: kings read as queens, queens and knights as rooks and kings; six of the eight games lose boards. The other four parts are level or better (Y-LIChess 55 -> 54, ChessQ 14 -> 14, samryan 115 -> 115, chesscog 8 -> 14; squares up on each), and averaged by part instead of by photo tone2 is ahead (boards exact 27.6% -> 30.3%). So it is not shown better on unseen boards and is clearly worse on one of them; it stays out. Why is not known: the tone share (0.6 against 0.35) and eight more epochs changed together. It passed the rule in `CLAUDE.md` (board B and ChessReD test); what kept it out is the second test set, which was thereby used to choose (see that section) |
 | `pieces_s_low1` | continues **tone1's** `last.pt`, 8 epochs, `merged_all5` (as `merged_all4`, with 6,000 more renders, six in ten of them seen from 12 to 32 degrees above the board: 26,000 renders), `--side-tone 0.35` | running since 00:27 on 2026-11-15 (a first start at 00:05 from tone2 was stopped when tone2 failed the second test set) |
+| `pieces_s_crop2` | continues tone1's `last.pt`, 8 epochs, `merged_all5_crop` (the 17,013 photos of `merged_all5` with a corner label, cut down to the board), `--side-tone 0.35` | queued behind `pieces_s_low1`: whether the piece model on the board only reads kinds better; score with `--crop-board` |
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | Finished 2026-11-14 11:12. `last.pt` (`scores/corners_s_canon1_last.txt`), median corner error in squares: **board B 0.27** (exp4 0.91; within half a square 83% against 32%), ChessReD test **0.14** (exp4 0.19, baseline 0.31), Fenit A 0.11. Which corner is a1 it gets right on ChessReD (301 of 306) and wrong on board B (11 of the 90 boards it finds there; the app takes a1 from the pieces). The first learned corner model that passes the package's tests (103 of 103, the G033 endgame fixture read right with the grid fit off). **In `Models/`**: see below |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
 
@@ -461,8 +462,8 @@ Much less than before, and on two sets they cost:
   changes nothing on three parts, mends ChessQ, and on Y-LIChess 54 photos
   gain 196 squares and 21 lose 680: on 18 of them the fit accepts a grid
   that is not the board, mostly one rank off. The development sets have no
-  such photo, so a rule against it cannot be chosen on them, only shown to
-  cost nothing there.
+  such photo; the rule that came of it ("The corner model picks the grid
+  fit's window", below) was tested there on windows moved on purpose.
 - Quarter turns were a real part of what was left: with the app's defaults
   of that build 26 boards of the second test set were exact once turned by
   a quarter (12 by a half), and 8 against 16 on Fenit A. That is what the
@@ -510,8 +511,15 @@ these sets has one. And where the grid is found one square off, the colours
 are the other way round and the rule forces a quarter turn on a reading
 that was wrong already: that is 8 of the 13 photos of the second test set
 that read worse with it (Y-LIChess full boards, 21-25 squares before, 19-24
-after). "No quarter turns" holds for boards that are exact once turned; one
-photo there (`wood_0148`) still fits better a quarter turn on.
+after). On those boards the rule makes a quarter turn where there was none:
+16 Y-LIChess full boards that were read the right way round and one rank
+off are a quarter turn off as well with it (app-side session's count; the
+squares hardly move, 357 before and 358 after, so the scores do not show
+it). "No quarter turns" holds for boards that are exact once turned.
+Counted by where the pieces land, readings a quarter turn off go from 56 to
+19 on the second test set (Y-LIChess 20 -> 18, samryan 32 -> 0, ChessQ 4 ->
+1), from 10 to 1 on Fenit A and from 2 to 0 on board B. The cure for the
+rest is not in this rule but in the grid fit's choice of window (below).
 
 Through the app (app-side session's port, `CoreMLBoardRecognizer(a1Dark:)`,
 `app_check --a1-dark on|off`; `docs/RECOGNITION.md`, "What a dark a1 is
@@ -522,8 +530,8 @@ set, once, as a test: 95.86% -> 96.38% of squares, 439 -> 459 boards exact,
 boards a quarter turn off 26 -> 0, no fully right board lost. Swift and
 Python give the same answer on all 2,311 photos.
 
-With quarter turns gone, the head start for the model's own a1 only trades
-half turns, and stays at 6. In Python with `--a1-dark`, head start 0 / 6 /
+With the pieces no longer able to turn a board by a quarter, the head start
+for the model's own a1 only trades half turns, and stays at 6. In Python with `--a1-dark`, head start 0 / 6 /
 12 / 20 / 40 (`runs/scores/a1_prior_dark.txt`, `a1_dark_pair.txt`): Fenit
 A, a board the corner model knows, 228 / 231 / 245 / 250 / 253 boards
 exact; board B, one it does not, 94.28 / 94.28 / 94.08 / 93.70 / 93.06% of
@@ -531,6 +539,77 @@ squares, with 14 / 14 / 15 / 17 / 21 boards read half a turn off; ChessReD
 test the same at every value. More trust in the model's a1 mends half
 turns on a known board and makes them on an unknown one, and the unknown
 one is what the app is for.
+
+**The corner model picks the grid fit's window (2026-11-15; in the
+reference and, since pull request #25, in the app, on by default).** The classical fit finds the lines of the
+grid more exactly than a model does, but it has to choose which 8x8 squares
+of the grid are the board, and a border that looks like a rank of squares
+makes it take a window one rank off: 16 to 18 photos of the Y-LIChess
+board, which the dark-a1 rule then turns by a quarter as well. The corner
+model is less exact and seldom a whole square off. So the fit keeps the
+lines and the model picks the window: `chess_pipeline.window_by_model`
+looks at the model's four corners in the fit's own board frame and, when
+all four lie within `WINDOW_NEAR` (0.75) squares of the same shift by one
+square, moves the fit's window by it; otherwise nothing changes.
+`evaluate.py --fit-window` switches it on; `--shift-fit FILES,RANKS` moves
+the fit's window on purpose, to test it.
+
+The development sets have no photo with a window off, so it was measured
+there in two ways (Python, the pair in `Models/`, `--a1-dark`;
+`runs/scores/fit_window_075.txt` at the tolerance it has;
+`fit_window.txt` is the same at 0.5, with the damage a moved window does
+without the rule). Left alone, the rule never fires on board B, Fenit A or
+ChessReD test (692 photos, 659 of them with both a fit and model corners):
+no cost. With the window moved one rank on purpose, squares right without
+the rule -> with it: Fenit A 68.2% -> 98.1% (277 of 278 windows moved
+back; 98.1% with no shift), ChessReD test 53.0% -> 99.5% (287 of 289),
+board B 63.2% -> 84.8% (60 of 92; the corner model has not seen that
+board). At a tolerance of 0.5 board B's count is 46 and at 0.95 it is 66,
+and no value fires on a fit left alone: nothing on these sets tells 0.75
+from 0.95, and 0.75 is a middle value, not a measured best. A window is
+moved back exactly when all four of the model's corners lie within the
+tolerance of the fit's own, so the count is the same whichever way the
+window was moved, and "squares right with the rule" is computed from the
+model's agreement with a right fit, not measured on a real fault: a real
+one comes from a border, and the window next to it is an extrapolation.
+The only real faults seen are the Y-LIChess photos below and one Fenit A
+photo through the app.
+
+Then once on the second test set, as a test
+(`runs/scores/heldout2_pair_tone1_canon1_a1dark_window.txt` against
+`..._a1dark.txt`): it fires 14 times, all on Y-LIChess. Games 90.18% ->
+98.28% of squares, 35 -> 41 of 102 boards exact; layouts 90.53% -> 90.80%
+(one window moved); ChessQ, chesscog, samryan and chess-cv unchanged, not
+one window moved. What it cannot mend is a photo where the corner model is
+a rank off too. What it gets wrong: a model whose four corners all lie
+more than half a square off the same way moves a window that was right.
+None was seen, but the margin is thin: on a fit left alone the largest
+mean offset of the model's corners is 0.72 squares on board B and 0.70 on
+ChessReD test, and only the corners' disagreement with each other keeps
+those windows where they are.
+
+Through the app (app-side session's port, `app_check --fit-window on|off`;
+`docs/RECOGNITION.md`, "What the model's choice of window is worth"), the
+pair in `Models/`, off -> on: ChessReD test and board B unchanged, no
+window moved; Fenit A 233 -> 234 boards exact (one endgame whose window
+the app's fit had a file off, 55 -> 64 squares); second test set, once, as
+a test: 96.38% -> 97.00% of squares, 459 -> 464 boards exact, 18 windows
+moved, all on Y-LIChess (89.80% -> 94.81%; 17 of the 18 gain 665 squares;
+one, `wood_0202`, ends on the right squares half a turn round and scores 0
+where it had 24), and readings a quarter turn off go from 19 to 1. Given
+the same corners, the Swift and the Python make the same shift on all
+2,019 photos where both found the board; end to end the Python moves 14
+windows on the second test set and the app 18, because their corners
+differ a little.
+
+The gain on Y-LIChess is not a blind test of the rule: the fault was found
+on those very photos, and all the windows moved are theirs. What is blind
+is that nothing else on the second test set changed. The tolerance came
+from board B. On the second test set 0.5 and 0.95 move the same windows as
+0.75 (computed afterwards; nothing was chosen by it); through the app
+on board B windows moved on purpose come back on 68 / 80 / 88 of 95 at
+0.5 / 0.75 / 0.95, so a wider tolerance is an open choice for the
+development sets.
 
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
@@ -545,6 +624,19 @@ ChessReD test falls from 97.7% of boards exact to 91.5 / 88.2 / 83.0 /
 75.5%, and board B gains nothing (20.4% -> 20.4 / 19.4 / 18.4 / 14.3%;
 `runs/scores/drop_inside_tone1.txt`). Boxes cannot tell the two apart; the
 model has to.
+
+**Also tried and not taken: no more of a kind on a side than a set has.**
+Through the app the pair in `Models/` reads a second queen, a third knight
+or the like on 32 of board B's 100 boards (9 of Fenit A's 286, 5 of
+ChessReD test's 306), and no position of these sets has one. A rule after
+the two-kings rule that renames the surplus pieces to the kind the model
+scored next best (kings never) can only act where the model gave a second
+score, and for most of them it gives none: it is sure of its second queen.
+With labelled corners and `pieces_s_tone1` it changes 4 boards of board B
+(96.83% -> 96.88% of squares, no board gained), none of Fenit A and 2 of
+ChessReD test (299 -> 301 boards exact; `runs/scores/set_limits_tone1.txt`).
+Too little for a rule that reads a promoted piece wrong; not in the
+reference.
 
 The goal is still far: 16% of boards fully right on board B and 28% on the
 second test set (27% before a1 on a dark square), where the target is 85%. What is wrong on board B now,
@@ -752,17 +844,18 @@ tests, and the first corner model does not. Until pull request #15 the piece
 model beside it was the baseline piece weights exported with NMS across
 classes.
 
-**What a new model has to beat** (through `app_check` built from c8afd31
-or later, with the app's defaults: grid fit on, a1 on a dark square, head
-start 6, one king a side, colour step off, each photo decoded once; the
-pair in `Models/`, `runs/app_check/dark/now_*.txt`, and `dark_h2/now_*.txt`
-for the second test set): ChessReD test 295 of
-306 boards exact, two more once turned by 180 degrees; Fenit board B 94.48%
-of squares, 16 boards exact, every board found; Fenit A 98.09% of squares,
-233 of 286 exact; second test set 96.38% and 459 of 1,619;
-as 3:4 photos ChessReD test 282, board B 94.45%. The outputs in
-`runs/app_check/tone1/` are from the build before a1 on a dark square:
-re-run the pair in `Models/` with the build a candidate is run with. Compare two models only through the same
+**What a new model has to beat** (through `app_check` built from 0b9cd6f
+or later, with the app's defaults: grid fit on, its window where the corner
+model has the board, a1 on a dark square, head start 6, one king a side,
+colour step off, each photo decoded once; the pair in `Models/`,
+`runs/app_check/window/now_*.txt`, and `window_h2/now_*.txt` for the second
+test set): ChessReD test 295 of 306 boards exact, two more once turned by
+180 degrees; Fenit board B 94.48% of squares, 16 boards exact, every board
+found; Fenit A 98.14% of squares, 234 of 286 exact; second test set 97.00%
+and 464 of 1,619; as 3:4 photos (`window/now_*_portrait.txt`) ChessReD
+test 282, board B 94.45%. Outputs
+in `runs/app_check/dark*/` and `tone1/` are from earlier builds: re-run the
+pair in `Models/` with the build a candidate is run with. Compare two models only through the same
 build of `app_check`: every app-side step moved these numbers a little, and
 before pull request #9 it read different pixels. And the model has to pass
 the fixture tests of `./Scripts/swift-test.sh`: the four fixtures with the
@@ -1070,6 +1163,9 @@ that the count is known:
    the chess-cv games here; `pieces_s_low1` was then started from tone1
    instead of tone2.
 4. That quarter turns were worth a rule was seen here first.
+5. That the grid fit takes a window one rank off was seen here (Y-LIChess),
+   and the rule against it (the corner model picks the window) exists
+   because of it; its tolerance was set on board B.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else

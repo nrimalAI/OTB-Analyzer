@@ -31,8 +31,8 @@ from pathlib import Path
 
 from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
-    assign_squares, board_crop, colour_patch, fen_placement_to_board, homography,
-    one_king_a_side, orient_by_pieces, sides_from_colour,
+    assign_squares, board_crop, colour_patch, fen_placement_to_board, homography, project,
+    one_king_a_side, orient_by_pieces, sides_from_colour, window_by_model, WINDOW_NEAR,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -360,6 +360,17 @@ def main():
                     help="replace the corners by the classical grid fit "
                          "(grid_corners.py) where it accepts its own result; the "
                          "rotation stays the one nearest the model's or labelled corners")
+    ap.add_argument("--fit-window", action="store_true",
+                    help="with --grid-corners: move the fit's window by one square where the "
+                         "corner model has the board there (chess_pipeline.window_by_model)")
+    ap.add_argument("--window-near", type=float, default=WINDOW_NEAR, metavar="SQUARES",
+                    help="with --fit-window: how far each of the model's corners may lie "
+                         "from the shift (chess_pipeline.WINDOW_NEAR)")
+    ap.add_argument("--shift-fit", type=lambda s: tuple(int(v) for v in s.split(",")), default=None,
+                    metavar="FILES,RANKS",
+                    help="a test of --fit-window: move the fit's window by this many squares "
+                         "before anything else looks at it, e.g. 0,1 (write a negative one "
+                         "as --shift-fit=-1,0)")
     ap.add_argument("--a1-dark", action="store_true",
                     help="with --a1-from-pieces: look only at the rotations that put a "
                          "dark square on a1 (grid_corners.dark_corner_rotations), "
@@ -391,6 +402,8 @@ def main():
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
+    if (args.fit_window or args.shift_fit) and not args.grid_corners:
+        ap.error("--fit-window and --shift-fit act on the grid fit: they need --grid-corners")
     if args.a1_dark and (args.gt_corners or args.a1_from_pieces is None):
         ap.error("--a1-dark chooses among the rotations the pieces are asked about: "
                  "it needs --a1-from-pieces and has nothing to do with --gt-corners")
@@ -438,7 +451,7 @@ def main():
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
     exact_or_flipped = grid_rejected = grid_alone = sides_changed = kings_changed = 0
-    a1_colour_unclear = a1_colour_moved = 0
+    a1_colour_unclear = a1_colour_moved = windows_moved = 0
     confusion = Counter()
 
     for src, gt, gt_kpts, gt_boxes in items:
@@ -478,6 +491,15 @@ def main():
                 turn = min(range(4), key=lambda j: np.linalg.norm(
                     np.roll(grid, -j, axis=0) - old, axis=1).sum())
                 kpts = np.roll(grid, -turn, axis=0).tolist()
+                if args.shift_fit:
+                    # A test of --fit-window: the fit's window moved on purpose.
+                    back = np.linalg.inv(homography(kpts))
+                    kpts = [list(project(back, (x + args.shift_fit[0], y + args.shift_fit[1])))
+                            for x, y in ((0, 0), (0, 8), (8, 8), (8, 0))]
+                if args.fit_window:
+                    kpts, moved = window_by_model(kpts, old.tolist(), near=args.window_near)
+                    kpts = [list(c) for c in kpts]
+                    windows_moved += moved != (0, 0)
             else:
                 kpts = np.array(grid, float).tolist()
                 grid_alone += 1
@@ -598,6 +620,8 @@ def main():
         print(f"a1 dark: square colours unclear on {a1_colour_unclear} photos; "
               f"the corners as given had a light a1 on {a1_colour_moved}")
     if args.grid_corners:
+        if args.fit_window:
+            print(f"grid fit's window moved by a square to where the corner model has the board: {windows_moved}")
         print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
         print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
     if args.sides_from_colour:

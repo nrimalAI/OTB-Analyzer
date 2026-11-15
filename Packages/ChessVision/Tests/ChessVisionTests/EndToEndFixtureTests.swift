@@ -114,6 +114,72 @@ import Testing
             cornerModel: models.corners, pieceModel: models.pieces, a1Dark: false).a1Dark == false)
     }
 
+    /// The corner model picks the grid fit's window: on unless switched off
+    /// (`docs/RECOGNITION.md`, "What the model's choice of window is worth"),
+    /// and the recognizer hands its own setting on to where the two sets of
+    /// corners meet (`corners(model:in:)`, the method `recognize` calls
+    /// through `locate`). The fixture photos read the same with the rule and
+    /// without, so they would not notice it missing: here a drawn board and
+    /// a model that has it one rank on.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testFitWindowIsOnByDefaultAndReachesTheCorners() throws {
+        let models = try Self.models.get()
+        let asBuilt = try makeRecognizer()
+        let without = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, fitWindow: false)
+        #expect(asBuilt.fitWindow == true && CoreMLBoardRecognizer.Default.fitWindow == true)
+        #expect(without.fitWindow == false)
+
+        let (image, truth, _) = try GridFitWindowTests.drawnBoard()
+        let rank = try #require(GridCorners.shifted(truth, files: 0, ranks: 1))
+        func off(_ corners: [CGPoint], _ from: [CGPoint]) -> CGFloat {
+            zip(corners, from).map { hypot($0.x - $1.x, $0.y - $1.y) }.max() ?? .infinity
+        }
+        let moved = try #require(asBuilt.corners(model: rank, in: image))
+        #expect(off(moved.corners, rank) < 3)
+        let left = try #require(without.corners(model: rank, in: image))
+        #expect(off(left.corners, truth) < 3)
+        // The other defaults are the ones named.
+        #expect(asBuilt.oneKing == CoreMLBoardRecognizer.Default.oneKing)
+        #expect(asBuilt.a1Dark == CoreMLBoardRecognizer.Default.a1Dark)
+        #expect(asBuilt.sidesFromColour == CoreMLBoardRecognizer.Default.sidesFromColour)
+        #expect(CoreMLBoardRecognizer.Default.a1Prior == BoardOrientation.appPrior)
+        #expect(CoreMLBoardRecognizer.Default.gridFit)
+    }
+
+    /// What `app_check --window` is given (`diagnoseFitWindow`) is what the
+    /// recognizer itself makes of the two sets of corners: the fit's in the
+    /// model's order where the rule is off, the window the model picks
+    /// where it is on.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testTheFitWindowDiagnosisIsWhatTheRecognizerDoes() throws {
+        let models = try Self.models.get()
+        let asBuilt = try makeRecognizer()
+        let without = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, fitWindow: false)
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self, from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+        var both = 0
+        for file in manifest.keys.sorted() {
+            let source = try #require(
+                CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
+            let photo = DecodedImage.once(try #require(CGImageSourceCreateImageAtIndex(source, 0, nil)))
+            guard let found = try asBuilt.diagnoseFitWindow(photo) else { continue }
+            both += 1
+            #expect(found.window == GridCorners.windowByModel(fit: found.fit, model: found.model), "\(file)")
+            #expect(asBuilt.corners(model: found.model, in: photo)?.corners == found.window.corners,
+                    "\(file)")
+            #expect(without.corners(model: found.model, in: photo)?.corners == found.fit, "\(file)")
+            // The setting plays no part in the diagnosis.
+            let other = try #require(try without.diagnoseFitWindow(photo))
+            #expect(other.model == found.model && other.fit == found.fit && other.window == found.window,
+                    "\(file)")
+        }
+        // The model and the fit both find the board on the fixtures.
+        #expect(both >= 3)
+    }
+
     /// The recognizer hands its own `a1Dark` on to what follows the models
     /// (`place`, the method `recognize` calls). The fixture photos read the
     /// same with the rule and without, so they would not notice it missing:
