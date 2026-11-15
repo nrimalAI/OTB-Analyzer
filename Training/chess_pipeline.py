@@ -83,9 +83,9 @@ def project(H, point):
 # How far, in squares, each of the corner model's corners may lie from a
 # whole-square shift of the grid fit's window for the window to be moved.
 # With the fit's window moved one rank on purpose on Fenit board B, a board
-# the corner model has not seen, 0.5 / 0.75 / 0.95 move 46 / 60 / 66 of 93
+# the corner model has not seen, 0.5 / 0.75 / 0.95 move 46 / 60 / 66 of 92
 # windows back; on a fit left alone none of them moves a window on board B,
-# Fenit A or ChessReD test (692 photos).
+# Fenit A or ChessReD test (692 photos). Nothing there tells 0.75 from 0.95.
 WINDOW_NEAR = 0.75
 
 
@@ -103,11 +103,16 @@ def window_by_model(fit_corners, model_corners, near=WINDOW_NEAR):
     four lie within `near` squares of the same shift by one square (one rank,
     one file or both), the window is moved by it. Otherwise nothing changes:
     when the model's corners are near the fit's, and when they are too far
-    off or too unlike a shift to be believed.
+    off or too unlike a shift to be believed. (What it gets wrong: a model
+    whose four corners all lie more than half a square off the same way
+    moves a window that was right.)
 
     Returns (corners, (files, ranks)): the four corners in the order given,
     and the shift made, (0, 0) for none."""
     fit = [tuple(map(float, c)) for c in fit_corners]
+    if not (np.isfinite(np.asarray(fit)).all()
+            and np.isfinite(np.asarray(model_corners, dtype=float)).all()):
+        return fit, (0, 0)
     H = homography(fit)
     frame = [(0.0, 0.0), (0.0, 8.0), (8.0, 8.0), (8.0, 0.0)]
     offsets = np.array([np.subtract(project(H, c), at) for c, at in zip(model_corners, frame)])

@@ -369,7 +369,8 @@ def main():
     ap.add_argument("--shift-fit", type=lambda s: tuple(int(v) for v in s.split(",")), default=None,
                     metavar="FILES,RANKS",
                     help="a test of --fit-window: move the fit's window by this many squares "
-                         "before anything else looks at it, e.g. 0,1")
+                         "before anything else looks at it, e.g. 0,1 (write a negative one "
+                         "as --shift-fit=-1,0)")
     ap.add_argument("--a1-dark", action="store_true",
                     help="with --a1-from-pieces: look only at the rotations that put a "
                          "dark square on a1 (grid_corners.dark_corner_rotations), "
@@ -401,6 +402,8 @@ def main():
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
+    if (args.fit_window or args.shift_fit) and not args.grid_corners:
+        ap.error("--fit-window and --shift-fit act on the grid fit: they need --grid-corners")
     if args.a1_dark and (args.gt_corners or args.a1_from_pieces is None):
         ap.error("--a1-dark chooses among the rotations the pieces are asked about: "
                  "it needs --a1-from-pieces and has nothing to do with --gt-corners")
