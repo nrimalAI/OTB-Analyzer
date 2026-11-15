@@ -167,25 +167,55 @@ def collar(r, z, thick):
     return [(r * 0.75, z), (r, z + thick * 0.4), (r, z + thick * 0.6), (r * 0.7, z + thick)]
 
 
+# --shapes: "classic" is the set of the first 26,000 renders (seeds 1-5):
+# every king has a cross a seventh of its height and is the tallest piece
+# by a clear step, every pawn's head is a ball of one size range, the feet
+# are slim. "varied" widens what a set can be, towards the real sets the
+# model gets wrong (Fenit board B: heavy feet, a king hardly taller than
+# its queen, a small finial): heavier and slimmer feet, a king from just
+# over its queen's height up, the king's finial a cross, a small cross, a
+# ball or nearly nothing, the queen's coronet with balls, with spikes or
+# plain, taller rooks, bigger pawn heads. The classic draws are unchanged,
+# so a seed renders the same classic picture as before.
+SHAPES = "classic"
+
+
 def make_set(rng):
     """Six meshes, one per kind, in one random style."""
-    st = dict(
-        foot=rng.uniform(0.08, 0.16), step=rng.random() < 0.5,
-        belly=rng.uniform(0.55, 0.85), belly_at=rng.uniform(0.12, 0.3),
-        waist=rng.uniform(0.28, 0.45), collar=rng.uniform(0.55, 0.8),
-    )
-    size = rng.uniform(0.82, 1.12)     # how tall the set is for its squares
-    girth = rng.uniform(0.85, 1.12)
-    tall = {"pawn": rng.uniform(0.82, 1.0), "rook": rng.uniform(0.98, 1.15),
-            "knight": rng.uniform(1.1, 1.3), "bishop": rng.uniform(1.3, 1.5),
-            "queen": rng.uniform(1.5, 1.75), "king": rng.uniform(1.7, 1.98)}
-    wide = {"pawn": 0.26, "rook": 0.30, "knight": 0.31, "bishop": 0.31, "queen": 0.345, "king": 0.36}
+    varied = SHAPES == "varied"
+    if varied:
+        st = dict(
+            foot=rng.uniform(0.07, 0.2), step=rng.random() < 0.5,
+            belly=rng.uniform(0.5, 1.0), belly_at=rng.uniform(0.1, 0.35),
+            waist=rng.uniform(0.24, 0.55), collar=rng.uniform(0.5, 0.95),
+        )
+        size = rng.uniform(0.78, 1.18)
+        girth = rng.uniform(0.8, 1.25)
+        queen = rng.uniform(1.45, 1.85)
+        tall = {"pawn": rng.uniform(0.75, 1.08), "rook": rng.uniform(0.95, 1.3),
+                "knight": rng.uniform(1.05, 1.4), "bishop": rng.uniform(1.2, 1.6),
+                "queen": queen, "king": queen + rng.uniform(0.03, 0.35)}
+        wide = {kind: w * rng.uniform(0.9, 1.15) for kind, w in
+                (("pawn", 0.26), ("rook", 0.30), ("knight", 0.31), ("bishop", 0.31),
+                 ("queen", 0.345), ("king", 0.36))}
+    else:
+        st = dict(
+            foot=rng.uniform(0.08, 0.16), step=rng.random() < 0.5,
+            belly=rng.uniform(0.55, 0.85), belly_at=rng.uniform(0.12, 0.3),
+            waist=rng.uniform(0.28, 0.45), collar=rng.uniform(0.55, 0.8),
+        )
+        size = rng.uniform(0.82, 1.12)     # how tall the set is for its squares
+        girth = rng.uniform(0.85, 1.12)
+        tall = {"pawn": rng.uniform(0.82, 1.0), "rook": rng.uniform(0.98, 1.15),
+                "knight": rng.uniform(1.1, 1.3), "bishop": rng.uniform(1.3, 1.5),
+                "queen": rng.uniform(1.5, 1.75), "king": rng.uniform(1.7, 1.98)}
+        wide = {"pawn": 0.26, "rook": 0.30, "knight": 0.31, "bishop": 0.31, "queen": 0.345, "king": 0.36}
     out = {}
     for kind in KIND.values():
         h, r = tall[kind] * size, wide[kind] * girth
         w = st["waist"] * r
         if kind == "pawn":
-            ball = r * rng.uniform(0.52, 0.68)
+            ball = r * (rng.uniform(0.5, 0.82) if varied else rng.uniform(0.52, 0.68))
             neck = h - 2 * ball * rng.uniform(0.85, 0.95)
             c = r * st["collar"]
             pts = body(r, neck - 0.04 * h, st) + collar(c, neck - 0.04 * h, 0.05 * h)
@@ -194,14 +224,14 @@ def make_set(rng):
                     for a in np.linspace(0.6, math.pi, 8)]
             mesh = lathe(kind, pts)
         elif kind == "rook":
-            top_r = r * rng.uniform(0.68, 0.85)
+            top_r = r * (rng.uniform(0.6, 0.95) if varied else rng.uniform(0.68, 0.85))
             wall = h * rng.uniform(0.16, 0.24)
             pts = body(r, h - wall * 1.6, st)
             pts[-1] = (max(w * 1.6, top_r * 0.75), pts[-1][1])
             pts += [(top_r, h - wall * 1.3), (top_r, h), (top_r * 0.72, h),
                     (top_r * 0.72, h - wall * 0.45), (0.0, h - wall * 0.45)]
             parts = [lathe(kind, pts)]
-            if rng.random() < 0.8:  # battlements: blocks on the rim
+            if rng.random() < (0.6 if varied else 0.8):  # battlements: blocks on the rim
                 n = rng.choice([4, 5, 6])
                 for i in range(n):
                     a = 2 * math.pi * i / n
@@ -217,8 +247,8 @@ def make_set(rng):
         elif kind == "bishop":
             neck = h * rng.uniform(0.56, 0.64)
             c = r * st["collar"]
-            head_r = r * rng.uniform(0.48, 0.62)
-            tip = h * 0.045
+            head_r = r * (rng.uniform(0.42, 0.7) if varied else rng.uniform(0.48, 0.62))
+            tip = h * (rng.uniform(0.035, 0.08) if varied else 0.045)
             pts = body(r, neck, st) + collar(c, neck, 0.04 * h)
             top = h - 2 * tip
             for t in np.linspace(0.0, 1.0, 9):
@@ -237,27 +267,45 @@ def make_set(rng):
                     (crown * 0.8, rim + 0.01 * h), (crown * 0.5, rim + 0.035 * h),
                     (0.05 * h, h - 0.07 * h), (0.045 * h, h - 0.03 * h), (0.0, h)]
             parts = [lathe(kind, pts)]
-            if rng.random() < 0.7:  # points of the crown
+            coronet = rng.random()
+            if coronet < (0.5 if varied else 0.7):  # points of the crown: balls
                 n = rng.choice([6, 8, 10])
                 for i in range(n):
                     a = 2 * math.pi * i / n
                     parts.append(sphere_mesh("p", crown * 0.14,
                                              (crown * 0.92 * math.cos(a), crown * 0.92 * math.sin(a), rim + crown * 0.06)))
+            elif varied and coronet < 0.8:          # ... or spikes; the rest is a plain rim
+                n = rng.choice([5, 6, 8])
+                spike = crown * rng.uniform(0.25, 0.45)
+                for i in range(n):
+                    a = 2 * math.pi * i / n
+                    parts.append(box_mesh("p", (crown * 0.13, crown * 0.13, spike),
+                                          (crown * 0.9 * math.cos(a), crown * 0.9 * math.sin(a), rim + spike * 0.4)))
+            if varied and rng.random() < 0.4:       # a ball on top instead of the small button
+                parts.append(sphere_mesh("b", h * rng.uniform(0.035, 0.06), (0, 0, h - 0.03 * h)))
             mesh = join(kind, parts)
         elif kind == "king":
             neck = h * rng.uniform(0.52, 0.6)
             c = r * st["collar"]
             crown = r * rng.uniform(0.6, 0.75)
-            cross = h * rng.uniform(0.12, 0.17)
+            finial = "cross"
+            if varied:
+                finial = rng.choices(["cross", "small cross", "ball", "knob"], [0.5, 0.25, 0.15, 0.1])[0]
+            cross = h * (rng.uniform(0.12, 0.17) if finial == "cross" else rng.uniform(0.06, 0.1))
             rim = h - cross - 0.05 * h
             pts = body(r, neck, st) + collar(c, neck, 0.035 * h)
             pts += [(w * 1.2, neck + 0.05 * h), (crown * 0.8, rim - 0.05 * h), (crown, rim),
                     (crown * 0.85, rim + 0.02 * h), (crown * 0.3, rim + 0.05 * h), (0.0, rim + 0.05 * h)]
             arm = cross * rng.uniform(0.2, 0.3)
-            parts = [lathe(kind, pts),
-                     box_mesh("c1", (arm, arm, cross), (0, 0, h - cross / 2)),
-                     box_mesh("c2", (cross * 0.75, arm, arm), (0, 0, h - cross * 0.38))]
-            mesh = join(kind, parts)
+            if finial in ("cross", "small cross"):
+                top = [box_mesh("c1", (arm, arm, cross), (0, 0, h - cross / 2)),
+                       box_mesh("c2", (cross * 0.75, arm, arm), (0, 0, h - cross * 0.38))]
+            elif finial == "ball":
+                top = [box_mesh("c1", (arm, arm, cross * 0.5), (0, 0, h - cross * 0.75)),
+                       sphere_mesh("c2", cross * 0.42, (0, 0, h - cross * 0.42))]
+            else:   # a knob hardly above the crown
+                top = [sphere_mesh("c1", cross * 0.3, (0, 0, h - cross * 0.75))]
+            mesh = join(kind, [lathe(kind, pts)] + top)
         else:  # knight
             plinth = h * rng.uniform(0.2, 0.28)
             pts = body(r, plinth, st)
@@ -651,6 +699,9 @@ def main():
     ap.add_argument("--palette", choices=["relative", "split"], default="relative",
                     help="how the two sides' colours are chosen: relative (two shades of one "
                          "list, the lighter is White) or split (the first renders' two lists)")
+    ap.add_argument("--shapes", choices=["classic", "varied"], default="classic",
+                    help="classic: the piece sets of the first 26,000 renders; varied: a wider "
+                         "range of feet, heights, finials and coronets (see SHAPES)")
     ap.add_argument("--from-above", type=float, default=0.3,
                     help="share of pictures taken from 70 degrees up to straight above "
                          "(at most what the low side views leave: 0.8 without --low-views)")
@@ -659,7 +710,7 @@ def main():
                          "(without it: a fifth, from 22 to 40 degrees; with it "
                          "none between 32 and 40)")
     args = ap.parse_args(argv)
-    global PALETTE, HIGH_FROM, LOW
+    global PALETTE, HIGH_FROM, LOW, SHAPES
     if args.low_views is not None:
         if not 0 <= args.low_views <= 1:
             ap.error("--low-views must be between 0 and 1")
@@ -667,6 +718,7 @@ def main():
     if not 0 <= args.from_above <= 1 - LOW[0] + 1e-9:
         ap.error(f"--from-above must be between 0 and {1 - LOW[0]:g} (the rest are low side views)")
     PALETTE, HIGH_FROM = args.palette, 1.0 - args.from_above
+    SHAPES = args.shapes
 
     out = Path(args.out).resolve()
     for sub in ("pieces/images", "pieces/labels", "corners/images", "corners/labels"):
@@ -719,6 +771,7 @@ def main():
             f.write(json.dumps(dict(stem=stem, placement=placement, corners=corners,
                                     corners_inside=inside, size=size, palette=PALETTE,
                                     from_above=args.from_above, low_views=args.low_views,
+                                    shapes=SHAPES,
                                     **view)) + "\n")
         # Last, because this file is what marks an image as done (see the skip above).
         (out / "pieces" / "labels" / f"{stem}.txt").write_text(

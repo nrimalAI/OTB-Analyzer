@@ -1120,14 +1120,23 @@ was in `Models/`, and why it was taken out again.
   `--canonical-corners` run on the labels as they are on disk.
 - `render_boards.py` (runs in Blender 5.x, `brew install --cask blender`):
   rendered positions with exact boxes, corners and position, a new piece set,
-  board, floor, light and camera per image. `datasets/render` holds 26,000:
+  board, floor, light and camera per image. `datasets/render` holds 26,000
+  and, once `--seed 6` is through, 34,000:
   `--seed 1` and `--seed 2` (4,000 each) with `--palette split`, the first
   renders' two lists of side colours, `--seed 3` (4,000) and `--seed 4`
   (8,000) with `--palette relative --from-above 0.4`, where the two sides
   are two shades of one list and the lighter is White, and `--seed 5`
   (6,000) with `--low-views 0.6 --from-above 0.15` as well: six in ten seen
   from 12 to 32 degrees above the board, where tall pieces stand in front
-  of the ones behind them. `relative` is the
+  of the ones behind them. `--seed 6` (8,000, started 2026-11-15 14:55)
+  with `--shapes varied --from-above 0.4`: piece sets from a wider range
+  than the first five batches' (`--shapes classic`, the default: every king
+  with a large cross and clearly the tallest piece, slim feet): heavier and
+  slimmer feet, a king from just over its queen's height up, its finial a
+  cross, a small cross, a ball or a knob, the queen's coronet with balls,
+  spikes or plain, taller rooks, bigger pawn heads. The classic draws are
+  untouched: `--seed 4 --from-above 0.4 --count 1` gives `render_00400000`'s
+  labels again. `relative` is the
   default now, so give `--palette split` to add to seeds 1 and 2; the
   lines of `positions.jsonl` say which it was from seed 5 on (seeds 1 to 4
   were made before that was written down). With `--low-views` no picture is
