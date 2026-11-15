@@ -408,28 +408,51 @@ so for the third pair it is no longer a set that nothing was chosen on.)
     right only once turned, and one photo of 286 is read turned), and the
     pieces overrule it on 24 boards, 16 by half a turn and 8 by a quarter.
     The head start of 6 for the corner model's a1 was chosen on ChessReD
-    test, where no value changes anything with this pair. On the
+    test, where no value from 6 up changes anything with this pair. On the
     development sets, head start 0 / 3 / 6 / 9 / 12 / 15 / 20 / 40 / none
     of the pieces: Fenit A 214 / 223 / 231 / 236 / 243 / 247 / 251 / 255 /
     255 boards; board B 94.36% of squares from 0 to 12, then 94.23% /
     93.83% / 92.20% / 76.50% (16 boards up to 20, then 15 and 7); ChessReD
     test 292 / 294 boards at 0 and 3, 295 from 6 up.
-  - **A head start of 12 was tried and fails the test; 6 stays.** The
-    development sets speak for it: 12 boards gained on Fenit A, nothing
-    lost on board B or ChessReD test. On the second held-out set it reads
-    25 photos worse and 5 better than 6 does (two-sided sign test p <
-    0.001): 95.86% -> 95.71% of squares, 439 -> 440 boards. Y-LIChess 14
-    photos worse and 2 better, samryan 10 and 1, ChessQ 1 and 2, chesscog
-    and chess-cv not one photo different; as 3:4 photos nothing moves on
-    ChessReD test and board B. On boards the corner model has not seen its
-    a1 is wrong often enough that the pieces must be able to overrule it;
-    Fenit A is a board it was trained on, and board B did not show the
-    cost. (The test set was used to reject a change here, not to pick a
-    value; it is one more look at that set. Values under 6 were not tried
-    on it: the development sets are against them, and the test set is not
-    there to find one.) A single number does not serve both kinds of
-    board: what could is something that tells a board the corner model
-    knows from one it does not.
+  - **A head start of 12 was tried and is not taken; 6 stays.** The
+    development sets speak for it: 12 boards gained on Fenit A, no score
+    lost on board B or ChessReD test. On the second held-out set, run as a
+    test, it loses squares and gains nothing: 95.86% -> 95.71% (183 squares
+    lost, 37 gained), 25 photos worse and 5 better, boards exact 439 ->
+    440. Every photo that changes is the same board read at another turn,
+    no piece is read differently: 24 photos that were the right way up at 6
+    are turned at 12, 23 of them by a quarter, which the app's flip button
+    (a half turn) does not mend, and 5 go the other way. Boards exact do
+    not show it because most of the 24 were a square or more off already.
+    - How strong the evidence is: a sign test over photos gives p < 0.001,
+      but the photos are not independent. 24 of the 25 are from two
+      sources, Y-LIChess (14 worse, 2 better) and samryan (10 and 1), in
+      runs of neighbouring positions and repeated set-ups; counted by run
+      it is about 8 worse and 3 better. What decides is that there is no
+      gain on unseen boards to set against the turned ones.
+    - What the changed photos share is few pieces: 35 of the 36 that read
+      differently have nine or fewer, as have all 13 that change on Fenit
+      A. On those of the test set the corner model's a1 is wrong on 31 and
+      right on 5, and at 6 the pieces put 24 of them right; on Fenit A,
+      whose photos it was trained on, it is right on 12 of the 13.
+      Chesscog and chess-cv read every photo the same at 6 and 12, and
+      could not have done otherwise: they have no photo with fewer than
+      ten pieces. Board B did not show the cost at 12 and shows it from 15.
+    - What this leaves open. The test set was used to reject a change, not
+      to pick a value; it is one more look at that set. Values under 6
+      were not run on it. 6 is kept because it is what there was, not
+      because it is shown to be the best value for unseen boards: the one
+      comparison on the test set points downward, and the development sets
+      cannot place this number any more (board B reads the same from 0 to
+      12, and Fenit A and ChessReD test, both boards the corner model was
+      trained on, always want more: 0 and 3 lose boards there). Choosing
+      again needs an unseen development board with sparse positions, not
+      another look at the test set. A single number may not serve both
+      kinds of board at all; something that tells a board the corner model
+      knows from one it does not might, or something that asks how much
+      the pieces have to say.
+    - The values 9 and 15 on the development sets were run with the test;
+      0 and 3 after it.
   - **The grid fit** changes nothing at all on samryan, chess-cv and
     chesscog (not one photo reads differently), mends board B (131 squares
     on 11 photos, 2 lost) and ChessQ, and costs on Y-LIChess: 54 photos
@@ -928,9 +951,11 @@ are wrong and the corner model does not correct them. The fixture as a 3:4
 photo scores +2.5 the right way up and the corner model has a1 at the
 wrong end, so it is read right with a head start under 5 and turned from 5
 up (the reviewer of pull request #20 tried 0, 3, 4, 5, 6 and 12). A smaller
-head start is not on offer: it loses boards on Fenit A and on ChessReD
-test, and a larger one fails the second held-out set ("What the app reads
-with the third pair"). Pull request #19 puts this corner model in
+head start is not on offer on what the development sets say: it loses
+boards on Fenit A and on ChessReD test, both boards the corner model was
+trained on, and those sets can no longer place this number alone; a larger
+one loses squares on the second held-out set ("What the app reads with the
+third pair"). Pull request #19 puts this corner model in
 `Models/` all the same, because the pair reads far more boards, also as
 3:4 photos, and the owner was told of this cost with the way to take the
 corner model out again. The tests say so each time they
