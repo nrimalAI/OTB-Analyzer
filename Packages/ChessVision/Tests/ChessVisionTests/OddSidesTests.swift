@@ -344,6 +344,44 @@ struct OddSidesTests {
         #expect(none.contains { $0.finalLabel != $0.label })
     }
 
+    /// `place` is the colour steps and then the rest (`settle`), each once:
+    /// what `diagnosePieces` shows is the list between the two. Four pieces
+    /// called Black at L* 10, 93, 93 and 75 beside six White ones at 95:
+    /// the step makes the two at 93 White; run a second time on its own
+    /// answer it would take the one at 75 as well.
+    @Test func testTheColourStepsRunOnceBeforeTheRest() throws {
+        let (image, boxes) = try PieceSidesTests.drawnPawns()
+        let said = [Piece.Color](repeating: .white, count: 6) + [Piece.Color](repeating: .black, count: 4)
+        let found = zip(said, boxes).map {
+            PieceDetection(piece: .pawn, color: $0, confidence: 0.9, boundingBox: $1)
+        }
+        let colours: [PieceSides.Lab?] = [95, 95, 95, 95, 95, 95, 10, 93, 93, 75].map {
+            PieceSides.Lab(l: $0, a: 0, b: 0)
+        }
+        let once = OddSides.apply(found, colours: colours)
+        #expect(once.map(\.color)
+            == [Piece.Color](repeating: .white, count: 6) + [.black, .white, .white, .black])
+        #expect(OddSides.apply(once, colours: colours)[9].color == .white)
+
+        // The two halves of `place` give what `place` gives, and the first
+        // half with both steps off is the pieces as they came.
+        let sided = CoreMLBoardRecognizer.sides(
+            of: found, in: image, sidesFromColour: false, oddSides: true)
+        let whole = try #require(CoreMLBoardRecognizer.place(
+            found, corners: Self.rightWayUp, cornersFromModel: true, in: image,
+            sidesFromColour: false, oddSides: true, oneKing: true, queenForKing: false,
+            a1Prior: nil, a1Dark: false, pull: SquareAssignment.defaultPull))
+        let halves = try #require(CoreMLBoardRecognizer.settle(
+            sided, corners: Self.rightWayUp, cornersFromModel: true, in: image,
+            oneKing: true, queenForKing: false, a1Prior: nil, a1Dark: false,
+            pull: SquareAssignment.defaultPull))
+        #expect(whole.corners == halves.corners)
+        #expect(whole.pieces.mapValues(\.piece) == halves.pieces.mapValues(\.piece))
+        let asCame = CoreMLBoardRecognizer.sides(
+            of: found, in: image, sidesFromColour: false, oddSides: false)
+        #expect(asCame.map(PieceSides.label) == found.map(PieceSides.label))
+    }
+
     /// The sides are mended before the kings are counted, since the kings
     /// are counted by side. A cream king on d2, a dark king on e7, and the
     /// cream piece on f2 called a black king with the higher score. Mended

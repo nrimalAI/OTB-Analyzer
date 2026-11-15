@@ -147,19 +147,21 @@ import Testing
         #expect(CoreMLBoardRecognizer.Default.gridFit)
     }
 
-    /// The side of single pieces is off unless asked for (it is in the
-    /// reference to be measured through the app first), and the recognizer
-    /// hands its own setting on to what follows the models (`place`, the
-    /// method `recognize` calls): a drawn board with two cream pawns the
-    /// model calls Black.
+    /// The side of single pieces is on unless switched off
+    /// (`docs/RECOGNITION.md`, "What the side of single pieces is worth"),
+    /// and the recognizer hands its own setting on to what follows the
+    /// models (`place`, the method `recognize` calls). The fixture photos
+    /// read the same with the step and without, so they would not notice
+    /// it missing: here a drawn board with two cream pawns the model calls
+    /// Black.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
-    func testOddSidesIsOffByDefaultAndReachesWhatFollowsTheModels() throws {
+    func testOddSidesIsOnByDefaultAndReachesWhatFollowsTheModels() throws {
         let models = try Self.models.get()
         let asBuilt = try makeRecognizer()
-        let asked = try CoreMLBoardRecognizer(
-            cornerModel: models.corners, pieceModel: models.pieces, oddSides: true)
-        #expect(asBuilt.oddSides == false && CoreMLBoardRecognizer.Default.oddSides == false)
-        #expect(asked.oddSides == true)
+        let without = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oddSides: false)
+        #expect(asBuilt.oddSides == true && CoreMLBoardRecognizer.Default.oddSides == true)
+        #expect(without.oddSides == false)
 
         let (image, found) = try OddSidesTests.drawn()
         let corners = [
@@ -172,13 +174,14 @@ import Testing
             return placed.pieces.values.filter { $0.piece.color == .white }.count
         }
         #expect(found.filter { $0.color == .white }.count == 6)
-        #expect(try whites(asBuilt) == 6)
-        #expect(try whites(asked) == 8)
+        #expect(try whites(asBuilt) == 8)
+        #expect(try whites(without) == 6)
     }
 
-    /// A queen for a king is off unless asked for, as the side of single
-    /// pieces is, and the recognizer hands its own setting on to what
-    /// follows the models.
+    /// A queen for a king is off unless asked for (through the app it gains
+    /// a board of Fenit board B and loses four of Fenit A,
+    /// `docs/RECOGNITION.md`, "A queen for a king"), and the recognizer
+    /// hands its own setting on to what follows the models.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testQueenForKingIsOffByDefaultAndReachesWhatFollowsTheModels() throws {
         let models = try Self.models.get()
@@ -205,6 +208,72 @@ import Testing
         let alone = try CoreMLBoardRecognizer(
             cornerModel: models.corners, pieceModel: models.pieces, oneKing: false, queenForKing: true)
         #expect(try kings(alone) == 1)
+    }
+
+    /// What `app_check --pieces` is given (`diagnosePieces`) is what the
+    /// recognizer has and reads: the placement is `recognize`'s, the corners
+    /// are its corners before a1 is chosen, and each piece carries the
+    /// model's scores as one king a side sees them.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testThePiecesDiagnosisIsWhatTheRecognizerReads() async throws {
+        let models = try Self.models.get()
+        let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+        let manifest = try JSONDecoder().decode(
+            [String: String].self, from: Data(contentsOf: fixtures.appending(path: "expected.json")))
+        // As the app runs it; and with the colour steps off and a1 left
+        // where the corners have it, so that the corners `recognize` ends
+        // with are the corners before a1 is chosen.
+        let asBuilt = try makeRecognizer()
+        let plain = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, a1Prior: nil, oddSides: false)
+        for file in manifest.keys.sorted() {
+            let source = try #require(
+                CGImageSourceCreateWithURL(fixtures.appending(path: file) as CFURL, nil))
+            let photo = DecodedImage.once(try #require(CGImageSourceCreateImageAtIndex(source, 0, nil)))
+            var labels: [[String]] = []
+            for recognizer in [asBuilt, plain] {
+                let read = try await recognizer.recognize(photo)
+                let found = try recognizer.diagnosePieces(photo)
+                #expect(found.placement == FENBuilder.placement(read.pieces.mapValues(\.piece)), "\(file)")
+                let corners = try #require(found.corners)
+                #expect(found.squareColours == GridCorners.squareColours(in: photo, corners: corners), "\(file)")
+                #expect(found.pieces.count >= read.pieces.count && !found.pieces.isEmpty, "\(file)")
+                for piece in found.pieces {
+                    // The highest score is the piece's confidence and names
+                    // the model's answer; the scores come highest first.
+                    let top = try #require(piece.scores.first)
+                    #expect(top.label == piece.modelLabel && top.score == piece.confidence, "\(file)")
+                    #expect(piece.scores.map(\.score) == piece.scores.map(\.score).sorted(by: >), "\(file)")
+                    // What one king a side sees is made of them.
+                    let kinds = CoreMLBoardRecognizer.kindScores(
+                        piece.scores.map { (identifier: $0.label, score: $0.score) })
+                    #expect(piece.kindScores == Dictionary(uniqueKeysWithValues: kinds.map {
+                        (PieceSides.name($0.key), $0.value)
+                    }), "\(file)")
+                    // Only a colour step changes a class, and only the side.
+                    #expect(piece.label.split(separator: "_").last
+                        == piece.modelLabel.split(separator: "_").last, "\(file)")
+                    #expect((piece.colour?.count ?? 3) == 3, "\(file)")
+                }
+                labels.append(found.pieces.map(\.label))
+                if recognizer.oddSides {
+                    // a1 may have been turned: the same ring, from whichever corner.
+                    #expect((0..<4).contains { turn in
+                        Array(corners[turn...] + corners[..<turn]) == read.corners
+                    }, "\(file)")
+                } else {
+                    // The very corners, and the pieces as the model read them.
+                    #expect(corners == read.corners, "\(file)")
+                    #expect(found.pieces.allSatisfy { $0.label == $0.modelLabel }, "\(file)")
+                }
+            }
+            // On the fixtures the side of single pieces changes nothing.
+            #expect(labels[0] == labels[1], "\(file)")
+            // The corners shown are those before a1 is chosen: with the
+            // check of a1 on, the ones the recognizer without it ends with.
+            #expect(try asBuilt.diagnosePieces(photo).corners == plain.diagnosePieces(photo).corners,
+                    "\(file)")
+        }
     }
 
     /// What `app_check --window` is given (`diagnoseFitWindow`) is what the

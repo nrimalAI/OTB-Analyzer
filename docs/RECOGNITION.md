@@ -30,8 +30,12 @@ worth".
 
 **Since 2026-11-15 the corner model picks the grid fit's window** (step
 3). What that changes, on top of the dark a1, is in "What the model's
-choice of window is worth", which is the section for what the app reads
-now.
+choice of window is worth".
+
+**Since 2026-11-15 the side of single pieces is mended from their
+colour** (step 5). What that changes, on top of the two above, is in
+"What the side of single pieces is worth", which is the section for what
+the app reads now.
 
 ## The steps (`CoreMLBoardRecognizer.recognize`)
 
@@ -72,10 +76,9 @@ now.
    colours contradict them for more than 15% of the pieces that have a colour
    (a box whose middle lies outside the photo has none); then each of those
    takes its group's side. Kinds and confidences are never changed.
-   **The side of single pieces, switched off** (`OddSides`, port of
-   `odd_sides` and `patch_hidden`; in the reference since 2026-11-15 and
-   ported so that it can be measured through the app, `Training/README.md`,
-   "The side of single pieces"): the other way to use the same colours.
+   **The side of single pieces** (`OddSides`, port of `odd_sides` and
+   `patch_hidden`; on since 2026-11-15, see "What the side of single
+   pieces is worth"): the other way to use the same colours.
    The model's own answers say what colour each side is in the photo (the
    median colour of the pieces it calls White and of those it calls Black,
    as L*, 4a*, 4b*), and a piece called Black whose colour is twice as near
@@ -148,8 +151,9 @@ now.
    beside the board and gets no square.
 
 Steps 3, 6 and 7 can be switched off, the model's choice of window of step
-3 and the dark a1 of step 7 each by itself, and the two halves of step 5
-and the queen for a king of step 6 each on
+3, the side of single pieces of step 5 and the dark a1 of step 7 each by
+itself, and the whole board's colours of step 5 and the queen for a king
+of step 6 each on
 (`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:fitWindow:oddSides:queenForKing:)`;
 `CoreMLBoardRecognizer.Default` names what the app runs with).
 How the two sets of corners combine is
@@ -433,11 +437,36 @@ before.
   becomes a queen; counted first, Black's real king would). Another
   pins the order of the two colour steps (the whole board's first), and
   one that what `app_check --colours` is given is what the step does.
-  One builds the recognizer as the app does and with the step asked for,
-  and requires the first to leave those pawns and the second to mend
-  them. A colour that is not a number changes nothing, as in the Python;
+  One builds the recognizer with every default left alone and with the
+  step switched off, and requires the first to mend those pawns and the
+  second to leave them. A colour that is not a number changes nothing, as in the Python;
   a box whose corners are the wrong way round is the one input on which
   the two differ, and no model gives one.
+- **What follows the pieces is replayed in Python on what the app has**
+  (`app_check --pieces`, `swift_reference.py pieces`). The recorded cases
+  were the whole contract for one king a side, and a1 from the pieces
+  and the squares were checked on recorded cases only, because the
+  Python and the app do not get the same scores and boxes from the piece
+  model. The dump takes that away: for each photo it holds the corners
+  before a1 is chosen, what the square colours say of them, every piece
+  as it stands before one king a side with the scores that step sees,
+  and the placement the app reads; the Python then runs
+  `one_king_a_side`, `orient_by_pieces` and `assign_squares` on it. On
+  the three development sets, with the colour steps off, with the side
+  of single pieces on, and with the queen for a king on as well, and on
+  board B also with one king a side, the dark a1 and the head start all
+  off and with the grid fit off: the same placement on every one of
+  2,276 readings. What those readings do not exercise: the fit standing
+  alone and a photo with no board (neither occurs in them), the whole
+  board's colour step on, a head start other than 6, 0 or off. On
+  ChessReD test no variant of one king a side, a1 or the dark a1 changes
+  a reading, so its 918 readings test the squares only; the steps act on
+  board B (one king a side on 15 photos, a1 from the pieces on 57) and on
+  Fenit A (2 and 26), by the reviewer's count. A test requires that the dump's placement is
+  `recognize`'s on the fixture photos and that its scores are those one
+  king a side is given. `replay_pieces` takes another rule in place of
+  `one_king_a_side`, to try one on the app's own scores before it is
+  ported.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -511,6 +540,10 @@ before.
   was moved on purpose):
   `app_check --models M --list L.json --window sw.json [--shift-fit 0,1]`,
   `swift_reference.py window --swift sw.json`.
+  For what follows the pieces (one king a side, a1 from the pieces, the
+  squares), on the pieces, scores and corners the app has:
+  `app_check --models M --list L.json --pieces sw.json`,
+  `swift_reference.py pieces --swift sw.json`.
 
 ### How close the Swift grid fit is to the Python
 
@@ -678,29 +711,61 @@ so for the third pair it is no longer a set that nothing was chosen on.)
   Much as with the second pair: 2.7 squares a photo on unseen boards, half
   of the wrong pieces among them. The threshold is the owner's to move.
 
-## The side of single pieces: off, and what it does on the development sets
+## What the side of single pieces is worth
 
-The second half of step 5 (`OddSides`), ported on 2026-11-15 at the
-reference's request and **switched off in the app**: the reference chose
-its numbers on board B, and whether it goes on is decided from a run
-through the app on the development sets and on the second held-out set by
-part, which is the training session's to make and is not made here
-(`Training/README.md`, "The side of single pieces"). What follows is only
-the check of the port, on the three development sets: the third pair
-through `app_check`, everything else as the app runs it, the step off and
-on through the same binary; with it off every photo reads as in "What the
-model's choice of window is worth". Squares right; boards exact; boards
-exact or half a turn away.
+The second half of step 5 (`OddSides`), ported on 2026-11-15 and **on in
+the app since the same day**. The reference chose its numbers on board B
+(`Training/README.md`, "The side of single pieces"), so board B's gain is
+where the rule comes from and not a test of it; what was asked of the
+other sets is that nothing changes on boards the model reads well.
+Measured with the third pair through `app_check`, everything else as the
+app runs it, the step off and on through the same binary; with it off
+every photo reads as in "What the model's choice of window is worth". The
+development sets were run here and again by the training session, with
+the same readings; the second held-out set was run through the app once,
+as a test, by the training session (`Training/runs/app_check/odd_h2/`),
+and its files were recounted here. That run tests for harm only, since
+nothing changes there; and it was not the set's first use for this rule:
+the reference ran a two-way form of the rule on it in Python, whose
+failure there is why the rule is one-way, and the run through the app
+came before the step was asked to be switched on, so it served as a gate
+(`Training/README.md`, "Second held-out test set", items 7 and 9). No
+number of the rule was set on that set. Squares right; boards exact;
+boards exact or half a turn away.
 
-| Set (photos) | Step off (the app) | Step on | Pieces made White |
+| Set (photos) | Without the step | **With it, as the app runs it now** | Readings that differ |
 |---|---|---|---|
-| Fenit board B (100) | 94.48%; 16; 19 | 94.94%; 31; 35 | 41 on 34 photos |
-| Fenit A (286) | 98.14%; 234; 256 | 98.14%; 234; 256 | none |
-| ChessReD test (306) | 99.80%; 295; 297 | 99.80%; 295; 297 | none |
+| Fenit board B (100) | 94.48%; 16; 19 | **94.94%; 31; 35** | 34 (41 pieces made White) |
+| Fenit A (286) | 98.14%; 234; 256 | **98.14%; 234; 256** | none |
+| ChessReD test (306) | 99.80%; 295; 297 | **99.80%; 295; 297** | none |
+| *second held-out set:* | | | |
+| Y-LIChess (200) | 94.81%; 60; 68 | **94.81%; 60; 68** | none |
+| ChessQ (50) | 93.44%; 14; 16 | **93.44%; 14; 16** | none |
+| chesscog (29) | 98.17%; 8; 8 | **98.17%; 8; 8** | none |
+| samryan (500) | 96.50%; 115; 123 | **96.50%; 115; 123** | none |
+| chess-cv games (840) | 97.99%; 267; 267 | **97.99%; 267; 267** | none |
+| **all (1,619)** | 97.00%; 464; 482 | **97.00%; 464; 482** | none |
 
-- **Board B is the board the numbers were chosen on**, so its gain is not
-  a test of the rule; Fenit A and ChessReD test say that it leaves alone
-  boards the model reads well, photo for photo.
+- **Everything it does, as the photos are taken, is on board B.** Of the
+  2,211 photos of the other sets not one reads differently, the 1,619 of
+  the second held-out set among them. (On Fenit A and ChessReD test the
+  rule changes no piece at all; on the second held-out set only the
+  readings were compared.) What it is known to mend is one board, the
+  one its numbers were chosen on (brown "white" pieces, some of which
+  the piece model calls Black). Whether it mends other boards with that
+  fault is not known: no other set here has it.
+- **What it costs.** In these runs, one square on one photo drawn as a
+  3:4 photo (below). And it is known to change pieces that are right:
+  on the 9,178 real training photos, with their labelled sides, the
+  reference counts a right piece changed on 65 photos, 0.7%
+  (`Training/README.md`, "The side of single pieces"); and in the Python
+  it changed 53 pieces on 50 photos of the second held-out set, 47 of
+  them on samryan, with no board gained or lost, on readings the README
+  says are poorer than the app's (full-size photos shrunk without
+  smoothing).
+- **Against the goal** on boards nobody trained on: board B 31 of 100
+  fully right (16 without the step); the second held-out set 464 of
+  1,619 (29%) as before; the goal is 85%.
 - On board B 34 photos read differently. 38 squares that were wrong are
   right, 3 stay wrong, and on 33 of the 34 photos no square is lost; 15
   more boards are fully right.
@@ -721,20 +786,50 @@ exact or half a turn away.
   67.7. The step reads the middle of every piece's box once; single runs
   on a Mac mini that was training.
 - A piece whose side the step changes keeps the model's confidence, as
-  in the reference, so the app marks it no more than before.
+  in the reference, so the app marks it no more than before. On board B
+  the app marks 123 of 223 wrong pieces with the step (146 of 257
+  without) and 245 of 1,464 right ones (222 of 1,430), 3.7 squares a
+  photo either way.
+- **As 3:4 photos**, which is what a phone takes: board B 94.45% ->
+  94.91%; 16 -> 31; 19 -> 35 (35 photos read differently, 32 with more
+  squares right, the same endgame with fewer). Fenit A reads every photo
+  as without the step (98.14%; 234; 256). The Fenit photos are 3:4
+  already, so for them this is nearly a repeat and not a second test;
+  ChessReD's are square, and drawn as 3:4 the board is three quarters
+  the size for the models. **ChessReD test loses one square on one
+  photo**: 99.68% -> 99.67%; 282; 284 either way. `G000_IMG064.jpg`, 63
+  squares -> 62: a black rook on e4 standing behind the white knight on
+  d4, whose patch shows the knight, is made White. In the photo as it is
+  taken the piece model finds the knight (at 0.39), its box counts as
+  standing in front, and the rule leaves the rook out; the photo reads
+  all 64. Drawn as a 3:4 photo the model does not find the knight, d4 is
+  empty with the step and without, which is the 63, and nothing stands
+  in front of the rook for the rule. It is the one reading in these runs
+  that the step makes worse on a board the model reads well.
+- **The "piece in front" test depends on the piece model finding the
+  piece in front.** A white piece the model misses, standing in front of
+  a black one, whitens the black one; such a photo has a wrong square
+  already. How much that test holds back as the photos are taken: with
+  no piece ever counted as in front the rule would change 4 pieces on 4
+  photos of ChessReD test (none with the test), none on Fenit A, and 46
+  on board B against 41.
+- **To be measured again with every new piece model**: the rule mends a
+  fault of this one, on one board. And a piece whose side it changed is
+  not marked for the user (above); marking it would flag a wrong
+  whitening, and is a design choice for the owner.
 
 ## A queen for a king: off, and what it does on the development sets
 
 The second half of step 6 (`OneKingASide.apply(queenForKing:)`), ported on
-2026-11-15 at the reference's request and **switched off in the app**, as
-the side of single pieces above: whether it goes on is the training
-session's to decide from its own run through the app. This is the check of
+2026-11-15 at the reference's request and **switched off in the app**. It
+stays off: the training session, whose rule it is, does not ask for it
+after the figures below and means to try another. This is the check of
 the port on the three development sets: the third pair through
-`app_check`, the switch off and on through the same binary, by itself and
-on top of the side of single pieces. Squares right; boards exact; boards
+`app_check`, the switch off and on through the same binary, without the
+side of single pieces and on top of it (as the app runs now). Squares right; boards exact; boards
 exact or half a turn away.
 
-| Set (photos) | Both off (the app) | Queen for king | Single pieces | Both on |
+| Set (photos) | Neither | Queen for king alone | Single pieces (the app) | Both |
 |---|---|---|---|---|
 | Fenit board B (100) | 94.48%; 16; 19 | 94.48%; 17; 20 | 94.94%; 31; 35 | 94.78%; 32; 37 |
 | Fenit A (286) | 98.14%; 234; 256 | 98.12%; 230; 251 | 98.14%; 234; 256 | 98.12%; 230; 251 |
@@ -803,7 +898,7 @@ before the set was run. Squares right; boards
 exact; boards exact or half a turn away; and, of the photos where the model
 and the fit both found the board, how many windows the rule moved.
 
-| Set (photos) | Without the rule | **With it, as the app runs it now** | Windows moved |
+| Set (photos) | Without the rule | **With it, as the app ran it then** | Windows moved |
 |---|---|---|---|
 | ChessReD test (306) | 99.80%; 295; 297 | **99.80%; 295; 297** | 0 of 288 |
 | Fenit board B (100) | 94.48%; 16; 19 | **94.48%; 16; 19** | 0 of 95 |
@@ -921,7 +1016,7 @@ as a test. Squares right; boards exact; boards exact or half a turn away
 (one tap in the app); boards that are wrong as read and exact once turned
 by a quarter.
 
-| Set (photos) | Without the rule | **With it, as the app runs it now** |
+| Set (photos) | Without the rule | **With it, as the app ran it then** |
 |---|---|---|
 | ChessReD test (306) | 99.80%; 295; 297; 0 | **99.80%; 295; 297; 0** |
 | Fenit board B (100) | 94.36%; 16; 19; 0 | **94.48%; 16; 19; 0** |

@@ -306,11 +306,11 @@ extension PieceSides {
         name(detection.color) + "_" + name(detection.piece)
     }
 
-    private static func name(_ side: Piece.Color) -> String {
+    static func name(_ side: Piece.Color) -> String {
         side == .white ? "white" : "black"
     }
 
-    private static func name(_ kind: Piece.Kind) -> String {
+    static func name(_ kind: Piece.Kind) -> String {
         switch kind {
         case .pawn: return "pawn"
         case .knight: return "knight"

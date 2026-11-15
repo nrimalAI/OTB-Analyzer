@@ -25,7 +25,10 @@ import Vision
 /// Black from the colours of the pieces where the piece model's own answer
 /// does not fit them (`PieceSides`), is there but switched off: on boards
 /// nobody tuned its rule on, it fails with the piece model it was made for.
-/// A fourth sees to it that each side has one king (`OneKingASide`). And a1
+/// What is on is its narrower kin, the side of single pieces: a piece
+/// called Black whose colour is plainly the White side's becomes White
+/// (`OddSides`). A fourth sees to it that each side has one king
+/// (`OneKingASide`). And a1
 /// is a dark square: the pieces choose between the two ways round that the
 /// colours of the squares allow (`GridCorners.squareColours`).
 ///
@@ -52,20 +55,21 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let a1Dark: Bool
     /// Internal for testing.
     let fitWindow: Bool
-    /// Internal for testing: the app's default must stay off.
+    /// Internal for testing.
     let oddSides: Bool
     /// Internal for testing: the app's default must stay off.
     let queenForKing: Bool
 
     /// What the app runs with where nothing else is asked for.
     public enum Default {
+        public static let pull = SquareAssignment.defaultPull
         public static let a1Prior: Double? = BoardOrientation.appPrior
         public static let gridFit = true
         public static let sidesFromColour = false
         public static let oneKing = true
         public static let a1Dark = true
         public static let fitWindow = true
-        public static let oddSides = false
+        public static let oddSides = true
         public static let queenForKing = false
     }
 
@@ -113,21 +117,25 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///   - oddSides: a piece the piece model calls Black becomes White when
     ///     its colour in the photo is plainly the White side's: twice as
     ///     near the colour of the pieces called White as that of the other
-    ///     pieces called Black (`OddSides`). Off unless asked for: it is in
-    ///     the reference to be measured through the app first
-    ///     (`Training/README.md`, "The side of single pieces").
+    ///     pieces called Black (`OddSides`). On: through the app it mends
+    ///     15 boards of Fenit board B, the board its numbers were chosen
+    ///     on, and changes no reading of the other development sets nor of
+    ///     the second held-out test set as the photos are taken; drawn as
+    ///     3:4 photos, one photo of ChessReD test loses a square
+    ///     (`docs/RECOGNITION.md`, "What the side of single pieces is
+    ///     worth").
     ///   - queenForKing: with `oneKing`, a side left without a king and
     ///     without a piece the model gave a "king" score takes its queen
     ///     for one, of several the one the model is least sure of
-    ///     (`OneKingASide`). Off unless asked for: in the reference to be
-    ///     measured through the app first (`Training/README.md`, "A side
-    ///     without a king takes its queen"). Has no effect with `oneKing`
-    ///     off.
+    ///     (`OneKingASide`). Off unless asked for: through the app it gains
+    ///     one board of Fenit board B and loses four of Fenit A
+    ///     (`docs/RECOGNITION.md`, "A queen for a king"). Has no effect
+    ///     with `oneKing` off.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
         cornerScoreThreshold: Float = 0.25,
-        pull: Double = 0.30,  // = SquareAssignment.defaultPull
+        pull: Double = Default.pull,
         a1Prior: Double? = Default.a1Prior,
         gridFit: Bool = Default.gridFit,
         sidesFromColour: Bool = Default.sidesFromColour,
@@ -272,18 +280,30 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         pull: Double,
         whole: GrayImage.Working? = nil
     ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
+        settle(
+            sides(of: found, in: image, sidesFromColour: sidesFromColour, oddSides: oddSides),
+            corners: located, cornersFromModel: cornersFromModel, in: image, oneKing: oneKing,
+            queenForKing: queenForKing, a1Prior: a1Prior, a1Dark: a1Dark, pull: pull, whole: whole)
+    }
+
+    /// The second half of `place`, from the pieces with their sides as the
+    /// colour steps left them: one king a side, a1, the squares. Apart, so
+    /// that what is shown of those pieces (`diagnosePieces`) is the very
+    /// list this is given. Internal for testing.
+    static func settle(
+        _ sided: [PieceDetection],
+        corners located: [CGPoint],
+        cornersFromModel: Bool,
+        in image: CGImage,
+        oneKing: Bool,
+        queenForKing: Bool,
+        a1Prior: Double?,
+        a1Dark: Bool,
+        pull: Double,
+        whole: GrayImage.Working? = nil
+    ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
         var corners = located
-        var detections = found
-        if sidesFromColour || oddSides {
-            // One measurement for both steps: neither moves a box.
-            let colours = PieceSides.colours(of: detections, in: image)
-            if sidesFromColour {
-                detections = PieceSides.fromColour(detections, colours: colours)
-            }
-            if oddSides {
-                detections = OddSides.apply(detections, colours: colours)
-            }
-        }
+        var detections = sided
         if oneKing {
             detections = OneKingASide.apply(detections, queenForKing: queenForKing)
         }
@@ -299,6 +319,81 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         guard let homography = Homography(corners: corners) else { return nil }
         return (corners, SquareAssignment.assign(
             detections: detections, homography: homography, pull: pull))
+    }
+
+    /// The pieces with their sides as the two colour steps leave them, each
+    /// step where it is switched on: the whole board's colours first, then
+    /// single pieces'. What one king a side is given. Internal for testing.
+    static func sides(
+        of found: [PieceDetection], in image: CGImage, sidesFromColour: Bool, oddSides: Bool
+    ) -> [PieceDetection] {
+        guard sidesFromColour || oddSides else { return found }
+        var detections = found
+        // One measurement for both steps: neither moves a box.
+        let colours = PieceSides.colours(of: detections, in: image)
+        if sidesFromColour {
+            detections = PieceSides.fromColour(detections, colours: colours)
+        }
+        if oddSides {
+            detections = OddSides.apply(detections, colours: colours)
+        }
+        return detections
+    }
+
+    /// Everything the recognizer has in hand just before one king a side,
+    /// with its settings as they are, and what it then reads: for replaying
+    /// one king a side, a1 from the pieces and the squares in the Python on
+    /// exactly what the app has (`app_check --pieces`,
+    /// `swift_reference.py pieces`).
+    public func diagnosePieces(_ photo: CGImage) throws -> PiecesDiagnosis {
+        let image = DecodedImage.once(photo)
+        let letterbox = Letterbox(
+            imageSize: CGSize(width: image.width, height: image.height))
+        guard let square = letterbox.render(image) else {
+            return PiecesDiagnosis(
+                corners: nil, cornersFromModel: false, squareColours: nil, pieces: [], placement: nil)
+        }
+        // As `recognize`.
+        let whole = gridFit || (a1Dark && a1Prior != nil) ? GridCorners.workingImage(of: image) : nil
+        let located = corners(
+            model: try modelCorners(in: square, letterbox: letterbox), in: image, whole: whole)
+        // Each box the model takes for a piece, with all its scores.
+        let found = try pieceObservations(in: square).compactMap { observation in
+            Self.piece(from: observation, letterbox: letterbox).map { (observation.scores, $0) }
+        }
+        let model = found.map(\.1)
+        let detections = Self.sides(
+            of: model, in: image, sidesFromColour: sidesFromColour, oddSides: oddSides)
+        let colours = PieceSides.colours(of: model, in: image)
+
+        // What `recognize` goes on to do, on the pieces shown.
+        var placement: String?
+        if let located, let placed = Self.settle(
+            detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
+            oneKing: oneKing, queenForKing: queenForKing, a1Prior: a1Prior, a1Dark: a1Dark, pull: pull,
+            whole: whole) {
+            placement = FENBuilder.placement(placed.pieces.mapValues(\.piece))
+        }
+        return PiecesDiagnosis(
+            corners: located?.corners,
+            cornersFromModel: located?.fromModel ?? false,
+            squareColours: located.map {
+                GridCorners.squareColours(in: image, corners: $0.corners, whole: whole)
+            },
+            pieces: detections.indices.map { index in
+                PiecesDiagnosis.Piece(
+                    label: PieceSides.label(detections[index]),
+                    modelLabel: PieceSides.label(model[index]),
+                    confidence: detections[index].confidence,
+                    box: detections[index].boundingBox,
+                    scores: found[index].0.map { PiecesDiagnosis.Score(label: $0.identifier, score: $0.score) },
+                    kindScores: Dictionary(uniqueKeysWithValues: detections[index].kindScores.map {
+                        (PieceSides.name($0.key), $0.value)
+                    }),
+                    colour: colours[index].map { [$0.l, $0.a, $0.b] },
+                    hidden: OddSides.patchHidden(model, index))
+            },
+            placement: placement)
     }
 
     /// What the piece model finds in a photo and what the colour step
@@ -587,4 +682,53 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         let a8 = corners[1]
         return a1.y >= a8.y ? .whiteBottom : .blackBottom
     }
+}
+
+/// What the recognizer has in hand for one photo just before one king a
+/// side, and what it reads (`CoreMLBoardRecognizer.diagnosePieces`).
+public struct PiecesDiagnosis {
+
+    /// The piece model's score for one label of a box.
+    public struct Score {
+        public let label: String
+        public let score: Float
+    }
+
+    public struct Piece {
+        /// The class as it stands before one king a side, as the Python
+        /// names it: `"white_pawn"`.
+        public let label: String
+        /// The piece model's own answer, before either colour step.
+        public let modelLabel: String
+        /// The model's score for its own answer.
+        public let confidence: Float
+        /// In pixels of the photo, origin top-left.
+        public let box: CGRect
+        /// The model's score for every label Vision hands out for the box,
+        /// the highest first, before any cut.
+        public let scores: [Score]
+        /// What one king a side sees: for each kind the larger score of the
+        /// two colours, and nothing under
+        /// `CoreMLBoardRecognizer.leastKindScore`. Keyed `"king"`, `"queen"`.
+        public let kindScores: [String: Double]
+        /// The median L*, a*, b* of the middle of the box; nil when that
+        /// lies outside the photo.
+        public let colour: [Double]?
+        /// Whether another piece stands in front of the middle of the box.
+        public let hidden: Bool
+    }
+
+    /// The corners before a1 is taken from the pieces (the model's, the
+    /// grid fit's, or the fit's as the model moved them); nil for no board.
+    public let corners: [CGPoint]?
+    /// Whether the corner model had a say in which corner is a1. Where it
+    /// had none (the fit alone) the pieces decide with no head start.
+    public let cornersFromModel: Bool
+    /// What the colours of the squares say of `corners`; nil for no board.
+    public let squareColours: GridCorners.SquareColours?
+    /// The pieces in the order the model gave them.
+    public let pieces: [Piece]
+    /// What the recognizer reads from all of this, as a placement; nil for
+    /// no board.
+    public let placement: String?
 }
