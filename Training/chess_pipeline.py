@@ -455,7 +455,7 @@ KINDS = ("king", "queen", "rook", "bishop", "knight", "pawn")
 KING_FLOOR = 0.02
 
 
-def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
+def one_king_a_side(detections, kind_scores, floor=KING_FLOOR, queen_for_king=False):
     """The detections with one king on each side, where the model's scores
     allow it. Every position of a game has exactly two kings, and a king read
     as a queen (or a third "king") is what a piece model gets wrong on a set
@@ -480,7 +480,14 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
     if that is at least `floor`. With more than two, a side with several
     kings keeps the one with the highest "king" score and each of the others
     becomes its best-scoring other kind (a queen when it has no other score).
-    A piece keeps its side, confidence and box."""
+    A piece keeps its side, confidence and box.
+
+    `queen_for_king` (off unless asked for; not in the app): where a side
+    without a king has no piece with a "king" score of `floor`, its queen is
+    made the king, and of several queens the one the model is least sure of.
+    A king the model is sure is a queen is the commonest thing left wrong on
+    Fenit board B once the sides are right; on a board set up without a king
+    it turns a real queen into one."""
     out = list(detections)
     total = sum(1 for d in out if d.cls.endswith("_king"))
     if total == 2:
@@ -493,7 +500,12 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR):
         kings = [k for k in idx if out[k].cls == side + "_king"]
         if total < 2 and not kings:
             best = max(idx, key=lambda k: (king_score[k], -k))
-            if king_score[best] >= floor:
+            if king_score[best] < floor and queen_for_king:
+                queens = [k for k in idx if out[k].cls == side + "_queen"]
+                best = min(queens, key=lambda k: (out[k].confidence, k)) if queens else None
+            elif king_score[best] < floor:
+                best = None
+            if best is not None:
                 out[best] = Detection(side + "_king", out[best].confidence, out[best].bbox)
         elif total > 2 and len(kings) > 1:
             keep = max(kings, key=lambda k: (king_score[k], -k))

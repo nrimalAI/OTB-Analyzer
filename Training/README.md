@@ -666,6 +666,36 @@ me to the training photos, where the shadow showed. These are Python
 figures (with one box a spot samryan and the chess-cv games read lower here
 than through the app): the app's are the ones that count, once it is ported.
 
+**A side without a king takes its queen (2026-11-15; in the reference,
+`one_king_a_side(..., queen_for_king=True)` and `evaluate.py
+--queen-for-king`; not in the app yet, off by default).** With the sides
+mended (the paragraphs above, Python), board B has 36 boards right, 21 one
+square off and 13 two off, and of those 47 squares 15 are the black king
+read as a queen and 2 the white one. `one_king_a_side` leaves them: it
+crowns a piece only if the model gave it a "king" score of 0.02, and these
+the model is sure are queens. A game position has both kings, and a king is
+seldom not found at all, so a side left without one takes its queen; of two
+queens, the one the model is less sure of (on board B that picks the king
+13 times and the queen 4; the taller box, measured in squares at its foot,
+13 and 7).
+
+End to end in Python, on top of the side rule
+(`runs/scores/odd_sides_tone1.txt` -> `queen_for_king_tone1.txt`): **board
+B 36 -> 45 boards exact** (squares 94.98% -> 94.97%: where it crowns the
+wrong one of two queens a board one square off becomes two off); ChessReD
+test unchanged (297); Fenit A 231 -> 229. Fenit A's losses are what the
+one-king rule loses already: boards set up without a king, where a real
+queen is crowned. Such a position is not one the engine can be asked about.
+
+Then the second test set, as a test, in Python, the side rule on in both
+(`..._spot07_oddsides_oneway.txt` against `..._oddsides_queenking.txt`): no
+part worse. Boards exact: samryan 33 -> 42 of 500 (93.35% -> 93.45% of
+squares), the chess-cv games 43 -> 66 of 840 (95.92% -> 96.11%), the
+Y-LIChess games 24 -> 25, its layouts 21, ChessQ 14 and chesscog 13
+unchanged; 148 -> 181 in all. The two that gain are the ones photographed
+from straight above, where a king and a queen look most alike. Python
+figures, as above; the app's count once it is ported.
+
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
 read as p 8 times, a black pawn on an empty square 6, Q as q 3, K as k 3,
@@ -1238,6 +1268,9 @@ that the count is known:
    after it was made one-way on the training photos' labelled sides, again.
    The first run is why the wrong changes were looked for; they were looked
    for and counted on training photos, not here.
+8. The queen taken for a missing king (`queen_for_king`) was run here once
+   in Python, after it was fixed on the development sets; nothing about it
+   was chosen here.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else
