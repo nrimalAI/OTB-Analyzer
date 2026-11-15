@@ -456,6 +456,20 @@ Much less than before, and on two sets they cost:
   boards of the second test set are exact once turned by a quarter (12 by a
   half), and 8 against 16 on Fenit A.
 
+**What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
+16 boards are right, 30 are one square off and 16 two. The one square: P
+read as p 8 times, a black pawn on an empty square 6, Q as q 3, K as k 3,
+r as q 3. The phantom pawn is the head of a tall piece seen as a pawn of
+its own: its box lies inside the king's or queen's, with too little overlap
+for the model's own NMS to drop it. **Tried and not taken:** dropping a box
+of which more than a share lies inside the larger box of a more confident
+detection. It takes real pawns that stand in front of or behind a taller
+piece with it: with labelled corners, at a share of 0.9 / 0.8 / 0.7 / 0.6,
+ChessReD test falls from 97.7% of boards exact to 91.5 / 88.2 / 83.0 /
+75.5%, and board B gains nothing (20.4% -> 20.4 / 19.4 / 18.4 / 14.3%;
+`runs/scores/drop_inside_tone1.txt`). Boxes cannot tell the two apart; the
+model has to.
+
 The goal is still far: 16% of boards fully right on board B and 27% on the
 second test set, where the target is 85%. What is wrong on board B now,
 with labelled corners: P read as p 39 times, kings read as queens 23 times,
