@@ -23,6 +23,11 @@ of models: two that have been in `Models/`, and the one that pull request
 
 The tests and the description of the steps hold for any pair.
 
+**Since 2026-11-14 a1 is taken to be a dark square** (step 7). The tables
+of the three pairs were measured before that rule and are left as they
+were; what the rule changes with the third pair is in "What a dark a1 is
+worth", which is the section for what the app reads now.
+
 ## The steps (`CoreMLBoardRecognizer.recognize`)
 
 1. The photo is letterboxed into a square (`Letterbox`) and given to both models.
@@ -69,6 +74,23 @@ The tests and the description of the steps hold for any pair.
    rotation gets a head start of 6 (`BoardOrientation.appPrior`). When the
    corners are the fit's alone there is no model opinion, and the pieces
    decide without a head start.
+   **a1 is a dark square** (`GridCorners.squareColours`, port of
+   `grid_corners.dark_corner_rotations`): before the pieces are asked, the
+   grey of the 64 cells between the corners says which two of the four
+   rotations put a dark square on a1, and the pieces choose between those
+   two only. They are half a turn apart, so the pieces can still turn a
+   board round and can no longer turn it by a quarter, which is what they
+   did to boards with few pieces and what the app's flip button does not
+   mend. The head start still goes to the corners as they came, when those
+   are one of the two. The colours say nothing, and all four rotations stay,
+   when fewer than 40 cells are seen, when the lighter and the darker cells
+   are less than 15 grey levels apart, or when the two colours do not split
+   cleanly (each cell is called light or dark; the share of light cells
+   among those of a1's colour and among the others must differ by half).
+   Each cell is read at four patches near its corners, as the grid fit
+   reads it, because a piece usually stands on the middle. **A board set
+   up with a light square on a1 is read a quarter turn off**: the rule
+   takes the rules of chess at their word.
 8. Each box's bottom centre goes through the corner homography to a square
    (`Homography`, `SquareAssignment`); one piece per square. A foot that
    falls up to a quarter of a square outside the board is taken back onto
@@ -76,8 +98,9 @@ The tests and the description of the steps hold for any pair.
    `EDGE_MARGIN`); further out it is a captured or spare piece standing
    beside the board and gets no square.
 
-Steps 3, 6 and 7 can be switched off and step 5 on
-(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:)`).
+Steps 3, 6 and 7 can be switched off, the dark a1 of step 7 by itself, and
+step 5 on
+(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:)`).
 How the two sets of corners combine is `CoreMLBoardRecognizer.corners(model:in:gridFit:)`,
 and it is what `Training/evaluate.py --grid-corners` does.
 
@@ -251,6 +274,26 @@ before.
   compared piece for piece, and the board scores differ a little. Two more
   tests place drawn pieces through the recognizer's own code and fail if the
   kings are counted before the sides from the colours or after a1.
+- `Training/swift_reference.py dark-cases` writes `Fixtures/dark_cases.json`:
+  what `dark_corner_rotations` makes of 16 chequered pictures that both
+  sides draw from a few numbers (which corner is dark, the ring of corners
+  in each rotation, and each of the three thresholds from both sides: 40
+  cells seen and 32, 15 grey levels and 14, a split of 0.5 and one cell
+  less), of the five drawn boards of `grid-cases` with their true corners in
+  the four rotations, a square along, a square up and half a square off,
+  of the drawn table without a board, and of the four fixture photos on the
+  corners the Python's grid fit gives them, in the four rotations; and
+  which rotation `orient_by_pieces(turns=)` chooses for each of the 120
+  cases of `orientation_cases.json` when only rotations 0 and 2, or only 1
+  and 3, are allowed. `GridSquareColoursTests` and `BoardOrientationTests`
+  replay them: the rotations must be the Python's, the strength of the
+  split equal on the drawn pictures (the same pixels) and within two cells
+  of 32 on the photos (it is equal there too today). Three more tests
+  place pieces on a drawn board through the recognizer's own code: pieces
+  that say "a quarter on" get the better of the two rotations the colours
+  allow, pieces that agree with the colours and a half turn are left to
+  the pieces, and on a picture whose colours say nothing all four
+  rotations stay open.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -315,6 +358,9 @@ before.
   For the colour step, on the boxes the app's piece model finds:
   `app_check --models M --list L.json --colours sw.json`,
   `swift_reference.py colours --swift sw.json --list L.json`.
+  For the dark a1, on the corners the app ends with:
+  `app_check --models M --list L.json --dark sw.json`,
+  `swift_reference.py dark --swift sw.json --list L.json`.
 
 ### How close the Swift grid fit is to the Python
 
@@ -481,6 +527,95 @@ so for the third pair it is no longer a set that nothing was chosen on.)
 
   Much as with the second pair: 2.7 squares a photo on unseen boards, half
   of the wrong pieces among them. The threshold is the owner's to move.
+
+## What a dark a1 is worth
+
+The rule of step 7: the colours of the squares leave two of the four ways
+a board can lie, and the pieces choose between those two. It came from the
+reference (`Training/README.md`, "a1 is a dark square": chosen there on
+board B, Fenit A and ChessReD test). Measured on the Mac mini on 2026-11-14
+with the third pair through `app_check`, everything else as the app runs
+it, the rule off and on through the same binary (the readings with it off
+are, photo for photo, those of the last column of the table above). The
+development sets were run first; the second held-out set was then run once,
+as a test. Squares right; boards exact; boards exact or half a turn away
+(one tap in the app); boards that are wrong as read and exact once turned
+by a quarter.
+
+| Set (photos) | Without the rule | **With it, as the app runs it now** |
+|---|---|---|
+| ChessReD test (306) | 99.80%; 295; 297; 0 | **99.80%; 295; 297; 0** |
+| Fenit board B (100) | 94.36%; 16; 19; 0 | **94.48%; 16; 19; 0** |
+| Fenit A (286) | 97.79%; 231; 247; 8 | **98.09%; 233; 255; 0** |
+| *second held-out set:* | | |
+| Y-LIChess (200) | 88.16%; 44; 49; 14 | **89.80%; 55; 63; 0** |
+| ChessQ (50) | 93.03%; 14; 15; 1 | **93.44%; 14; 16; 0** |
+| chesscog (29) | 98.17%; 8; 8; 0 | **98.17%; 8; 8; 0** |
+| samryan (500) | 95.50%; 106; 112; 11 | **96.50%; 115; 123; 0** |
+| chess-cv games (840) | 97.99%; 267; 267; 0 | **97.99%; 267; 267; 0** |
+| **all (1,619)** | 95.86%; 439; 451; 26 | **96.38%; 459; 477; 0** |
+
+- **No set loses, and the quarter turns are gone.** On the second held-out
+  set 85 photos read differently: 58 have more squares right (606 squares)
+  and 13 fewer (63); the other 14 have as many right as before, read
+  another way round. Y-LIChess 27 better and 12 worse, samryan 29 and 1,
+  ChessQ 2 and 0; chesscog and chess-cv read every photo as before. 20
+  more boards are fully right (11 on Y-LIChess, 9 on samryan: each was a
+  quarter off) and 26 more are right or half a turn away. On the
+  development sets: Fenit A 11 photos (4 better by 59 squares, 3 worse by
+  5: of its 8 boards a quarter off, 2 are now right and 6 half a turn
+  away), board B 4 photos (2 better by 8 squares, none worse), ChessReD
+  test none. As with the head start, what changes is boards with few
+  pieces: 60 of the 85 photos, and 14 of the 15 on the development sets,
+  have nine or fewer.
+- **The 13 that lose** are 12 Y-LIChess photos and one of samryan. Eight
+  of the twelve are full boards (30 or 32 pieces) that were read at 25
+  squares of 64 or fewer before and lose one or two more: the corners
+  there are not the board's (the grid fit accepts a grid a rank off on
+  such photos, "What the app reads with the third pair"), the colours
+  find a light a1 as the corners came, and a quarter turn is forced on
+  what was wrong already. Three are layouts with every piece on one half
+  of the board (19, 17 and 16 squares before; 0, 0 and 4 after, one of
+  them now exact once turned by half). The last, and samryan's, are
+  endgames that were a quarter off and are now half a turn off with one
+  square fewer. No board that was fully right is lost.
+- **Against the goal** on boards nobody trained on: 459 of 1,619 photos
+  fully right (28%; 27% without the rule) and still 16 of board B's 100;
+  the goal is 85%.
+- **What the colours say.** They are unclear on 8 photos of 2,311 (board B
+  3, Fenit A 1, ChessQ 4), and there the four rotations stay open as
+  before. The corners as they came had a light a1 on 1 photo of Fenit A,
+  none of ChessReD test and 30 of board B, and on 192 of the second
+  held-out set (samryan 123, Y-LIChess 60, ChessQ 7, chesscog 1, chess-cv
+  1): this corner model's a1 is often a quarter off on a board it has not
+  seen, and on most of those photos the pieces already turned it right
+  without the rule.
+- **Half turns are what is left**: 18 boards of the second held-out set
+  and 22 of Fenit A are right once turned by half. The rule cannot help
+  there, nor with the endgames of ChessReD game G033 ("Known weak spot"):
+  as 3:4 photos ChessReD test reads as before (99.68%; 282; 284), the
+  fixture `test_004005.jpg` among the turned ones, and board B 94.45% (was
+  94.33%); 16; 19.
+- **The Swift against the Python on the same corners** (`app_check --dark`,
+  `swift_reference.py dark`): the same answer on all 2,311 photos, and
+  the strength of the split within one cell of 32 on every one of them
+  (equal at the 95th percentile of each set).
+- **Time**: none that can be measured. The photo is shrunk to the grid
+  fit's working size once, for the fit and for the colours (Fenit A, 286
+  photos: 116.3 s with the rule, 116.2 s without, on a machine that was
+  training at the time). Shrinking it a second time for the colours cost
+  65 to 100 ms a photo.
+- **What the app marks** (confidence under 0.85) on the second held-out
+  set with the rule: 52% of the wrong pieces (49% without), 8.3% of the
+  right ones and 2.7 squares a photo, as before.
+- **What it cannot do, and what was not measured.** A board set up with a
+  light square on a1 is read a quarter turn off, and the flip button does
+  not mend that; no set here has such a board, so how often people do it
+  is not known. Nothing was run on a phone. The head start for the corner
+  model's a1 was not looked at again: 12 was not taken because it turned
+  sparse boards by a quarter, which the rule now rules out, so that
+  question is open again, for the reference first and not for another
+  look at the second held-out set.
 
 ## What the app read with the second pair
 
