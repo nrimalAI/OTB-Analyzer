@@ -360,6 +360,10 @@ def main():
                     help="replace the corners by the classical grid fit "
                          "(grid_corners.py) where it accepts its own result; the "
                          "rotation stays the one nearest the model's or labelled corners")
+    ap.add_argument("--a1-dark", action="store_true",
+                    help="with --a1-from-pieces: look only at the rotations that put a "
+                         "dark square on a1 (grid_corners.dark_corner_rotations), "
+                         "where the square colours can be told apart")
     ap.add_argument("--a1-from-pieces", type=float, nargs="?", const=0.0, default=None,
                     metavar="PRIOR",
                     help="choose which corner is a1 from the detected pieces "
@@ -431,6 +435,7 @@ def main():
     total_squares = correct_squares = 0
     boards = exact = corner_failures = flip_suspects = unlabelled = 0
     exact_or_flipped = grid_rejected = grid_alone = sides_changed = kings_changed = 0
+    a1_colour_unclear = a1_colour_moved = 0
     confusion = Counter()
 
     for src, gt, gt_kpts, gt_boxes in items:
@@ -519,12 +524,21 @@ def main():
             before = [d.cls for d in detections]
             detections = one_king_a_side(detections, kind_scores_of(detections, every_box))
             kings_changed += any(d.cls != c for d, c in zip(detections, before))
+        turns = None
+        if args.a1_dark and not args.gt_corners:
+            # a1 is a dark square: the square colours leave two of the four
+            # rotations, where they can be told apart.
+            import cv2
+            from grid_corners import dark_corner_rotations
+            turns, _ = dark_corner_rotations(cv2.imread(str(src)), kpts)
+            a1_colour_unclear += turns is None
+            a1_colour_moved += turns is not None and 0 not in turns
         if not model_found:
             # No model opinion on a1 to weigh against the pieces.
-            H = homography(orient_by_pieces(kpts, detections, args.pull, prior=0.0))
+            H = homography(orient_by_pieces(kpts, detections, args.pull, prior=0.0, turns=turns))
         elif args.a1_from_pieces is not None:
             H = homography(orient_by_pieces(kpts, detections, args.pull,
-                                            prior=args.a1_from_pieces))
+                                            prior=args.a1_from_pieces, turns=turns))
         predicted = assign_squares(H, detections, pull=args.pull)
         pred_letters = {sq: FEN_LETTER[cls] for sq, (cls, _) in predicted.items()}
 
@@ -577,6 +591,9 @@ def main():
     low, high = wilson(exact_or_flipped, boards)
     print(f"exact, or exact once turned 180 degrees (one tap in the app): "
           f"{exact_or_flipped / boards:.2%}  ({low:.0%}-{high:.0%})")
+    if args.a1_dark:
+        print(f"a1 dark: square colours unclear on {a1_colour_unclear} photos; "
+              f"the corners as given had a light a1 on {a1_colour_moved}")
     if args.grid_corners:
         print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
         print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")

@@ -380,14 +380,18 @@ def white_side_score(board):
     return score
 
 
-def orient_by_pieces(corners, detections, pull=0.30, prior=0.0):
+def orient_by_pieces(corners, detections, pull=0.30, prior=0.0, turns=None):
     """The corners (a1, a8, h8, h1) turned so that the pieces say which one is
     a1: of the four rotations, the one whose board has the highest
     white_side_score. `prior` is added to the score of the corners as given,
-    i.e. how much to trust the corner model's own choice (0: not at all)."""
+    i.e. how much to trust the corner model's own choice (0: not at all).
+    `turns`, when given, are the only rotations looked at (0: as given, 1: a
+    quarter turn on, ...): the ones the square colours allow."""
     corners = [tuple(c) for c in corners]
     best, best_score = corners, None
     for turn in range(4):
+        if turns is not None and turn not in turns:
+            continue
         turned = corners[turn:] + corners[:turn]
         score = white_side_score(assign_squares(homography(turned), detections, pull))
         if turn == 0:

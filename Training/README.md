@@ -466,6 +466,42 @@ Much less than before, and on two sets they cost:
   boards of the second test set are exact once turned by a quarter (12 by a
   half), and 8 against 16 on Fenit A.
 
+**a1 is a dark square (2026-11-14; in the reference, not yet in the app).**
+Quarter turns are the larger part of what is left on unseen boards, and no
+head start mends them. The square colours do, without any model: on a board
+set up as the rules say a1 is dark, so of the four ways the board can lie
+two are left, half a turn apart, and the pieces choose between those two
+only. `grid_corners.dark_corner_rotations` reads the two rotations from the
+64 cells (it was written to label corners, `derive_corners.py`; where the
+colours do not split cleanly it says nothing and all four stay);
+`chess_pipeline.orient_by_pieces(..., turns=)` takes them;
+`evaluate.py --a1-dark` switches it on. End to end in Python with the pair
+in `Models/` (grid fit, head start 6, one king a side), without -> with.
+Squares right; boards exact; exact or half a turn away:
+
+| | Without | With `--a1-dark` |
+|---|---|---|
+| Fenit board B (100) | 94.16%; 19; 23 | 94.28%; 19; 23 |
+| Fenit A (286) | 97.83%; 229; 245 | 98.14%; 231; 253 |
+| ChessReD test (306) | 99.83%; 297; 299 | the same |
+| Second test set, as a test: `chessq` (50) | 93.44%; 12; 13 | 93.84%; 12; 14 |
+| `ylichess` games (102) | 90.23%; 35; 35 | 90.18%; 35; 35 |
+| `ylichess` layouts (98) | 88.38%; 13; 19 | 90.53%; 22; 32 |
+| `chesscog_real` (29) | 98.60%; 13; 13 | the same |
+| `samryan` (500) | 95.28%; 86; 93 | 96.20%; 94; 102 |
+| `chesscv_games` (840) | 95.99%; 46; 46 | the same |
+
+(`runs/scores/a1_dark_pair.txt`, `heldout2_pair_tone1_canon1*.txt`. These
+are Python figures: they differ a little from the app's, and the chess-cv
+photos are read here without their EXIF turn, which is why so few of them
+are exact; both columns are read the same way.) It was chosen on the three
+development sets, where it loses nothing, and then run once on the second
+test set: better on three parts, the same on two, three squares worse on
+one. The corners as the model gave them had a light a1 on 34 of board B's
+photos, 107 of samryan's and 40 of the Y-LIChess layouts'. A board set up
+with a light square on a1 would be read a quarter turn off by it; none of
+these sets has one. The app-side session has been asked to port it.
+
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
 read as p 8 times, a black pawn on an empty square 6, Q as q 3, K as k 3,

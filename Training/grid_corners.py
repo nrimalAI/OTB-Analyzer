@@ -672,6 +672,44 @@ def find_grid(image_bgr, prior_box=None, return_info=False):
     return (out, conf, info) if return_info else (out, conf)
 
 
+def dark_corner_rotations(image_bgr, ring):
+    """Which rotations of the ring of four corners put a dark square on a1,
+    from the colours of the 64 cells. Returns (rotations, strength): rotations
+    is (0, 2) or (1, 3), where rotation k starts the ring at its corner k;
+    strength in 0..1 is how cleanly the two cell colours split; (None,
+    strength) when they do not (fewer than 40 cells seen, too little
+    contrast, or no clear split).
+
+    a1 is a dark square on a board set up as the rules say, so this leaves
+    two of the four ways a board can lie, half a turn apart, whatever the
+    pieces or a model say. Used to label corners (derive_corners.py) and, in
+    the pipeline, to keep the pieces from turning a board by a quarter
+    (chess_pipeline.orient_by_pieces, turns=)."""
+    from chess_pipeline import homography
+    s = min(1.0, 1000 / max(image_bgr.shape[:2]))
+    small = cv2.resize(image_bgr, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else image_bgr
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    H = homography(np.asarray(ring) * s)
+    v = _cell_values(gray, H, 0, 0, 8, 8)            # [rank, file, 4 patches]
+    cell = np.nanmedian(v, axis=2)
+    ok = ~np.isnan(cell)
+    if ok.sum() < 40:
+        return None, 0.0
+    gi, gj = np.meshgrid(np.arange(8), np.arange(8))
+    even = (gi + gj) % 2 == 0                        # a1's colour for rotation 0
+    lo, hi = np.percentile(cell[ok], [25, 75])
+    if hi - lo < 15:
+        return None, 0.0
+    light = cell > (lo + hi) / 2
+    share_even, share_odd = light[ok & even].mean(), light[ok & ~even].mean()
+    strength = abs(share_even - share_odd)
+    if strength < 0.5:
+        return None, float(strength)
+    # rotation 0 is valid when the cells of a1's colour are the dark ones;
+    # a quarter turn swaps the two colours
+    return ((0, 2) if share_even < share_odd else (1, 3)), float(strength)
+
+
 # --------------------------------------------------------------- evaluation
 
 def corner_error(pred, truth):
