@@ -242,9 +242,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     /// the colours first (the whole board's, then single pieces'), since
     /// the kings are counted by side and which corner is a1 is read from
     /// sides and kinds; then one king a side; then a1, among the ways round
-    /// the colours of the squares allow; then the squares. Returns the corners as finally turned and the board; nil
-    /// when the corners are not a board. `whole`: the photo at the grid
-    /// fit's working size, when the caller has it. Internal for testing.
+    /// the colours of the squares allow; then the squares. Returns the
+    /// corners as finally turned and the board; nil when the corners are
+    /// not a board. `whole`: the photo at the grid fit's working size, when
+    /// the caller has it. Internal for testing.
     static func place(
         _ found: [PieceDetection],
         corners located: [CGPoint],

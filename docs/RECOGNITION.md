@@ -377,8 +377,8 @@ before.
   in for it is `app_check`, whose readings change on exactly the photos
   whose window `--window` reports as moved.
 - `Training/swift_reference.py odd-cases` writes `Fixtures/odd_cases.json`:
-  what `odd_sides` and `patch_hidden` make of 100 sets of detections with
-  their colours and of a drawn picture. Forty are built by hand, each
+  what `odd_sides` and `patch_hidden` make of 103 sets of detections with
+  their colours and of a drawn picture. Forty-three are built by hand, each
   condition of the rule from both sides: a light piece called Black at
   L* 53.3 and 53.4, where "twice as near" begins; the two sides 8.9 and
   9.1 apart with the spread on its floor, 14.9 and 15.1 with a spread of
@@ -387,11 +387,18 @@ before.
   0.19 and 0.21 of the patch behind a piece in front, a box in front
   whose foot is higher and one whose foot is level; a piece that would
   make a side but stands behind another; a box of no width; other values
-  for each of the four numbers; and that a dark piece called White stays
-  White. Sixty are random boards whose boxes reach over their neighbours
-  (106 pieces behind another in all). The script refuses a case within a
-  millionth of a tie, because the two do not share the last bits of a
-  distance. `OddSidesTests` replays them: the classes and which pieces
+  for each of the four numbers; that a dark piece called White stays
+  White; that a piece is held against the other pieces called Black and
+  not against all of them, and against them as the model called them
+  whatever the rule makes of them; and that a side's colour is the median
+  of each number and not the mean. Sixty are random boards whose boxes
+  reach over their neighbours (97 pieces behind another on those). The
+  script refuses a random board within a millionth of a tie, because the
+  two do not share the last bits of a distance, and one with a box that
+  does not come back the same from a corner and a size, which is how the
+  Swift holds a box: two feet exactly level in the Python must be level in
+  the Swift (the hand-made case of a level foot is exact by construction;
+  in the app both read the same boxes). `OddSidesTests` replays them: the classes and which pieces
   are behind another must be the Python's, and kind, confidence, box and
   scores untouched. The drawn picture is `colour_pieces.png` with three
   of its brown pieces called Black, its colours read from the PNG. Two
@@ -399,9 +406,14 @@ before.
   two cream pawns a model calls Black are White's with the step on and
   not with it off, and the sides are mended before the kings are counted
   (a cream piece called a black king: mended first, White's lesser king
-  becomes a queen; counted first, Black's real king would). One builds
-  the recognizer as the app does and with the step asked for, and
-  requires the first to leave those pawns and the second to mend them.
+  becomes a queen; counted first, Black's real king would). Another
+  pins the order of the two colour steps (the whole board's first), and
+  one that what `app_check --colours` is given is what the step does.
+  One builds the recognizer as the app does and with the step asked for,
+  and requires the first to leave those pawns and the second to mend
+  them. A colour that is not a number changes nothing, as in the Python;
+  a box whose corners are the wrong way round is the one input on which
+  the two differ, and no model gives one.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -681,8 +693,8 @@ exact or half a turn away.
   from the Swift's, and the same answer on which pieces stand behind
   another (955 of them).
 - Time, as processor seconds over a set, on against off: board B 21.3
-  against 18.0, Fenit A 95.9 against 92.2, ChessReD test 67.7 against
-  72.7. The step reads the middle of every piece's box once; single runs
+  against 18.0, Fenit A 95.9 against 92.2, ChessReD test 72.7 against
+  67.7. The step reads the middle of every piece's box once; single runs
   on a Mac mini that was training.
 - A piece whose side the step changes keeps the model's confidence, as
   in the reference, so the app marks it no more than before.

@@ -75,9 +75,11 @@ struct OddSidesTests {
 
     /// The indices of the pieces a case changes.
     private static func changed(_ name: String) throws -> [Int] {
-        let item = try #require(try recorded.get().cases.first { $0.name == name }, "no case \(name)")
+        let item = try #require(
+            try recorded.get().cases.first { $0.name == name }, "no case \(name)")
         let before = try detections(item)
-        return try apply(item).enumerated().filter { $0.element.color != before[$0.offset].color }.map(\.offset)
+        return try apply(item).enumerated()
+            .filter { $0.element.color != before[$0.offset].color }.map(\.offset)
     }
 
     // MARK: - Against the Python
@@ -135,6 +137,11 @@ struct OddSidesTests {
             ("1 light pieces called Black", [12]),
             ("3 light pieces called Black", [12, 13, 14]),
             ("a dark piece called White", []),
+            // against the other pieces called Black, as the model called them
+            ("two called Black, one of them light", [3]),
+            ("three light pieces of four called Black", [7, 8]),
+            // the median of each number, not the mean
+            ("one piece called White far off in a*", []),
             // twice as near
             ("called Black at L* 53.3", []), ("called Black at L* 53.4", [12]),
             ("called Black at L* 52, nearer 1.5", [12]), ("called Black at L* 52, nearer 3.0", []),
@@ -211,13 +218,16 @@ struct OddSidesTests {
         // One colour too few.
         #expect(OddSides.apply(before, colours: Array(colours.dropLast())).map(PieceSides.label)
             == before.map(PieceSides.label))
-        // A colour that is not a number: of the odd piece, and of a piece
-        // that makes White's colour.
-        for index in [12, 0, 1, 2] {
-            var broken = colours
-            broken[index] = PieceSides.Lab(l: .nan, a: 0, b: 0)
-            let after = OddSides.apply(before, colours: broken)
-            #expect(after[index].color == before[index].color, "colour \(index)")
+        // A colour that is not a number, of any piece that counts and in
+        // any of its three numbers: nothing changes, as in the Python.
+        for index in before.indices {
+            for part in 0..<3 {
+                var broken = colours
+                broken[index] = PieceSides.Lab(
+                    l: part == 0 ? .nan : 50, a: part == 1 ? .nan : 0, b: part == 2 ? .nan : 0)
+                #expect(OddSides.apply(before, colours: broken).map(PieceSides.label)
+                    == before.map(PieceSides.label), "colour \(index), part \(part)")
+            }
         }
         var all = colours
         for index in all.indices {
@@ -251,7 +261,8 @@ struct OddSidesTests {
     ) throws -> String {
         let placed = try #require(CoreMLBoardRecognizer.place(
             found, corners: rightWayUp, cornersFromModel: true, in: image,
-            sidesFromColour: sidesFromColour, oddSides: oddSides, oneKing: oneKing, a1Prior: nil,  // a1 as given
+            sidesFromColour: sidesFromColour, oddSides: oddSides, oneKing: oneKing,
+            a1Prior: nil,  // a1 as given
             a1Dark: false, pull: SquareAssignment.defaultPull))
         return FENBuilder.placement(placed.pieces.mapValues(\.piece))
     }
@@ -268,6 +279,69 @@ struct OddSidesTests {
             == "8/pppppppp/8/8/8/8/PPPPPPPP/8")
         #expect(try Self.placement(found, in: image, oddSides: false, sidesFromColour: true)
             == "8/pppppppp/8/8/8/8/PPpPPpPP/8")
+    }
+
+    /// The whole board's colours are asked before the single pieces', as in
+    /// `evaluate.py`. Three cream pawns called Black and a dark one called
+    /// White are four of sixteen against the colours, over that step's 15%:
+    /// it puts all four right. Single pieces first, the three cream ones
+    /// are mended, one of sixteen is left against the colours, and the dark
+    /// pawn stays White.
+    @Test func testTheWholeBoardsColoursComeBeforeTheSinglePieces() throws {
+        let (image, boxes) = try PieceSidesTests.drawnPawns()
+        let found = boxes.enumerated().map { index, box in
+            PieceDetection(
+                piece: .pawn,
+                color: (index < 8 && ![2, 5, 6].contains(index)) || index == 8 ? .white : .black,
+                confidence: 0.9, boundingBox: box)
+        }
+        #expect(try Self.placement(found, in: image, oddSides: false) == "8/Pppppppp/8/8/8/8/PPpPPppP/8")
+        #expect(try Self.placement(found, in: image, oddSides: true, sidesFromColour: true)
+            == "8/pppppppp/8/8/8/8/PPPPPPPP/8")
+        #expect(try Self.placement(found, in: image, oddSides: false, sidesFromColour: true)
+            == "8/pppppppp/8/8/8/8/PPPPPPPP/8")
+        // By itself the step mends the three and leaves the dark pawn: one
+        // way only.
+        #expect(try Self.placement(found, in: image, oddSides: true) == "8/Pppppppp/8/8/8/8/PPPPPPPP/8")
+    }
+
+    /// What `app_check --colours` is given for this step
+    /// (`PieceSides.diagnose`): which pieces stand behind another, and the
+    /// class the step gives each piece from the model's own answers, not
+    /// from what the other colour step made of them.
+    @Test func testTheDiagnosisIsWhatTheStepDoes() throws {
+        let picture = try Self.recorded.get().picture
+        let file = try #require(picture.file)
+        let source = try #require(
+            CGImageSourceCreateWithURL(Self.fixtures.appending(path: file) as CFURL, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        // The drawn pieces as recorded (three brown ones called Black), and
+        // a box standing in front of the first of them.
+        var recorded = try Self.detections(picture)
+        let first = recorded[0].boundingBox
+        recorded.append(PieceDetection(
+            piece: .pawn, color: .black, confidence: 0.5,
+            boundingBox: CGRect(x: first.minX, y: first.minY + 10, width: first.width, height: first.height)))
+        // The same with every piece called Black: the whole board's colours
+        // then change many sides and the single pieces' none.
+        let allBlack = recorded.map { $0.taken(color: .black) }
+
+        for (name, found) in [("as recorded", recorded), ("all called Black", allBlack)] {
+            let diagnosis = PieceSides.diagnose(found, in: image)
+            let colours = PieceSides.colours(of: found, in: image)
+            #expect(diagnosis.map(\.hidden) == found.indices.map { OddSides.patchHidden(found, $0) },
+                    "\(name)")
+            #expect(diagnosis[0].hidden && diagnosis.filter(\.hidden).count == 1, "\(name)")
+            #expect(diagnosis.map(\.oddLabel)
+                == OddSides.apply(found, colours: colours).map(PieceSides.label), "\(name)")
+            #expect(diagnosis.map(\.finalLabel)
+                == PieceSides.fromColour(found, colours: colours).map(PieceSides.label), "\(name)")
+        }
+        let mended = PieceSides.diagnose(recorded, in: image).filter { $0.oddLabel != $0.label }
+        #expect(mended.count >= 2 && mended.allSatisfy { $0.oddLabel.hasPrefix("white_") })
+        let none = PieceSides.diagnose(allBlack, in: image)
+        #expect(none.allSatisfy { $0.oddLabel == $0.label })
+        #expect(none.contains { $0.finalLabel != $0.label })
     }
 
     /// The sides are mended before the kings are counted, since the kings

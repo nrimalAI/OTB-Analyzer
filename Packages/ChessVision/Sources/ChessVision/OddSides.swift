@@ -71,6 +71,11 @@ enum OddSides {
             }
         }
         guard min(white.count, black.count) >= 2 else { return detections }
+        // (A colour that is not a number: `np.median` of a side is then not
+        // a number either and no comparison in the Python holds. No photo
+        // gives one.)
+        guard !point.values.contains(where: { $0.x.isNaN || $0.y.isNaN || $0.z.isNaN })
+        else { return detections }
         let centreWhite = median(white.map { point[$0]! })
         let centreBlack = median(black.map { point[$0]! })
         // White must be the lighter side.
@@ -106,6 +111,9 @@ enum OddSides {
         let px1 = x1 + patch.left * w, py1 = y1 + patch.top * h
         let px2 = x1 + patch.right * w, py2 = y1 + patch.bottom * h
         let area = (px2 - px1) * (py2 - py1)
+        // (A box of no width or height. One whose corners are the wrong way
+        // round has a negative area in the Python and counts as hidden
+        // there; a `CGRect` has none, and no model gives one.)
         if area <= 0 {
             return true
         }

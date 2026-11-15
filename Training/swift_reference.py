@@ -659,12 +659,23 @@ def odd_cases(seed):
     kinds = ["king", "queen", "rook", "bishop", "knight", "pawn"]
     cases, tally = [], {"changed": 0, "pieces changed": 0, "hidden": 0}
 
+    class OnTheEdge(Exception):
+        """A case that hangs on the last bits of the arithmetic."""
+
+    def far(condition):
+        if not condition:
+            raise OnTheEdge
+
     def margins(detections, colours, chroma, nearer, apart, cover):
         # No case may hang on the last bits of the arithmetic: every
         # comparison the rule makes is this far from a tie, or exactly on it
-        # where the case is there for the tie.
+        # where the case is there for the tie. And every box must come back
+        # the same from a corner and a size, which is how the Swift holds it
+        # (x1 + (x2 - x1) is not always x2): two feet exactly level here
+        # must be level there.
         for k, det in enumerate(detections):
             x1, y1, x2, y2 = det.bbox
+            far(x1 + (x2 - x1) == x2 and y1 + (y2 - y1) == y2)
             w, h = x2 - x1, y2 - y1
             l, r, t, b = COLOUR_PATCH
             px1, py1, px2, py2 = x1 + l * w, y1 + t * h, x1 + r * w, y1 + b * h
@@ -672,11 +683,11 @@ def odd_cases(seed):
             for j, other in enumerate(detections):
                 if j == k or area <= 0:
                     continue
-                assert other.bbox[3] == y2 or abs(other.bbox[3] - y2) > 1e-6
+                far(other.bbox[3] == y2 or abs(other.bbox[3] - y2) > 1e-6)
                 iw = min(px2, other.bbox[2]) - max(px1, other.bbox[0])
                 ih = min(py2, other.bbox[3]) - max(py1, other.bbox[1])
                 if iw > 0 and ih > 0:
-                    assert abs(iw * ih - cover * area) > 1e-6 * area
+                    far(abs(iw * ih - cover * area) > 1e-6 * area)
         idx = [k for k, c in enumerate(colours) if c is not None and not patch_hidden(detections, k, cover)]
         point = {k: np.array([colours[k][0], chroma * colours[k][1], chroma * colours[k][2]]) for k in idx}
         side = {k: detections[k].cls.split("_", 1)[0] for k in idx}
@@ -685,19 +696,19 @@ def odd_cases(seed):
             return
         centre = {s: np.median([point[k] for k in groups[s]], axis=0) for s in groups}
         gap = centre["white"][0] - centre["black"][0]
-        assert gap == 0 or abs(gap) > 1e-6
+        far(gap == 0 or abs(gap) > 1e-6)
         if gap <= 0:
             return
         spread = float(np.median([np.linalg.norm(point[k] - centre[side[k]]) for k in idx]))
-        assert abs(spread - SIDE_SPREAD_FLOOR) > 1e-6
+        far(abs(spread - SIDE_SPREAD_FLOOR) > 1e-6)
         spread = max(SIDE_SPREAD_FLOOR, spread)
         apart_by = np.linalg.norm(centre["white"] - centre["black"]) - apart * spread
-        assert abs(apart_by) > 1e-6
+        far(abs(apart_by) > 1e-6)
         if apart_by < 0:
             return
         for k in groups["black"]:
             own = np.median([point[j] for j in groups["black"] if j != k], axis=0)
-            assert abs(nearer * np.linalg.norm(point[k] - centre["white"]) - np.linalg.norm(point[k] - own)) > 1e-6
+            far(abs(nearer * np.linalg.norm(point[k] - centre["white"]) - np.linalg.norm(point[k] - own)) > 1e-6)
 
     def record(name, detections, colours, chroma=CHROMA_WEIGHT, nearer=SIDE_NEARER, apart=SIDE_APART,
                cover=SIDE_HIDDEN):
@@ -736,6 +747,24 @@ def odd_cases(seed):
         said = ["white"] * 6 + ["black"] * 6 + ["black"] * odd
         changed = record(f"{odd} light pieces called Black", *row(said, whites + blacks + [(69.0, 0.0, 0.0)] * odd))
         assert changed == list(range(12, 12 + odd))
+    # A piece is held against the OTHER pieces called Black, not against all
+    # of them: of two, the one at L* 56 against the one at 20 (with itself
+    # counted, Black's colour would be 38 and it would stay).
+    assert record("two called Black, one of them light", *row(
+        ["white"] * 2 + ["black"] * 2, [(70.0, 0.0, 0.0)] * 2 + [(20.0, 0.0, 0.0), (56.0, 0.0, 0.0)])) == [3]
+    # ... and against the others as the model called them, whatever the
+    # rule makes of them: of four called Black, at 10, 93, 93 and 75, the
+    # two at 93 are White's; the one at 75 has 93 for the others' colour
+    # and stays (with the two already taken away it would not).
+    assert record("three light pieces of four called Black", *row(
+        ["white"] * 6 + ["black"] * 4,
+        [(95.0, 0.0, 0.0)] * 6 + [(10.0, 0.0, 0.0), (93.0, 0.0, 0.0), (93.0, 0.0, 0.0), (75.0, 0.0, 0.0)])) == [7, 8]
+    # A side's colour is the median of each number, not the mean: one piece
+    # called White far off in a* does not pull White's colour towards a
+    # piece called Black that is as far off.
+    assert record("one piece called White far off in a*", *row(
+        ["white"] * 5 + ["black"] * 7,
+        [(70.0, 0.0, 0.0)] * 4 + [(70.0, 6.0, 0.0)] + [(40.0, 0.0, 0.0)] * 6 + [(70.0, 5.0, 0.0)])) == []
     # One way only: a dark piece called White stays White.
     assert record("a dark piece called White", *row(["white"] * 7 + ["black"] * 6,
                                                    whites + [(21.0, 0.0, 0.0)] + blacks)) == []
@@ -813,7 +842,7 @@ def odd_cases(seed):
     # The same half covered by a box whose foot is higher, and one whose
     # foot is level: neither stands in front.
     assert record("half the patch behind a box whose foot is higher", *scene((130.0, 120.0, 200.0, 215.0))) == [0]
-    assert record("half the patch behind a box whose foot is level", *scene((130.0, 150.0, 200.0, 220.0))) == [0]
+    assert record("half the patch behind a box whose foot is level", *scene((130.0, 100.0, 200.0, 220.0))) == [0]
     for cover, moves in ((0.4, True), (0.3, False)):
         assert record(f"a third of the patch covered, cover {cover}",
                       *scene((142.0 - 24.0 / 3, 120.0, 200.0, 260.0)), cover=cover) == ([0] if moves else [])
@@ -836,7 +865,7 @@ def odd_cases(seed):
     # pieces called Black, some dark ones called White, some in shadow,
     # some without a colour.
     made = len(cases)
-    fired = 0
+    fired = on_the_edge = 0
     while len(cases) < made + 60:
         n = rng.randint(4, 24)
         places = rng.sample([(i, j) for i in range(8) for j in range(8)], n)
@@ -860,8 +889,8 @@ def odd_cases(seed):
             colours.append(None if rng.random() < 0.05 else colour)
         try:
             fired += bool(record(f"random {len(cases) - made}", detections, colours))
-        except AssertionError:
-            continue                              # a case on the edge of a comparison: another one
+        except OnTheEdge:
+            on_the_edge += 1                      # another one
     assert 15 <= fired <= 45, fired               # the random boards show both outcomes
 
     # 8. The drawn picture of colour-cases, with three of its brown pieces
@@ -883,7 +912,9 @@ def odd_cases(seed):
     path = FIXTURES / "odd_cases.json"
     path.write_text(json.dumps(out, separators=(",", ":")) + "\n")
     print(f"{len(cases)} sets of detections and the drawn picture: a piece changed in {tally['changed']}, "
-          f"{tally['pieces changed']} pieces in all; {tally['hidden']} pieces behind another")
+          f"{tally['pieces changed']} pieces in all; {tally['hidden']} pieces behind another "
+          f"({sum(sum(c['hidden']) for c in cases[made:])} of them on the random boards); "
+          f"{on_the_edge} random boards refused for hanging on the last bits")
     print(f"written to {path} ({path.stat().st_size // 1024} kB)")
 
 
