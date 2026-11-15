@@ -435,9 +435,16 @@ Much less than before, and on two sets they cost:
   The head start given to the model's own a1 (`--a1-prior`, 6 in the app)
   at 6 / 12 / 20 / 40 / pieces off: Fenit A 231 / 243 / 251 / 255 / 255
   boards; board B 94.36 / 94.36 / 93.83 / 92.20 / 76.50% of squares;
-  ChessReD test 295 at every value. So 12 would cost nothing on these three
-  sets and gain 12 boards on Fenit A. Not changed here. No value mends the
-  two G033 endgames: they score better turned at any head start.
+  ChessReD test 295 at every value. So 12 costs nothing on these three
+  sets and gains 12 boards on Fenit A, **and it stays at 6**: tried on the
+  second test set as a test (app-side session, 2026-11-14), 12 is worse on
+  25 photos and better on 5 (95.86% -> 95.71% of squares; Y-LIChess 2
+  against 14, samryan 1 against 10). On a board the corner model has not
+  seen its own a1 is wrong often enough that the pieces must be able to
+  overrule it; Fenit A is a board it was trained on, and board B did not
+  show it. The lever, if there is one, is telling a board the corner model
+  knows from one it does not, not the head start. No value mends the two
+  G033 endgames: they score better turned at any head start.
 - *The grid fit.* It mends board B (+131 squares on 11 photos, 2 lost) and
   changes one Fenit A photo for the worse. On the second test set it
   changes nothing on three parts, mends ChessQ, and on Y-LIChess 54 photos
