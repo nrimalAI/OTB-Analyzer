@@ -37,8 +37,8 @@ scores the model gave each of them for every kind: boards with no, one, two
 and more kings, on one side or both, scores on the floor and just under it,
 equal scores, kinds without a score; and of each of them with
 queen_for_king (a side without a king and without a piece the model gave a
-"king" score takes its queen: one queen, several, equally sure ones, none). Written to Fixtures/king_cases.json and
-replayed by OneKingASideTests. These cases are the whole contract: the Python
+"king" score takes its queen: one queen, several, equally sure ones, none).
+Written to Fixtures/king_cases.json and replayed by OneKingASideTests. These cases are the whole contract: the Python
 gets its scores from overlapping boxes (evaluate.kind_scores_of) and the app
 from the class scores of the box itself, so the two cannot be compared on
 photos piece for piece.
@@ -1067,7 +1067,8 @@ def king_cases(seed):
     # No queen: nothing, as without the switch.
     assert crowned([p("white_rook", confidence=0.2), p("white_pawn", king=0.019)]) == ["white_rook", "white_pawn"]
     # Neither side has a king: each takes its own queen, and only its own.
-    assert crowned([p("white_queen"), p("black_queen"), p("black_queen", confidence=0.26), p("white_rook")]) \
+    assert crowned([p("white_queen", confidence=0.9), p("black_queen", confidence=0.9),
+                    p("black_queen", confidence=0.26), p("white_rook")]) \
         == ["white_king", "black_queen", "black_king", "white_rook"]
     assert crowned([p("white_rook"), p("black_queen")]) == ["white_rook", "black_king"]
     # Two kings, both on one side: left alone, the other side's queen too.
@@ -1081,7 +1082,7 @@ def king_cases(seed):
     # A side that has its king is left alone whatever its queens.
     assert crowned([p("white_king", king=0.9), p("white_queen")]) == ["white_king", "white_queen"]
     # Random boards with no king or one, queens on them, and "king" scores
-    # under the floor, on it, or none.
+    # under the floor or none for nine pieces in ten.
     for n in range(40):
         pieces = []
         for k in range(rng.choice([2, 4, 8, 16, 24])):

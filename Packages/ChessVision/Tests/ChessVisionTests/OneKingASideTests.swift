@@ -238,17 +238,7 @@ struct OneKingASideTests {
     /// score.
     @Test func testTheRecognizerCrownsTheQueenOnlyWithOneKingASide() throws {
         let image = try PieceSidesTests.drawnPawns().image
-        let found = [
-            PieceDetection(
-                piece: .king, color: .white, confidence: 0.9, boundingBox: Self.box(file: 4, rank: 1),
-                kindScores: [.king: 0.9]),
-            PieceDetection(
-                piece: .queen, color: .black, confidence: 0.9, boundingBox: Self.box(file: 3, rank: 8),
-                kindScores: [.queen: 0.9]),
-            PieceDetection(
-                piece: .rook, color: .black, confidence: 0.9, boundingBox: Self.box(file: 0, rank: 8),
-                kindScores: [.rook: 0.9]),
-        ]
+        let found = Self.kingAndQueen()
         func placement(oneKing: Bool, queenForKing: Bool) throws -> String {
             let placed = try #require(CoreMLBoardRecognizer.place(
                 found, corners: Self.rightWayUp, cornersFromModel: true, in: image,

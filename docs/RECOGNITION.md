@@ -325,16 +325,20 @@ before.
   just under it; several queens, where the confidence decides and not the
   score for "queen"; equally sure queens; no queen; both sides without a
   king; two and three kings on the other side; a side that has its king)
-  and 40 random boards with queens and no or one king. `OneKingASideTests` replays them and requires the same classes, and
-  that side, confidence, box and scores are untouched. These cases are the
+  and 40 random boards with queens and no or one king. `OneKingASideTests`
+  replays them and requires the same classes, and that side, confidence,
+  box and scores are untouched. These cases are the
   whole contract for this step: on photos the Python and the app are not
   given the same scores (see "The scores of a piece"), so they cannot be
   compared piece for piece, and the board scores differ a little. Two more
   tests place drawn pieces through the recognizer's own code and fail if the
   kings are counted before the sides from the colours or after a1; one
   more, that the queen is crowned only with one king a side switched on;
-  and one builds the recognizer as the app does and with the queen for a
-  king asked for, and requires the first to leave the queen.
+  and one builds the recognizer with every default left alone and with
+  the queen for a king asked for, and requires the first to leave the
+  queen. (No test builds the recognizer through `init(bundle:)`, which
+  is what the app calls and which passes the defaults on; that holds for
+  every switch.)
 - `Training/swift_reference.py dark-cases` writes `Fixtures/dark_cases.json`:
   what `dark_corner_rotations` makes of 20 chequered pictures that both
   sides draw from a few numbers (which corner is dark, the ring of corners
@@ -736,30 +740,33 @@ exact or half a turn away.
 | Fenit A (286) | 98.14%; 234; 256 | 98.12%; 230; 251 | 98.14%; 234; 256 | 98.12%; 230; 251 |
 | ChessReD test (306) | 99.80%; 295; 297 | 99.80%; 295; 297 | 99.80%; 295; 297 | 99.80%; 295; 297 |
 
-- **Through the app it does little on board B and costs four boards of
-  Fenit A.** The reference counts 36 -> 45 boards on board B in Python on
-  top of the side of single pieces; the app counts 31 -> 32.
-- **Why so little: the branch is seldom reached in the app.** It acts
-  only where a board has fewer than two kings and a side has no piece
-  with a score of 0.02 for "king". The app has the model's own scores
-  for each box, the Python makes them up from boxes that overlap ("The
-  scores of a piece"), and with the app's scores one king a side has
-  usually found some piece to crown already. On board B, with the switch
-  off, 18 kings are read as queens, and only 13 readings have fewer than
-  two kings; on the others a king was given to another piece (25 pieces
-  that are neither king nor queen are read as kings, and 8 queens). With
-  the switch on, 4 readings have fewer than two kings, 17 kings are still
-  read as queens, and 12 queens and 29 other pieces are read as kings.
-  (Counted on the readings that are not turned by half.)
-- **Board B, by itself**: 10 photos read differently. On two the king is
-  mended. On two the real queen is crowned (Black's king was not read as
-  one). On six a piece that was wrong stays wrong: what the model read as
-  a queen and the rule makes a king is a rook (twice), a pawn, the other
-  side's queen (twice), or stands on an empty square. On
-  top of the side of single pieces: 9 photos, two with more squares
-  right, four with fewer, one of those four an endgame
-  (`8-6K1-4k3-5p1P-8-6P1-8-8.jpg`) whose king is mended and which is then
-  read half a turn round, 63 squares -> 54, all 64 once turned.
+- **Through the app it does little on board B and loses boards of Fenit
+  A** (four that were fully right, and one that was right once turned).
+  The reference counts 36 -> 45 boards on board B in Python on top of the
+  side of single pieces; the app counts 31 -> 32.
+- **Why so little: where it acts, the queen it crowns is seldom the
+  king, and half the kings read as queens are out of its reach.** On
+  board B, with the switch off and each reading taken the way round that
+  fits its position better: 22 kings are read as queens (17 black kings
+  as black queens, 3 white kings as white queens, 2 white kings as black
+  queens). 11 of them are in readings with fewer than two kings, where
+  the switch can act (13 readings have fewer than two kings; 4 with the
+  switch on). The other 11 are in readings that have two kings or more,
+  which the rule leaves alone: on 8 of those the reading is the same with
+  one king a side switched off, so the model itself read another piece
+  as a king, and on 3 one king a side had crowned another piece. With the
+  switch on, 19 kings are still read as queens.
+- **Board B, by itself**: 10 photos read differently. On three the king
+  is mended (one of them a reading that is half a turn round, so its
+  squares do not show it: 56 as read before and after). On two the real
+  queen is crowned (Black's king was not read as one). On five what the
+  model read as this side's queen, and the rule makes a king, is no queen
+  of that side: a rook (twice), a pawn, the other side's queen (twice).
+  So the least sure queen was the king on 3 photos of 10. On top of the
+  side of single pieces: 9 photos, two with more squares right, four with
+  fewer, one of those four an endgame (`8-6K1-4k3-5p1P-8-6P1-8-8.jpg`)
+  whose king is mended and which is then read half a turn round, 63
+  squares -> 54, all 64 once turned.
 - **Fenit A**: 13 of its 286 positions are set up without two kings. Five
   of them read differently and all five lose: on four, fully right
   before, the black queen is crowned; the fifth, a queen and a knight
