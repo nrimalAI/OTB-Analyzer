@@ -656,7 +656,8 @@ def main():
                          "(at most what the low side views leave: 0.8 without --low-views)")
     ap.add_argument("--low-views", type=float, default=None, metavar="SHARE",
                     help="share of pictures taken from 12 to 32 degrees above the board "
-                         "(without it: a fifth, from 22 to 40 degrees)")
+                         "(without it: a fifth, from 22 to 40 degrees; with it "
+                         "none between 32 and 40)")
     args = ap.parse_args(argv)
     global PALETTE, HIGH_FROM, LOW
     if args.low_views is not None:
@@ -717,7 +718,7 @@ def main():
         with open(out / "positions.jsonl", "a") as f:
             f.write(json.dumps(dict(stem=stem, placement=placement, corners=corners,
                                     corners_inside=inside, size=size, palette=PALETTE,
-                                    from_above=args.from_above, low_views=LOW[0],
+                                    from_above=args.from_above, low_views=args.low_views,
                                     **view)) + "\n")
         # Last, because this file is what marks an image as done (see the skip above).
         (out / "pieces" / "labels" / f"{stem}.txt").write_text(

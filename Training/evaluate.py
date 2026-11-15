@@ -391,6 +391,9 @@ def main():
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
+    if args.a1_dark and (args.gt_corners or args.a1_from_pieces is None):
+        ap.error("--a1-dark chooses among the rotations the pieces are asked about: "
+                 "it needs --a1-from-pieces and has nothing to do with --gt-corners")
 
     if args.dump_list:
         if args.positions:
@@ -525,7 +528,7 @@ def main():
             detections = one_king_a_side(detections, kind_scores_of(detections, every_box))
             kings_changed += any(d.cls != c for d, c in zip(detections, before))
         turns = None
-        if args.a1_dark and not args.gt_corners:
+        if args.a1_dark:
             # a1 is a dark square: the square colours leave two of the four
             # rotations, where they can be told apart.
             import cv2
