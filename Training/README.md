@@ -617,7 +617,8 @@ on board B windows moved on purpose come back on 68 / 80 / 88 of 95 at
 development sets.
 
 **The side of single pieces (2026-11-15; in the reference, `chess_pipeline.odd_sides`
-and `evaluate.py --odd-sides`; not in the app yet, off by default).** Through
+and `evaluate.py --odd-sides`; in the app since pull request #28, off by
+default there too until it is measured through `app_check`).** Through
 the app the pair in `Models/` reads 30 of board B's 100 photos with one
 square wrong and 16 with two, and of those 62 squares 28 are a white piece
 read as black (20 of them pawns). The model is right about most pieces of
@@ -664,7 +665,7 @@ The two-way rule, run there first, changed 71 pieces for 14 squares more
 and one board fewer; that it was no better than a coin there is what sent
 me to the training photos, where the shadow showed. These are Python
 figures (with one box a spot samryan and the chess-cv games read lower here
-than through the app): the app's are the ones that count, once it is ported.
+than through the app): the app's are the ones that count.
 
 **A side without a king takes its queen (2026-11-15; in the reference,
 `one_king_a_side(..., queen_for_king=True)` and `evaluate.py
