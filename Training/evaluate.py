@@ -356,6 +356,9 @@ def main():
                     help="decide White and Black from the colours of the detected "
                          "pieces where the model's answer does not fit them "
                          "(chess_pipeline.sides_from_colour)")
+    ap.add_argument("--queen-for-king", action="store_true",
+                    help="with --one-king: a side left without a king takes its queen "
+                         "for one (one_king_a_side(..., queen_for_king=True))")
     ap.add_argument("--odd-sides", action="store_true",
                     help="make White the single pieces called Black whose colour is "
                          "plainly the White side's in this photo (chess_pipeline.odd_sides)")
@@ -563,7 +566,8 @@ def main():
             odd_boards += any(d.cls != c for d, c in zip(detections, before))
         if args.one_king and not args.gt_boxes:
             before = [d.cls for d in detections]
-            detections = one_king_a_side(detections, kind_scores_of(detections, every_box))
+            detections = one_king_a_side(detections, kind_scores_of(detections, every_box),
+                                         queen_for_king=args.queen_for_king)
             kings_changed += any(d.cls != c for d, c in zip(detections, before))
         turns = None
         if args.a1_dark:
