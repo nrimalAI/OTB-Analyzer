@@ -35,7 +35,9 @@ next to the JSON as colour_pieces.png). Written to Fixtures/colour_cases.json.
 king-cases: what chess_pipeline.one_king_a_side makes of detections and the
 scores the model gave each of them for every kind: boards with no, one, two
 and more kings, on one side or both, scores on the floor and just under it,
-equal scores, kinds without a score. Written to Fixtures/king_cases.json and
+equal scores, kinds without a score; and of each of them with
+queen_for_king (a side without a king and without a piece the model gave a
+"king" score takes its queen: one queen, several, equally sure ones, none). Written to Fixtures/king_cases.json and
 replayed by OneKingASideTests. These cases are the whole contract: the Python
 gets its scores from overlapping boxes (evaluate.kind_scores_of) and the app
 from the class scores of the box itself, so the two cannot be compared on
@@ -922,10 +924,13 @@ def king_cases(seed):
     rng = random.Random(seed)
     cases = []
     tally = {"two kings, left alone": 0, "a king given": 0, "fewer than two kings, none given": 0,
-             "kings taken away": 0, "other": 0}
+             "kings taken away": 0, "other": 0, "a queen crowned": 0}
 
-    def piece(side, kind, scores, k):
-        return Detection(f"{side}_{kind}", rng.randrange(250, 1000) / 1000,
+    def piece(side, kind, scores, k, confidence=None):
+        # (a number is always drawn, so that the boards before a new case
+        # stay what they were)
+        drawn = rng.randrange(250, 1000) / 1000
+        return Detection(f"{side}_{kind}", drawn if confidence is None else confidence,
                          (60.0 * k, 40.0, 60.0 * k + 50, 150.0)), scores
 
     def record(pieces):
@@ -949,10 +954,24 @@ def king_cases(seed):
             tally["kings taken away"] += 1
         else:
             tally["other"] += 1
+        # The same with a side without a king taking its queen: where it
+        # differs, queens became kings and nothing else, on a board with
+        # fewer than two kings.
+        crowned = one_king_a_side(detections, scores, queen_for_king=True)
+        differs = [(a.cls, b.cls) for a, b in zip(result, crowned) if a.cls != b.cls]
+        assert all(a.endswith("_queen") and b == a.replace("_queen", "_king") for a, b in differs)
+        assert not differs or kings < 2
+        assert all(a.confidence == b.confidence and a.bbox == b.bbox for a, b in zip(detections, crowned))
+        tally["a queen crowned"] += bool(differs)
         cases.append(dict(
             detections=[dict(cls=d.cls, confidence=d.confidence, scores=s) for d, s in pieces],
-            out=[d.cls for d in result]))
+            out=[d.cls for d in result], out_queen=[d.cls for d in crowned]))
         return [d.cls for d in result]
+
+    def crowned(pieces):
+        """What the case just recorded comes to with queen_for_king."""
+        record(pieces)
+        return cases[-1]["out_queen"]
 
     def scores_for(kind):
         """What a model might score a piece of this kind: its own kind high,
@@ -977,9 +996,9 @@ def king_cases(seed):
         record(pieces)
 
     # 2. By hand, each sentence of the rule.
-    def p(cls, k=0, **scores):
+    def p(cls, k=0, confidence=None, **scores):
         side, kind = cls.split("_")
-        return piece(side, kind, scores, k)
+        return piece(side, kind, scores, k, confidence)
     # No pieces; one side only.
     assert record([]) == []
     assert record([p("white_queen", king=0.3)]) == ["white_king"]
@@ -1026,6 +1045,56 @@ def king_cases(seed):
     # A king that the model gave no king score (scores from elsewhere) loses to one that has one.
     assert record([p("white_king"), p("white_king", king=0.1), p("black_king", king=0.5)]) \
         == ["white_queen", "white_king", "black_king"]
+
+    # 3. queen_for_king: a side without a king, and without a piece the
+    # model gave a "king" score of the floor, takes its queen.
+    # One queen. Without the switch nothing (record() checks that too).
+    assert crowned([p("white_king", king=0.9), p("black_queen"), p("black_rook", king=0.01)]) \
+        == ["white_king", "black_king", "black_rook"]
+    assert cases[-1]["out"] == ["white_king", "black_queen", "black_rook"]
+    # A piece with a "king" score on the floor comes first: the queen stays.
+    assert crowned([p("white_king", king=0.9), p("black_queen"), p("black_rook", king=KING_FLOOR)]) \
+        == ["white_king", "black_queen", "black_king"]
+    assert crowned([p("white_king", king=0.9), p("black_queen"), p("black_rook", king=KING_FLOOR - 1e-9)]) \
+        == ["white_king", "black_king", "black_rook"]
+    # Several queens: the one the model is least sure of; equally sure, the
+    # first; the confidence counts, not the "queen" score.
+    assert crowned([p("white_queen", confidence=0.9, queen=0.2), p("white_queen", confidence=0.4, queen=0.9),
+                    p("white_queen", confidence=0.6), p("white_pawn", confidence=0.3)]) \
+        == ["white_queen", "white_king", "white_queen", "white_pawn"]
+    assert crowned([p("white_queen", confidence=0.7), p("white_queen", confidence=0.5),
+                    p("white_queen", confidence=0.5)]) == ["white_queen", "white_king", "white_queen"]
+    # No queen: nothing, as without the switch.
+    assert crowned([p("white_rook", confidence=0.2), p("white_pawn", king=0.019)]) == ["white_rook", "white_pawn"]
+    # Neither side has a king: each takes its own queen, and only its own.
+    assert crowned([p("white_queen"), p("black_queen"), p("black_queen", confidence=0.26), p("white_rook")]) \
+        == ["white_king", "black_queen", "black_king", "white_rook"]
+    assert crowned([p("white_rook"), p("black_queen")]) == ["white_rook", "black_king"]
+    # Two kings, both on one side: left alone, the other side's queen too.
+    assert crowned([p("white_king", king=0.9), p("white_king", king=0.8), p("black_queen")]) \
+        == ["white_king", "white_king", "black_queen"]
+    # Three kings on one side: the board has more than two, the other side
+    # gets none, its queen stays.
+    assert crowned([p("white_king", king=0.9), p("white_king", king=0.8, queen=0.1),
+                    p("white_king", king=0.7), p("black_queen")]) \
+        == ["white_king", "white_queen", "white_queen", "black_queen"]
+    # A side that has its king is left alone whatever its queens.
+    assert crowned([p("white_king", king=0.9), p("white_queen")]) == ["white_king", "white_queen"]
+    # Random boards with no king or one, queens on them, and "king" scores
+    # under the floor, on it, or none.
+    for n in range(40):
+        pieces = []
+        for k in range(rng.choice([2, 4, 8, 16, 24])):
+            side = rng.choice(["white", "black"])
+            kind = "king" if k == 0 and n % 2 else rng.choice(["queen", "queen", "rook", "bishop", "knight", "pawn"])
+            scores = scores_for(kind)
+            if kind != "king" and rng.random() < 0.9:
+                scores.pop("king", None)
+                if rng.random() < 0.3:
+                    scores["king"] = rng.choice([0.0, 0.004, 0.019])
+            pieces.append(piece(side, kind, scores, k, rng.choice([None, None, 0.5, 0.75])))
+        rng.shuffle(pieces)
+        record(pieces)
 
     path = FIXTURES / "king_cases.json"
     path.write_text(json.dumps(cases, separators=(",", ":")) + "\n")

@@ -103,6 +103,17 @@ now.
    it has none. Sides, confidences and boxes are never changed; a piece
    whose kind the rule changed is shown to the user with the model's score
    for the kind it became, so that the app marks it.
+   **A queen for a king, switched off** (`queenForKing`, the reference's
+   `queen_for_king`; in the reference since 2026-11-15 and ported so that
+   it can be measured through the app, `Training/README.md`, "A side
+   without a king takes its queen"): where a side without a king has no
+   piece with a score of 0.02 for "king", its queen is made the king; of
+   several queens the one with the lowest confidence, of equally sure
+   ones the first. A king the model is sure is a queen has no score for
+   "king" to go by. No queen: nothing. On a board set up without a king it
+   turns a real queen into one. The queen crowned is shown with the
+   model's score for "king", next to nothing, so the app marks it: it is
+   a guess from the rules of the game, not something the model saw.
 7. **a1 from the pieces** (`BoardOrientation`, port of `white_side_score` and
    `orient_by_pieces`): of the four rotations of the corners, the one whose
    board looks most like White at ranks 1-2 wins; the corner model's own
@@ -138,8 +149,8 @@ now.
 
 Steps 3, 6 and 7 can be switched off, the model's choice of window of step
 3 and the dark a1 of step 7 each by itself, and the two halves of step 5
-each on
-(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:fitWindow:oddSides:)`;
+and the queen for a king of step 6 each on
+(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:fitWindow:oddSides:queenForKing:)`;
 `CoreMLBoardRecognizer.Default` names what the app runs with).
 How the two sets of corners combine is
 `CoreMLBoardRecognizer.corners(model:in:gridFit:fitWindow:)`, and it is what
@@ -304,17 +315,26 @@ before.
   Python's exactly, and the colours to nine decimals where both read the same
   pixels (the drawn picture).
 - `Training/swift_reference.py king-cases` writes `Fixtures/king_cases.json`:
-  275 sets of detections with the scores of each piece for every kind, and
+  326 sets of detections with the scores of each piece for every kind, and
   what `one_king_a_side` makes of them: boards with no, one, two, three and
   four kings, on one side or both, scores on the floor and just under it,
   equal scores, kinds without a score, and each sentence of the rule by
-  hand. `OneKingASideTests` replays them and requires the same classes, and
+  hand. Each set is recorded a second time with `queen_for_king`, and 43
+  of them come out differently. Eleven sets were added by hand for it (one
+  queen; a piece with a "king" score on the floor, which comes first, and
+  just under it; several queens, where the confidence decides and not the
+  score for "queen"; equally sure queens; no queen; both sides without a
+  king; two and three kings on the other side; a side that has its king)
+  and 40 random boards with queens and no or one king. `OneKingASideTests` replays them and requires the same classes, and
   that side, confidence, box and scores are untouched. These cases are the
   whole contract for this step: on photos the Python and the app are not
   given the same scores (see "The scores of a piece"), so they cannot be
   compared piece for piece, and the board scores differ a little. Two more
   tests place drawn pieces through the recognizer's own code and fail if the
-  kings are counted before the sides from the colours or after a1.
+  kings are counted before the sides from the colours or after a1; one
+  more, that the queen is crowned only with one king a side switched on;
+  and one builds the recognizer as the app does and with the queen for a
+  king asked for, and requires the first to leave the queen.
 - `Training/swift_reference.py dark-cases` writes `Fixtures/dark_cases.json`:
   what `dark_corner_rotations` makes of 20 chequered pictures that both
   sides draw from a few numbers (which corner is dark, the ring of corners

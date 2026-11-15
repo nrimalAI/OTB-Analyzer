@@ -34,7 +34,17 @@ enum OneKingASide {
     ///
     /// The rule takes every position to have two kings. A position set up
     /// without one (a few in the test sets are) can only lose by it.
-    static func apply(_ detections: [PieceDetection], floor: Double = kingFloor) -> [PieceDetection] {
+    ///
+    /// `queenForKing` (`queen_for_king`; off unless asked for): where a side
+    /// without a king has no piece with a "king" score of `floor`, its queen
+    /// is made the king, and of several queens the one the model is least
+    /// sure of (equally sure: the earlier). A king the model is sure is a
+    /// queen has no "king" score to go by; on a board set up without a king
+    /// this turns a real queen into one. The queen crowned is shown with
+    /// the model's score for "king", next to nothing, so the app marks it.
+    static func apply(
+        _ detections: [PieceDetection], floor: Double = kingFloor, queenForKing: Bool = false
+    ) -> [PieceDetection] {
         var out = detections
         let total = out.filter { $0.piece == .king }.count
         if total == 2 {
@@ -50,8 +60,20 @@ enum OneKingASide {
                 where score(of: .king, for: out[index]) > score(of: .king, for: out[best]) {
                     best = index
                 }
-                if score(of: .king, for: out[best]) >= floor {
-                    out[best] = out[best].taken(for: .king)
+                var crowned: Int? = best
+                if score(of: .king, for: out[best]) < floor {
+                    crowned = nil
+                    if queenForKing {
+                        for index in indices where out[index].piece == .queen {
+                            // the lowest confidence; equal ones, the earlier
+                            if crowned.map({ out[index].confidence < out[$0].confidence }) ?? true {
+                                crowned = index
+                            }
+                        }
+                    }
+                }
+                if let crowned {
+                    out[crowned] = out[crowned].taken(for: .king)
                 }
             } else if total > 2 && kings.count > 1 {
                 var keep = kings[0]

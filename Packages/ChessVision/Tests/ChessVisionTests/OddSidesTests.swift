@@ -261,7 +261,7 @@ struct OddSidesTests {
     ) throws -> String {
         let placed = try #require(CoreMLBoardRecognizer.place(
             found, corners: rightWayUp, cornersFromModel: true, in: image,
-            sidesFromColour: sidesFromColour, oddSides: oddSides, oneKing: oneKing,
+            sidesFromColour: sidesFromColour, oddSides: oddSides, oneKing: oneKing, queenForKing: false,
             a1Prior: nil,  // a1 as given
             a1Dark: false, pull: SquareAssignment.defaultPull))
         return FENBuilder.placement(placed.pieces.mapValues(\.piece))

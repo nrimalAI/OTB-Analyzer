@@ -30,6 +30,10 @@
 //   --one-king on|off  exactly one king a side, from the scores the piece
 //                   model gave each piece for every kind (the app's default:
 //                   on).
+//   --queen-for-king on|off  with one king a side: a side left without a
+//                   king, and without a piece the model gave a "king"
+//                   score, takes its queen for one (default off, as in the
+//                   app). Does nothing with --one-king off.
 //   --a1-dark on|off  a1 is a dark square: where the colours of the squares
 //                   can be told apart the pieces choose between two ways
 //                   round only (the app's default: on).
@@ -156,6 +160,7 @@ var sidesFromColour = CoreMLBoardRecognizer.Default.sidesFromColour
 var sidesFromColourGiven = false
 var oneKing: Bool?
 var oddSides: Bool?
+var queenForKing: Bool?
 var a1Dark: Bool?
 var darkPath: String?
 var fitWindow: Bool?
@@ -192,6 +197,10 @@ while !arguments.isEmpty {
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--one-king takes on or off") }
         oneKing = value == "on"
+    case "--queen-for-king":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--queen-for-king takes on or off") }
+        queenForKing = value == "on"
     case "--a1-dark":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--a1-dark takes on or off") }
@@ -297,7 +306,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--odd-sides on|off] [--one-king on|off] [--a1-dark on|off] [--fit-window on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--window FILE [--shift-fit FILES,RANKS]] [--verbose] | app_check --upright PHOTO OUT.png")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--odd-sides on|off] [--one-king on|off] [--queen-for-king on|off] [--a1-dark on|off] [--fit-window on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--window FILE [--shift-fit FILES,RANKS]] [--verbose] | app_check --upright PHOTO OUT.png")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -353,7 +362,8 @@ do {
         oneKing: oneKing ?? CoreMLBoardRecognizer.Default.oneKing,
         a1Dark: a1Dark ?? CoreMLBoardRecognizer.Default.a1Dark,
         fitWindow: fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow,
-        oddSides: oddSides ?? CoreMLBoardRecognizer.Default.oddSides)
+        oddSides: oddSides ?? CoreMLBoardRecognizer.Default.oddSides,
+        queenForKing: queenForKing ?? CoreMLBoardRecognizer.Default.queenForKing)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -592,7 +602,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oddSides.map { ", odd sides \($0 ? "on" : "off")" } ?? "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oddSides.map { ", odd sides \($0 ? "on" : "off")" } ?? "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(queenForKing.map { ", queen for king \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
