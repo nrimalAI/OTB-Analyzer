@@ -6,10 +6,12 @@ is checked against this folder's Python and not against a second opinion.
     python swift_reference.py colour-cases
     python swift_reference.py king-cases
     python swift_reference.py dark-cases
+    python swift_reference.py window-cases
     python swift_reference.py grid --list photos.json --out python_grid.json
     python swift_reference.py compare --python python_grid.json --swift swift_grid.json
     python swift_reference.py colours --swift swift_colours.json [--list photos.json]
     python swift_reference.py dark --swift swift_dark.json [--list photos.json]
+    python swift_reference.py window --swift swift_window.json
 
 orientation: random boards seen in perspective with their corners given in a
 random rotation, some pieces missed, misread or found twice, some boxes beside
@@ -49,6 +51,15 @@ orientation_cases.json when only two of the four are allowed (turns=).
 Written to Fixtures/dark_cases.json, replayed by GridSquareColoursTests.
 Needs grid_cases.json and orientation_cases.json as they are in Fixtures.
 
+window-cases: the corner model picks the grid fit's window. What
+chess_pipeline.window_by_model makes of a fit's corners and a model's: the
+model's corners near the fit's, a square on in each of the eight directions,
+two squares on, one corner unlike the others, each threshold from both sides
+(the mean just under and over half a square, a corner just inside and outside
+the tolerance), the model's corners a rotation on, other tolerances; and where
+a window lies when it is moved on purpose (evaluate.py --shift-fit). Written
+to Fixtures/window_cases.json, replayed by GridFitWindowTests.
+
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
 the corners before the validity checks, the confidence and the numbers the
@@ -69,6 +80,14 @@ app ends with before a1 is checked (the grid fit's or the model's) and what
 the colours of the squares say of them; this reads that file, asks
 grid_corners.dark_corner_rotations about the same corners and counts where
 the two differ.
+
+window: the fit's window, on photos, Swift against Python on the same
+corners. `app_check --window` writes, for each photo of a list where the
+corner model and the grid fit both find the board, the two sets of corners
+and what the app makes of them (with `--shift-fit FILES,RANKS`: after the
+fit's window was moved on purpose); this reads that file, asks
+chess_pipeline.window_by_model about the same corners and counts where the
+two differ, and how many windows were moved, and moved back.
 """
 
 import argparse
@@ -82,7 +101,7 @@ from chess_pipeline import (
     Detection, EDGE_MARGIN, FEN_LETTER, KING_FLOOR, KINDS, PIECE_CLASSES, assign_detections, assign_squares,
     board_square, board_to_fen_placement, colour_patch, fen_placement_to_board, homography,
     one_king_a_side, orient_by_pieces, colour_sides, project, pulled_board_point, sides_from_colour,
-    two_groups, white_side_score,
+    two_groups, white_side_score, window_by_model, WINDOW_NEAR,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -959,6 +978,147 @@ def compare_dark(swift_path, list_path):
           f"p95 {np.percentile(off, 95):.4f}, max {off.max():.4f}")
 
 
+FRAME = ((0.0, 0.0), (0.0, 8.0), (8.0, 8.0), (8.0, 0.0))
+
+# Fits: a board seen from above, one seen at a slant, one seen from low
+# down, and one whose corners start elsewhere and run the other way round.
+WINDOW_RINGS = {
+    "above": [(200.0, 700.0), (200.0, 100.0), (800.0, 100.0), (800.0, 700.0)],
+    "slant": [(150.0, 820.0), (260.0, 240.0), (790.0, 215.0), (930.0, 790.0)],
+    "low": [(90.0, 640.0), (330.0, 410.0), (720.0, 405.0), (955.0, 630.0)],
+    "other way": [(790.0, 215.0), (260.0, 240.0), (150.0, 820.0), (930.0, 790.0)],
+}
+
+
+def moved_window(ring, files, ranks):
+    """The window `files` and `ranks` squares on, as evaluate.py --shift-fit moves it."""
+    back = np.linalg.inv(homography(ring))
+    return [list(map(float, project(back, (x + files, y + ranks)))) for x, y in FRAME]
+
+
+def window_cases(seed):
+    """chess_pipeline.window_by_model on fits and models built from a few numbers."""
+    def model_of(ring, shift, noise):
+        # The model's corners: the fit's window moved by `shift`, each corner
+        # then `noise` squares off, all in the fit's board frame.
+        back = np.linalg.inv(homography(ring))
+        return [list(map(float, project(back, (x + shift[0] + ex, y + shift[1] + ey))))
+                for (x, y), (ex, ey) in zip(FRAME, noise)]
+
+    still = [(0.0, 0.0)] * 4
+    eight = [(f, r) for f in (-1, 0, 1) for r in (-1, 0, 1) if (f, r) != (0, 0)]
+    made = [(f"a square on {shift}", shift, [(0.2, -0.1), (-0.15, 0.25), (0.1, 0.1), (-0.2, -0.2)], WINDOW_NEAR)
+            for shift in eight]
+    made += [
+        ("the fit's own corners", (0, 0), still, WINDOW_NEAR),
+        ("near the fit's", (0, 0), [(0.3, -0.2), (-0.25, 0.3), (0.2, 0.1), (-0.3, -0.3)], WINDOW_NEAR),
+        # The mean decides the shift: just under and just over half a square.
+        ("mean just under half a file", (0.4999, 0), still, WINDOW_NEAR),
+        ("mean just over half a file", (0.5001, 0), still, WINDOW_NEAR),
+        ("mean just under half a rank back", (0, -0.4999), still, WINDOW_NEAR),
+        ("mean just over half a rank back", (0, -0.5001), still, WINDOW_NEAR),
+        # More than one square: never.
+        ("two ranks on", (0, 2), still, WINDOW_NEAR),
+        ("two files back", (-2, 0), still, WINDOW_NEAR),
+        ("a file on and two ranks on", (1, 2), still, WINDOW_NEAR),
+        ("just under a rank and a half", (0, 1.4999), still, WINDOW_NEAR),
+        ("just over a rank and a half", (0, 1.5001), still, WINDOW_NEAR),
+        # One corner just inside and just outside the tolerance, on each axis
+        # and to each side (the other three pull the mean back a little).
+        ("a corner just inside, files", (0, 1), [(0.7499, 0)] + still[:3], WINDOW_NEAR),
+        ("a corner just outside, files", (0, 1), [(0.7501, 0)] + still[:3], WINDOW_NEAR),
+        ("a corner just inside, files back", (0, -1), still[:2] + [(-0.7499, 0), (0, 0)], WINDOW_NEAR),
+        ("a corner just outside, files back", (0, -1), still[:2] + [(-0.7501, 0), (0, 0)], WINDOW_NEAR),
+        ("a corner just inside, ranks", (1, 0), still[:3] + [(0, -0.7499)], WINDOW_NEAR),
+        ("a corner just outside, ranks", (1, 0), still[:3] + [(0, -0.7501)], WINDOW_NEAR),
+        ("a corner just inside, ranks up", (-1, 0), [(0, 0.7499)] + still[:3], WINDOW_NEAR),
+        ("a corner just outside, ranks up", (-1, 0), [(0, 0.7501)] + still[:3], WINDOW_NEAR),
+        # Three corners a rank on and one where the fit has it.
+        ("one corner stays", (0, 1), [(0, 0), (0, 0), (0, -1), (0, 0)], WINDOW_NEAR),
+        # Other tolerances.
+        ("0.6 off at 0.5", (0, 1), [(0.6, 0), (-0.6, 0), (0, 0), (0, 0)], 0.5),
+        ("0.6 off at 0.75", (0, 1), [(0.6, 0), (-0.6, 0), (0, 0), (0, 0)], WINDOW_NEAR),
+        ("0.9 off at 0.75", (0, 1), [(0.9, 0), (-0.9, 0), (0, 0), (0, 0)], WINDOW_NEAR),
+        ("0.9 off at 0.95", (0, 1), [(0.9, 0), (-0.9, 0), (0, 0), (0, 0)], 0.95),
+    ]
+    cases = []
+    for ring_name, ring in WINDOW_RINGS.items():
+        for name, shift, noise, near in made:
+            cases.append((f"{ring_name}: {name}", ring, model_of(ring, shift, noise), near))
+        # The model's corners in another rotation than the fit's: the caller
+        # is to put them in the same order, and nothing is moved if not.
+        for turn in (1, 2, 3):
+            model = model_of(ring, (0, 1), still)
+            cases.append((f"{ring_name}: a rank on, {turn} corners round", ring, model[turn:] + model[:turn],
+                          WINDOW_NEAR))
+    rng = random.Random(seed)
+    for k in range(80):
+        ring_name = rng.choice(list(WINDOW_RINGS))
+        ring = [(x + rng.uniform(-30, 30), y + rng.uniform(-30, 30)) for x, y in WINDOW_RINGS[ring_name]]
+        shift = rng.choice(eight + [(0, 0), (0, 0), (0, 2), (-2, 1)])
+        spread = rng.choice([0.1, 0.3, 0.6, 0.74, 0.9, 1.2])
+        noise = [(rng.uniform(-spread, spread), rng.uniform(-spread, spread)) for _ in range(4)]
+        cases.append((f"random {k}: {ring_name} {shift} spread {spread}", ring, model_of(ring, shift, noise),
+                      rng.choice([WINDOW_NEAR, WINDOW_NEAR, 0.5, 0.95])))
+
+    out, moved_by = [], {}
+    for name, ring, model, near in cases:
+        # No case may hang on the last bits of the arithmetic.
+        H = homography(ring)
+        offsets = np.array([np.subtract(project(H, c), at) for c, at in zip(model, FRAME)])
+        mean = offsets.mean(axis=0)
+        assert np.abs(np.abs(mean - np.floor(mean)) - 0.5).min() > 2e-5, name
+        shift = np.round(mean)
+        if shift.any() and np.abs(shift).max() <= 1:
+            assert np.abs(np.abs(offsets - shift) - near).min() > 2e-5, name
+        corners, made_shift = window_by_model(ring, model, near=near)
+        moved_by[made_shift] = moved_by.get(made_shift, 0) + 1
+        out.append({"name": name, "fit": [list(map(float, c)) for c in ring], "model": model, "near": near,
+                    "corners": [list(c) for c in corners], "shift": list(made_shift)})
+    shifts = [{"ring": name, "files": f, "ranks": r, "corners": moved_window(ring, f, r)}
+              for name, ring in WINDOW_RINGS.items() for f, r in eight + [(0, 0), (0, 2), (-3, 1)]]
+    path = FIXTURES / "window_cases.json"
+    path.write_text(json.dumps({"near": WINDOW_NEAR, "cases": out, "shifts": shifts},
+                               separators=(",", ":")) + "\n")
+    print(f"{len(out)} cases: left alone {moved_by.get((0, 0), 0)}, moved "
+          f"{ {k: v for k, v in sorted(moved_by.items()) if k != (0, 0)} }; {len(shifts)} windows moved on purpose")
+    print(f"written to {path} ({path.stat().st_size // 1024} kB)")
+
+
+def compare_window(swift_path):
+    """The fit's window, of the same corners in Python and in Swift."""
+    sw = json.loads(Path(swift_path).read_text())
+    purpose = tuple(sw["shift_fit"])
+    photos = same = moved_py = moved_sw = back_py = back_sw = 0
+    off, off_given = [], []
+    for photo in sorted(sw["photos"]):
+        found = sw["photos"][photo]
+        if found is None:
+            continue                              # the model or the fit found no board
+        given = moved_window(found["fit"], *purpose) if any(purpose) else found["fit"]
+        corners, shift = window_by_model(given, found["model"])
+        photos += 1
+        off_given.append(np.abs(np.subtract(given, found["given"])).max())
+        off.append(np.abs(np.subtract(corners, found["corners"])).max())
+        same += list(shift) == found["shift"]
+        moved_py += shift != (0, 0)
+        moved_sw += found["shift"] != [0, 0]
+        back_py += any(purpose) and shift == (-purpose[0], -purpose[1])
+        back_sw += any(purpose) and found["shift"] == [-purpose[0], -purpose[1]]
+        if list(shift) != found["shift"]:
+            print(f"  {Path(photo).name}: Python {shift}, Swift {found['shift']}")
+        elif shift != (0, 0) and not any(purpose):
+            print(f"  {Path(photo).name}: moved by {shift}")
+    off = np.array(off) if off else np.zeros(1)
+    off_given = np.array(off_given) if off_given else np.zeros(1)
+    print(f"{len(sw['photos'])} photos, the model and the fit both found the board on {photos}"
+          + (f", the fit's window moved by {purpose} on purpose" if any(purpose) else "")
+          + f": the same shift on {same}; windows moved: Python {moved_py}, Swift {moved_sw}"
+          + (f"; moved back: Python {back_py}, Swift {back_sw}" if any(purpose) else ""))
+    print(f"corners, Swift against Python, in pixels: max {off.max():.2e}"
+          + (f"; the window moved on purpose: max {off_given.max():.2e}" if any(purpose) else ""))
+
+
 def grid_reference(list_path, out_path, limit):
     import cv2
     from grid_corners import find_grid
@@ -1065,14 +1225,15 @@ def compare_colours(swift_path, list_path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "dark-cases",
-                                     "grid", "compare", "colours", "dark"])
+                                     "window-cases", "grid", "compare", "colours", "dark", "window"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
     ap.add_argument("--python", help="compare: file written by `grid`")
     ap.add_argument("--swift", help="compare: file written by `app_check --grid`; "
                                     "colours: file written by `app_check --colours`; "
-                                    "dark: file written by `app_check --dark`")
+                                    "dark: file written by `app_check --dark`; "
+                                    "window: file written by `app_check --window`")
     ap.add_argument("--count", type=int, default=120)
     ap.add_argument("--seed", type=int, default=20261113)
     args = ap.parse_args()
@@ -1091,8 +1252,12 @@ def main():
         king_cases(args.seed)
     elif args.what == "dark-cases":
         dark_cases()
+    elif args.what == "window-cases":
+        window_cases(args.seed)
     elif args.what == "dark":
         compare_dark(args.swift, args.list)
+    elif args.what == "window":
+        compare_window(args.swift)
     elif args.what == "grid":
         grid_reference(args.list, args.out, args.limit)
     elif args.what == "colours":

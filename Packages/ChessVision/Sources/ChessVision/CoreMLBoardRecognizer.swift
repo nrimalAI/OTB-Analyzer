@@ -50,6 +50,15 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let oneKing: Bool
     /// Internal for testing.
     let a1Dark: Bool
+    /// Internal for testing.
+    let fitWindow: Bool
+
+    /// What the app runs with where nothing else is asked for.
+    public enum Default {
+        public static let oneKing = true
+        public static let a1Dark = true
+        public static let fitWindow = true
+    }
 
     /// - Parameters:
     ///   - a1Prior: which corner is a1 is checked against the pieces
@@ -85,6 +94,13 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     is a1 is not checked against the pieces (`a1Prior` nil and the
     ///     corners the model's). A board set up with a light square on a1
     ///     is read a quarter turn off.
+    ///   - fitWindow: where the grid fit and the corner model both found the
+    ///     board, the model picks which 8×8 window of the fit's grid is the
+    ///     board: the fit's corners are moved by one square when all four of
+    ///     the model's lie near the same one-square shift of them
+    ///     (`GridCorners.windowByModel`). The fit takes a window one rank or
+    ///     file off where a border looks like a rank of squares. Has no
+    ///     effect where the fit is off, rejects itself or stands alone.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -93,8 +109,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         a1Prior: Double? = 6,  // = BoardOrientation.appPrior
         gridFit: Bool = true,
         sidesFromColour: Bool = false,
-        oneKing: Bool = true,
-        a1Dark: Bool = true
+        oneKing: Bool = Default.oneKing,
+        a1Dark: Bool = Default.a1Dark,
+        fitWindow: Bool = Default.fitWindow
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
@@ -105,6 +122,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.sidesFromColour = sidesFromColour
         self.oneKing = oneKing
         self.a1Dark = a1Dark
+        self.fitWindow = fitWindow
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -171,20 +189,33 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     }
 
     /// The corners: the model's, the grid fit's, or both (see
-    /// `corners(model:in:gridFit:)`); nil for no board.
+    /// `corners(model:in:gridFit:fitWindow:)`); nil for no board.
     private func locate(
         in image: CGImage, square: CGImage, letterbox: Letterbox, whole: GrayImage.Working? = nil
     ) throws -> (corners: [CGPoint], fromModel: Bool)? {
-        var modelCorners: [CGPoint]?
+        corners(
+            model: try modelCorners(in: square, letterbox: letterbox), in: image, whole: whole)
+    }
+
+    /// The corner model's corners where they are a board; nil for no board.
+    private func modelCorners(in square: CGImage, letterbox: Letterbox) throws -> [CGPoint]? {
         do {
             let found = try detectCorners(in: square, letterbox: letterbox)
-            if Homography(corners: found) != nil {
-                modelCorners = found
-            }
+            return Homography(corners: found) != nil ? found : nil
         } catch RecognitionError.boardNotFound {
             // The grid fit may still find the board.
+            return nil
         }
-        return Self.corners(model: modelCorners, in: image, gridFit: gridFit, whole: whole)
+    }
+
+    /// What is made of the model's corners and the grid fit's, with this
+    /// recognizer's settings: the one place where they are handed on, so
+    /// that a test can see that each of them arrives. Internal for testing.
+    func corners(
+        model: [CGPoint]?, in image: CGImage, whole: GrayImage.Working? = nil
+    ) -> (corners: [CGPoint], fromModel: Bool)? {
+        Self.corners(
+            model: model, in: image, gridFit: gridFit, fitWindow: fitWindow, whole: whole)
     }
 
     /// What follows the two models, with this recognizer's settings: the one
@@ -268,15 +299,36 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         return (located.corners, GridCorners.squareColours(in: image, corners: located.corners))
     }
 
+    /// The corner model's corners and the grid fit's in the same order, where
+    /// both found the board, and what the model makes of the fit's window,
+    /// whether or not that is switched on: for checking it against the
+    /// Python (`app_check --window`). Nil where either found no board.
+    public func diagnoseFitWindow(
+        _ photo: CGImage
+    ) throws -> (model: [CGPoint], fit: [CGPoint], window: GridCorners.Window)? {
+        let image = DecodedImage.once(photo)
+        let letterbox = Letterbox(
+            imageSize: CGSize(width: image.width, height: image.height))
+        guard let square = letterbox.render(image),
+              let model = try modelCorners(in: square, letterbox: letterbox),
+              let found = GridCorners.find(in: image)
+        else { return nil }
+        let fit = GridCorners.turned(found.corners, nearestTo: model)
+        return (model, fit, GridCorners.windowByModel(fit: fit, model: model))
+    }
+
     // MARK: - Grid fit
 
     /// The board's corners from what the corner model and the grid fit say,
-    /// as `evaluate.py --grid-corners` combines them. Internal for testing.
+    /// as `evaluate.py --grid-corners --fit-window` combines them. Internal
+    /// for testing.
     ///
     /// - The model found the board and the fit accepts its own result: the
     ///   fit's corners (it says where they are exactly), turned to the
     ///   rotation nearest the model's (it has an opinion on which is a1; the
-    ///   fit has none).
+    ///   fit has none); with `fitWindow`, moved by one square where the
+    ///   model has the board in the neighbouring window of the fit's grid
+    ///   (`GridCorners.windowByModel`).
     /// - The model found the board and the fit rejects itself, or is switched
     ///   off: the model's corners.
     /// - The model found no board and the fit accepts: the fit's corners, in
@@ -284,12 +336,16 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///   pieces alone).
     /// - Neither: nil, no board.
     static func corners(
-        model: [CGPoint]?, in image: CGImage, gridFit: Bool, whole: GrayImage.Working? = nil
+        model: [CGPoint]?, in image: CGImage, gridFit: Bool, fitWindow: Bool,
+        whole: GrayImage.Working? = nil
     ) -> (corners: [CGPoint], fromModel: Bool)? {
         let fit = gridFit ? GridCorners.find(in: image, whole: whole) : nil
         switch (model, fit) {
         case let (model?, fit?):
-            return (GridCorners.turned(fit.corners, nearestTo: model), true)
+            let turned = GridCorners.turned(fit.corners, nearestTo: model)
+            return (
+                fitWindow ? GridCorners.windowByModel(fit: turned, model: model).corners : turned,
+                true)
         case let (model?, nil):
             return (model, true)
         case let (nil, fit?):

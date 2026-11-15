@@ -114,6 +114,36 @@ import Testing
             cornerModel: models.corners, pieceModel: models.pieces, a1Dark: false).a1Dark == false)
     }
 
+    /// The corner model picks the grid fit's window: on unless switched off
+    /// (`docs/RECOGNITION.md`, "What the model's choice of window is worth"),
+    /// and the recognizer hands its own setting on to where the two sets of
+    /// corners meet (`corners(model:in:)`, the method `recognize` calls
+    /// through `locate`). The fixture photos read the same with the rule and
+    /// without, so they would not notice it missing: here a drawn board and
+    /// a model that has it one rank on.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testFitWindowIsOnByDefaultAndReachesTheCorners() throws {
+        let models = try Self.models.get()
+        let asBuilt = try makeRecognizer()
+        let without = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, fitWindow: false)
+        #expect(asBuilt.fitWindow == true && CoreMLBoardRecognizer.Default.fitWindow == true)
+        #expect(without.fitWindow == false)
+
+        let (image, truth, _) = try GridFitWindowTests.drawnBoard()
+        let rank = try #require(GridCorners.shifted(truth, files: 0, ranks: 1))
+        func off(_ corners: [CGPoint], _ from: [CGPoint]) -> CGFloat {
+            zip(corners, from).map { hypot($0.x - $1.x, $0.y - $1.y) }.max() ?? .infinity
+        }
+        let moved = try #require(asBuilt.corners(model: rank, in: image))
+        #expect(off(moved.corners, rank) < 3)
+        let left = try #require(without.corners(model: rank, in: image))
+        #expect(off(left.corners, truth) < 3)
+        // The other defaults are the ones named.
+        #expect(asBuilt.oneKing == CoreMLBoardRecognizer.Default.oneKing)
+        #expect(asBuilt.a1Dark == CoreMLBoardRecognizer.Default.a1Dark)
+    }
+
     /// The recognizer hands its own `a1Dark` on to what follows the models
     /// (`place`, the method `recognize` calls). The fixture photos read the
     /// same with the rule and without, so they would not notice it missing:

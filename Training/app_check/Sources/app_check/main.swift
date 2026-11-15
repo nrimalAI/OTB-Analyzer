@@ -30,6 +30,9 @@
 //   --a1-dark on|off  a1 is a dark square: where the colours of the squares
 //                   can be told apart the pieces choose between two ways
 //                   round only (the app's default: on).
+//   --fit-window on|off  where the corner model and the grid fit both find
+//                   the board, the model picks which 8x8 window of the
+//                   fit's grid is the board (the app's default: on).
 //   --flag-below C[,C...]  the app marks a square for the user to check
 //                   when its piece's confidence is under 0.85 (AppModel);
 //                   count how many of the right and of the wrong pieces that
@@ -43,6 +46,14 @@
 //                   what the colours of the squares say of them, for
 //                   `swift_reference.py dark` to compare with the Python on
 //                   the same corners.
+//   --window FILE   score nothing: write, for each photo where the corner
+//                   model and the grid fit both find the board, the two sets
+//                   of corners and what the app makes of the fit's window,
+//                   for `swift_reference.py window` to compare with the
+//                   Python on the same corners. With --shift-fit FILES,RANKS
+//                   the fit's window is first moved by that many squares on
+//                   purpose (as `evaluate.py --shift-fit`), to count how
+//                   many the model moves back.
 //   --grid FILE     run no model: write what the classical grid fit
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
@@ -138,6 +149,9 @@ var sidesFromColourGiven = false
 var oneKing: Bool?
 var a1Dark: Bool?
 var darkPath: String?
+var fitWindow: Bool?
+var windowPath: String?
+var shiftFit: (files: Int, ranks: Int)?
 var flagBelow: [Float] = [0.85]
 var coloursPath: String?
 var uprightPaths: (photo: String, out: String)?
@@ -172,6 +186,19 @@ while !arguments.isEmpty {
     case "--dark":
         guard !arguments.isEmpty else { fail("--dark takes the file to write") }
         darkPath = arguments.removeFirst()
+    case "--fit-window":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--fit-window takes on or off") }
+        fitWindow = value == "on"
+    case "--window":
+        guard !arguments.isEmpty else { fail("--window takes the file to write") }
+        windowPath = arguments.removeFirst()
+    case "--shift-fit":
+        let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Int($0) }
+        guard values.count == 2, let files = values[0], let ranks = values[1] else {
+            fail("--shift-fit takes two whole numbers with a comma between them: files,ranks")
+        }
+        shiftFit = (files, ranks)
     case "--flag-below":
         let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Float($0) }
         guard !values.isEmpty, values.allSatisfy({ $0 != nil }) else {
@@ -212,6 +239,12 @@ if coloursPath != nil && (gridPath != nil || redraw != nil || portrait) {
 if darkPath != nil && (gridPath != nil || coloursPath != nil || redraw != nil || portrait) {
     fail("--dark reads the photos as they are: it goes with neither --grid, --colours, --redraw nor --portrait")
 }
+if windowPath != nil && (gridPath != nil || coloursPath != nil || darkPath != nil || redraw != nil || portrait) {
+    fail("--window reads the photos as they are: it goes with neither --grid, --colours, --dark, --redraw nor --portrait")
+}
+if shiftFit != nil && windowPath == nil {
+    fail("--shift-fit goes with --window")
+}
 if let gridPath, let listPath {
     let listURL = URL(fileURLWithPath: listPath)
     guard
@@ -250,7 +283,7 @@ if let gridPath, let listPath {
     exit(0)
 }
 guard let modelsPath, let listPath else {
-    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--a1-dark on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--verbose] | app_check --upright PHOTO OUT.png")
+    fail("usage: app_check --models DIR --list FILE [--redraw N] [--portrait] [--a1-prior P|off] [--grid-fit on|off] [--grid FILE] [--sides-from-colour on|off] [--one-king on|off] [--a1-dark on|off] [--fit-window on|off] [--flag-below C] [--colours FILE] [--dark FILE] [--window FILE [--shift-fit FILES,RANKS]] [--verbose] | app_check --upright PHOTO OUT.png")
 }
 
 /// The image drawn into a canvas of the given size, grey 114 around it,
@@ -300,24 +333,12 @@ do {
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
     // What is not given stays the app's default, whatever that is.
-    switch (oneKing, a1Dark) {
-    case let (oneKing?, a1Dark?):
-        recognizer = try CoreMLBoardRecognizer(
-            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
-            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Dark: a1Dark)
-    case let (oneKing?, nil):
-        recognizer = try CoreMLBoardRecognizer(
-            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
-            sidesFromColour: sidesFromColour, oneKing: oneKing)
-    case let (nil, a1Dark?):
-        recognizer = try CoreMLBoardRecognizer(
-            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
-            sidesFromColour: sidesFromColour, a1Dark: a1Dark)
-    case (nil, nil):
-        recognizer = try CoreMLBoardRecognizer(
-            cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
-            sidesFromColour: sidesFromColour)
-    }
+    recognizer = try CoreMLBoardRecognizer(
+        cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
+        sidesFromColour: sidesFromColour,
+        oneKing: oneKing ?? CoreMLBoardRecognizer.Default.oneKing,
+        a1Dark: a1Dark ?? CoreMLBoardRecognizer.Default.a1Dark,
+        fitWindow: fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -404,6 +425,59 @@ if let darkPath {
     let boards = out.values.filter { !($0 is NSNull) }.count
     print("\(out.count) photos, a board on \(boards): square colours unclear on \(unclear); "
         + "the corners as they came had a light a1 on \(lightA1); written to \(darkPath)")
+    exit(0)
+}
+
+if let windowPath {
+    // The model's corners, the fit's, and the window the model picks.
+    var out: [String: Any] = [:]
+    var both = 0, moved = 0, movedBack = 0
+    for path in list.keys.sorted() {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : listURL.deletingLastPathComponent().appending(path: path)
+        guard let image = upright(url) else { fail("could not load \(path)") }
+        do {
+            guard let found = try recognizer.diagnoseFitWindow(image) else {
+                out[path] = NSNull()
+                continue
+            }
+            var given = found.fit
+            var window = found.window
+            if let shiftFit {
+                guard let shifted = GridCorners.shifted(found.fit, files: shiftFit.files, ranks: shiftFit.ranks)
+                else { fail("\(path): the fit's window could not be moved") }
+                given = shifted
+                window = GridCorners.windowByModel(fit: given, model: found.model)
+                if window.files == -shiftFit.files && window.ranks == -shiftFit.ranks { movedBack += 1 }
+            }
+            both += 1
+            if window.moved {
+                moved += 1
+                if verbose { print("\(url.lastPathComponent): moved by \(window.files), \(window.ranks)") }
+            }
+            func list(_ corners: [CGPoint]) -> [[Double]] { corners.map { [Double($0.x), Double($0.y)] } }
+            out[path] = [
+                "model": list(found.model), "fit": list(found.fit), "given": list(given),
+                "corners": list(window.corners), "shift": [window.files, window.ranks],
+            ] as [String: Any]
+        } catch {
+            fail("\(path): \(error)")
+        }
+    }
+    do {
+        try JSONSerialization.data(
+            withJSONObject: ["shift_fit": [shiftFit?.files ?? 0, shiftFit?.ranks ?? 0], "photos": out],
+            options: [.sortedKeys]
+        ).write(to: URL(fileURLWithPath: windowPath))
+    } catch {
+        fail("could not write \(windowPath): \(error)")
+    }
+    print("\(out.count) photos, the model and the fit both found the board on \(both)"
+        + (shiftFit.map { ", the fit's window moved by \($0.files), \($0.ranks) on purpose" } ?? "")
+        + ": windows moved \(moved)"
+        + (shiftFit != nil ? ", moved back \(movedBack)" : "")
+        + "; written to \(windowPath)")
     exit(0)
 }
 
@@ -496,7 +570,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))
