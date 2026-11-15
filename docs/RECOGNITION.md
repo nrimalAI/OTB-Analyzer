@@ -7,12 +7,14 @@ must match. This file says what the app-side steps are, how they are tested,
 and what they were measured to be worth. Training results are in
 `Training/README.md`.
 
-**Which models (2026-11-14).** Three pairs have been in `Models/`, and the
-measurements below are of all three; each section says which.
+**Which models (2026-11-14).** The measurements below are of three pairs
+of models: two that have been in `Models/`, and the one that pull request
+#19 puts there. Each section says which.
 
 - **The third pair**: `pieces_s_tone1` and `corners_s_canon1`, the pair
   that pull request #19 puts in `Models/`. "What the app reads with the
-  third pair" is the section for what the app does once #19 is merged.
+  third pair" is the section for what the app does once #19 is merged;
+  until then, and if #19 is taken back, it is the second pair's.
 - **The second pair**: `pieces_s_render3` and the first corner model, in
   `Models/` from pull request #15 until #19.
 - **The first pair**: the first piece model and the first corner model,
@@ -171,7 +173,7 @@ with the colour step switched on. The second run is the corner model's own
 test: each of its corners within one square of the grid fit's, and 94% of
 the squares of the four photos together. It has no floor of squares a photo,
 because with corners most of a square off the count hangs on single pieces
-standing on a line (the first corner model, whose corners are up to 0.74
+standing on a line (the first corner model, whose corners are up to 0.72
 squares off on one fixture: 58 or 60 of 64 there from the same pixels with
 the first piece model, depending on whether CoreML ran on the Neural Engine
 or the CPU, and 60 with `pieces_s_render3`; `corners_s_canon1` is within a
@@ -181,14 +183,16 @@ fit reads these photos by itself.
 
 **Which corner is a1** is checked in every one of these runs, and in the
 run on 3:4 photos: no photo may fit its position better once the board
-read is turned by 180 degrees. The floors of squares do not see that on an
+read is turned by a quarter, a half or three quarters. The floors of squares do not see that on an
 endgame: the fixture `test_004005.jpg` has six pieces, turned it still has
 52 squares of 64 right, and the four photos together 95%. One case is let
 through as a known issue, printed by the test run and not failing it:
 `corners_s_canon1` reads that fixture turned when it is drawn as a 3:4
-photo ("What the app reads with the third pair"). Anything else fails:
-another photo turned, that one turned as the square photo it is, or wrong
-in another way.
+photo ("What the app reads with the third pair"). A turn fails in every
+other case: with another corner model, another photo, another turn, that
+photo turned as the square it is, or turned with a piece wrong besides. A
+misreading that is not a turn is for the floors of squares to catch, as
+before.
 
 ## How the Swift is checked against the Python
 
@@ -370,8 +374,11 @@ in the app, the last column is ChessReD test 297, board B 19, Fenit A 247,
 the second held-out set 451. The last column is to the digit what the
 training session measured with its own build; its outputs are kept on the
 Mac mini in `Training/runs/app_check/tone1/` and `final_h2/`
-(`tone1_canon1_*.txt`). Which sets are blind is as for the second pair,
-below: only the second held-out set.)
+(`tone1_canon1_*.txt`). Which sets say what about a board the app has not
+met is as for the second pair, below, with one difference: nothing was
+trained or tuned on the second held-out set, but the choice to put this
+corner model in rested partly on its score there (`Training/README.md`),
+so for the third pair it is no longer a set that nothing was chosen on.)
 
 - **Against the goal.** On boards nobody trained on, the app reads 439 of
   1,619 photos fully right (27%) and 16 of board B's 100; the goal is 85%.
@@ -397,19 +404,25 @@ below: only the second held-out set.)
   - **a1 from the pieces** is what unseen boards need, and what costs on
     boards the corner model knows. Board B 76% -> 94% of squares, the
     second held-out set 94.0% -> 95.7%. Fenit A 254 -> 230 boards: there
-    the corner model has a1 right every time (as many boards right as
-    right once turned without the step), and the pieces overrule it, on 16
-    boards by half a turn. The head start of 6 for the corner model's a1
-    was chosen with a corner model that knew less.
+    the corner model has a1 right by itself (without the step no board is
+    right only once turned, and one photo of 286 is read turned), and the
+    pieces overrule it on 24 boards, 16 by half a turn and 8 by a quarter.
+    The head start of 6 for the corner model's a1 was chosen on ChessReD
+    test, where no value changes anything with this pair. On the
+    development sets, head start 6 / 12 / 20 / 40 / none of the pieces:
+    Fenit A 231 / 243 / 251 / 255 / 255 boards, board B 94.36% / 94.36% /
+    93.83% / 92.20% / 76.50% of squares (16 / 16 / 16 / 15 / 7 boards),
+    ChessReD test 295 throughout.
   - **The grid fit** changes nothing at all on samryan, chess-cv and
     chesscog (not one photo reads differently), mends board B (131 squares
     on 11 photos, 2 lost) and ChessQ, and costs on Y-LIChess: 54 photos
-    gain 196 squares, and 18 photos lose 677, about 38 each, where the fit
-    accepts a grid that is not the board and the corner model had it right.
+    gain 196 squares and 21 lose 680, 18 of them 677, about 38 each, where
+    the fit accepts a grid that is not the board (the position read a rank
+    off, on 16 of the 18 by the count of the reviewer of pull request #20).
     Over the second held-out set that is 0.4 points of squares lost and 5
     boards gained.
-  - **Neither is changed here.** What to do about it (a larger head start
-    for a corner model that knows a1, the model's corners where the fit is
+  - **Neither is changed here.** What to do about it (a larger head start,
+    which the figures above speak for; the model's corners where the fit is
     far from them) belongs in the reference first, chosen on board B, Fenit
     A and ChessReD test; Y-LIChess is part of the test set and shows the
     cost, it cannot be used to tune it away.
@@ -440,7 +453,8 @@ one full decode. **Nothing here was run on a phone**: not the readings, not
 how long the larger model takes there. Squares right; boards exact; photos
 in which no board was found. (Where this section says "now", "the app
 reads" or "the goal", it speaks of its own time, 2026-11-14 before pull
-request #19; the third pair's section above is the current one.)
+request #19; the third pair's section above is for the pair that #19
+puts in.)
 
 | Set (photos) | Grid fit, a1 from the pieces and the rule for the kings off | Rule for the kings off | **As the app runs it** |
 |---|---|---|---|
@@ -539,7 +553,7 @@ pair. What the app reads with the second and the third pair is in the two
 sections above. The steps are
 the same code for both; what they are worth depends on the piece model, so
 the sections below say how each step was chosen, and the sections above
-say what stands today. Where a section below says "today", "now" or "the
+say what the later pairs read. Where a section below says "today", "now" or "the
 app's default path", it speaks of its own time. ("Known weak spot" at the
 end is about corner models and stands as it is.)
 
@@ -549,8 +563,8 @@ end is about corner models and stands as it is.)
 confidence and without the rule for the kings. With those two, the first
 pair's figures are the "on" column of "What one king a side is worth"; the
 difference to the "both" rows here is a quarter of a point of squares at
-most, and Fenit A's 16 boards exact are 32. What the app reads today is in
-"What the app reads with the third pair".)
+most, and Fenit A's 16 boards exact are 32. What the app reads with the
+later pairs is in the two sections above.)
 
 Through `app_check` (the app's own code, Vision doing the resize) on the Mac
 mini, 2026-11-13, each photo decoded once (`DecodedImage`). "Off" is
@@ -630,8 +644,7 @@ table says of each photo. The chess-cv row and the totals are therefore a
 little off: by a tenth of a point of squares, a few boards exact and one
 photo without a board (44 is 45 from the full decode), going by what the
 change of path did to the first pair's figures. Those are in "What one
-king a side is worth"; today's are in "What the app reads with the third
-pair".)
+king a side is worth"; the later pairs' are in the two sections above.)
 
 - The two app-side steps take the first pair from 46% to 76% of
   squares on boards nobody has seen, and from no board in 340 photos to 44.
@@ -851,7 +864,7 @@ rendered boards, exported for this measurement only, with the corner model in
   chess-cv through the thumbnail call.) So it is off
   because it failed with `pieces_s_render1`, the model it was made for, and
   was worth nothing with the first piece model. It has not been measured
-  with `pieces_s_render3`.
+  with `pieces_s_render3` or `pieces_s_tone1`.
 - The rule has no smallest distance between the two groups, and with six
   pieces or fewer one disagreement is already over 15%. The Fenit A photos
   it acts on are such positions (2 to 9 pieces found): on one, two black
@@ -891,12 +904,18 @@ were tried.
 `corners_s_canon1`, the corner model of the third pair, gets a1 right on
 the fixture as the square photo it is, and wrong on the same photo drawn
 as a 3:4 photo and on two neighbouring frames of the game (G033 IMG100
-and IMG102 square; IMG101 and IMG102 as 3:4 photos). The head start makes
-no difference: the training session found the same frames turned at 0, 3,
-6 and 12. It went into `Models/` with pull request #19 all the same,
-because the pair reads far more boards, also as 3:4 photos ("What the app
-reads with the third pair"), and the owner was told of this cost with the
-way to take the corner model out again. The tests say so each time they
+and IMG102 square; IMG101 and IMG102 as 3:4 photos). The head start does
+not settle it. IMG100 and IMG102 score better turned whatever it is (the
+training session found them turned at 0, 3, 6 and 12): there the pieces
+are wrong and the corner model does not correct them. The fixture as a 3:4
+photo scores +2.5 the right way up and the corner model has a1 at the
+wrong end, so it is read right with a head start under 5 and turned from 5
+up (the reviewer of pull request #20 tried 0, 3, 4, 5, 6 and 12). A smaller
+head start is not on offer: Fenit A wants a larger one ("What the app
+reads with the third pair"). Pull request #19 puts this corner model in
+`Models/` all the same, because the pair reads far more boards, also as
+3:4 photos, and the owner was told of this cost with the way to take the
+corner model out again. The tests say so each time they
 run: the fixture as a 3:4 photo is a known issue of
 `testRecognizesFixturesAsPortraitPhotos`. A corner model that gets these
 frames right can have that exception taken out; until then the app's flip
