@@ -147,6 +147,35 @@ import Testing
         #expect(CoreMLBoardRecognizer.Default.gridFit)
     }
 
+    /// The side of single pieces is off unless asked for (it is in the
+    /// reference to be measured through the app first), and the recognizer
+    /// hands its own setting on to what follows the models (`place`, the
+    /// method `recognize` calls): a drawn board with two cream pawns the
+    /// model calls Black.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testOddSidesIsOffByDefaultAndReachesWhatFollowsTheModels() throws {
+        let models = try Self.models.get()
+        let asBuilt = try makeRecognizer()
+        let asked = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oddSides: true)
+        #expect(asBuilt.oddSides == false && CoreMLBoardRecognizer.Default.oddSides == false)
+        #expect(asked.oddSides == true)
+
+        let (image, found) = try OddSidesTests.drawn()
+        let corners = [
+            CGPoint(x: 0, y: 800), CGPoint(x: 0, y: 0), CGPoint(x: 800, y: 0), CGPoint(x: 800, y: 800),
+        ]
+        func whites(_ recognizer: CoreMLBoardRecognizer) throws -> Int {
+            let placed = try #require(
+                recognizer.place(found, corners: corners, cornersFromModel: true, in: image))
+            #expect(placed.pieces.count == 16)
+            return placed.pieces.values.filter { $0.piece.color == .white }.count
+        }
+        #expect(found.filter { $0.color == .white }.count == 6)
+        #expect(try whites(asBuilt) == 6)
+        #expect(try whites(asked) == 8)
+    }
+
     /// What `app_check --window` is given (`diagnoseFitWindow`) is what the
     /// recognizer itself makes of the two sets of corners: the fit's in the
     /// model's order where the rule is off, the window the model picks

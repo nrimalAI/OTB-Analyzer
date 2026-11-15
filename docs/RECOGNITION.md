@@ -72,6 +72,24 @@ now.
    colours contradict them for more than 15% of the pieces that have a colour
    (a box whose middle lies outside the photo has none); then each of those
    takes its group's side. Kinds and confidences are never changed.
+   **The side of single pieces, switched off** (`OddSides`, port of
+   `odd_sides` and `patch_hidden`; in the reference since 2026-11-15 and
+   ported so that it can be measured through the app, `Training/README.md`,
+   "The side of single pieces"): the other way to use the same colours.
+   The model's own answers say what colour each side is in the photo (the
+   median colour of the pieces it calls White and of those it calls Black,
+   as L*, 4a*, 4b*), and a piece called Black whose colour is twice as near
+   White's as it is to the colour of the other pieces called Black becomes
+   White. One way only: a light piece in a shadow is as dark as a black
+   one, so a piece called White is never made Black. Nothing changes when
+   a side has fewer than two pieces with a colour, when the pieces called
+   White are not the lighter, or when the two sides' colours are less than
+   three spreads apart (the spread: the median distance of a piece from
+   its own side's colour, at least 3). A piece is neither counted nor
+   changed when another box whose foot is lower in the picture covers more
+   than a fifth of the patch its colour is measured on: what is measured
+   there is the piece in front. It comes after the step above and before
+   the kings are counted, which are counted by side.
 6. **One king a side** (`OneKingASide`, port of `one_king_a_side`): a
    position from a game has exactly two kings, and a king read as a queen,
    or a third "king", is what a piece model gets wrong on a set it has not
@@ -119,8 +137,10 @@ now.
    beside the board and gets no square.
 
 Steps 3, 6 and 7 can be switched off, the model's choice of window of step
-3 and the dark a1 of step 7 each by itself, and step 5 on
-(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:fitWindow:)`).
+3 and the dark a1 of step 7 each by itself, and the two halves of step 5
+each on
+(`CoreMLBoardRecognizer(a1Prior:gridFit:sidesFromColour:oneKing:a1Dark:fitWindow:oddSides:)`;
+`CoreMLBoardRecognizer.Default` names what the app runs with).
 How the two sets of corners combine is
 `CoreMLBoardRecognizer.corners(model:in:gridFit:fitWindow:)`, and it is what
 `Training/evaluate.py --grid-corners --fit-window` does.
@@ -356,6 +376,44 @@ before.
   photo that has (Fenit A's, below) is not in the repository. What stands
   in for it is `app_check`, whose readings change on exactly the photos
   whose window `--window` reports as moved.
+- `Training/swift_reference.py odd-cases` writes `Fixtures/odd_cases.json`:
+  what `odd_sides` and `patch_hidden` make of 103 sets of detections with
+  their colours and of a drawn picture. Forty-three are built by hand, each
+  condition of the rule from both sides: a light piece called Black at
+  L* 53.3 and 53.4, where "twice as near" begins; the two sides 8.9 and
+  9.1 apart with the spread on its floor, 14.9 and 15.1 with a spread of
+  5; White darker than Black, exactly as light, and lighter by a
+  thousandth; one and two pieces a side, with and without a colour;
+  0.19 and 0.21 of the patch behind a piece in front, a box in front
+  whose foot is higher and one whose foot is level; a piece that would
+  make a side but stands behind another; a box of no width; other values
+  for each of the four numbers; that a dark piece called White stays
+  White; that a piece is held against the other pieces called Black and
+  not against all of them, and against them as the model called them
+  whatever the rule makes of them; and that a side's colour is the median
+  of each number and not the mean. Sixty are random boards whose boxes
+  reach over their neighbours (97 pieces behind another on those). The
+  script refuses a random board within a millionth of a tie, because the
+  two do not share the last bits of a distance, and one with a box that
+  does not come back the same from a corner and a size, which is how the
+  Swift holds a box: two feet exactly level in the Python must be level in
+  the Swift (the hand-made case of a level foot is exact by construction;
+  in the app both read the same boxes). `OddSidesTests` replays them: the classes and which pieces
+  are behind another must be the Python's, and kind, confidence, box and
+  scores untouched. The drawn picture is `colour_pieces.png` with three
+  of its brown pieces called Black, its colours read from the PNG. Two
+  more tests go through the recognizer's own code on drawn pawns: the
+  two cream pawns a model calls Black are White's with the step on and
+  not with it off, and the sides are mended before the kings are counted
+  (a cream piece called a black king: mended first, White's lesser king
+  becomes a queen; counted first, Black's real king would). Another
+  pins the order of the two colour steps (the whole board's first), and
+  one that what `app_check --colours` is given is what the step does.
+  One builds the recognizer as the app does and with the step asked for,
+  and requires the first to leave those pawns and the second to mend
+  them. A colour that is not a number changes nothing, as in the Python;
+  a box whose corners are the wrong way round is the one input on which
+  the two differ, and no model gives one.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -417,7 +475,8 @@ before.
   `swift_reference.py grid --list L.json --out py.json`,
   `app_check --list L.json --grid sw.json`,
   `swift_reference.py compare --python py.json --swift sw.json`.
-  For the colour step, on the boxes the app's piece model finds:
+  For the two colour steps (the sides of the whole board and of single
+  pieces), on the boxes the app's piece model finds:
   `app_check --models M --list L.json --colours sw.json`,
   `swift_reference.py colours --swift sw.json --list L.json`.
   For the dark a1, on the corners the app ends with:
@@ -594,6 +653,51 @@ so for the third pair it is no longer a set that nothing was chosen on.)
 
   Much as with the second pair: 2.7 squares a photo on unseen boards, half
   of the wrong pieces among them. The threshold is the owner's to move.
+
+## The side of single pieces: off, and what it does on the development sets
+
+The second half of step 5 (`OddSides`), ported on 2026-11-15 at the
+reference's request and **switched off in the app**: the reference chose
+its numbers on board B, and whether it goes on is decided from a run
+through the app on the development sets and on the second held-out set by
+part, which is the training session's to make and is not made here
+(`Training/README.md`, "The side of single pieces"). What follows is only
+the check of the port, on the three development sets: the third pair
+through `app_check`, everything else as the app runs it, the step off and
+on through the same binary; with it off every photo reads as in "What the
+model's choice of window is worth". Squares right; boards exact; boards
+exact or half a turn away.
+
+| Set (photos) | Step off (the app) | Step on | Pieces made White |
+|---|---|---|---|
+| Fenit board B (100) | 94.48%; 16; 19 | 94.94%; 31; 35 | 41 on 34 photos |
+| Fenit A (286) | 98.14%; 234; 256 | 98.14%; 234; 256 | none |
+| ChessReD test (306) | 99.80%; 295; 297 | 99.80%; 295; 297 | none |
+
+- **Board B is the board the numbers were chosen on**, so its gain is not
+  a test of the rule; Fenit A and ChessReD test say that it leaves alone
+  boards the model reads well, photo for photo.
+- On board B 34 photos read differently. 38 squares that were wrong are
+  right, 3 stay wrong, and on 33 of the 34 photos no square is lost; 15
+  more boards are fully right.
+- **One photo loses squares and is mended all the same**:
+  `8-6K1-7P-5p2-4k3-6P1-8-8.jpg`, five pieces. Without the step it has 63
+  squares, a white pawn read as black. With it every piece is right, and
+  the pieces, now three White and two Black, are read the other way
+  round: 54 squares, all 64 once turned by half (one tap). It is an
+  endgame that points the wrong way ("Known weak spot"), and the wrong
+  pawn had happened to hold it.
+- **The Swift against the Python on the same boxes** (`app_check
+  --colours`, `swift_reference.py colours`): the same class for every one
+  of the 11,776 pieces of the three sets, from the Python's colours and
+  from the Swift's, and the same answer on which pieces stand behind
+  another (955 of them).
+- Time, as processor seconds over a set, on against off: board B 21.3
+  against 18.0, Fenit A 95.9 against 92.2, ChessReD test 72.7 against
+  67.7. The step reads the middle of every piece's box once; single runs
+  on a Mac mini that was training.
+- A piece whose side the step changes keeps the model's confidence, as
+  in the reference, so the app marks it no more than before.
 
 ## What the model's choice of window is worth
 
