@@ -322,7 +322,7 @@ full-size photos; for a piece model trained on the copies use `score.sh`.
 | `pieces_s_tone1` | continues render3's `last.pt`, 8 epochs, `merged_all4` (as `merged_all3`, with 8,000 more renders of the same kind, `--seed 4`: 20,000 renders in all, 27,437 photos), `--side-tone 0.35` (`side_tone.py`: a third of the training photos shown in another tone, so that a cream side looks tan or brown beside a darker one) | Finished 2026-11-14 17:09. `last.pt`, labelled corners (`scores/pieces_s_tone1_last.txt`): **board B 96.8% / 20 of 98 exact** (render3 94.7% / 8), P read as p 39 times (render3 132; after epoch 3 it was 72); Fenit A (trained on) 99.7% / 89%; ChessReD test 99.95% / 97.7% (299 of 306; render3 296). Two changes in one run (8,000 more renders, the tone): which of the two did how much is not known. Mosaic was off for the whole run, as for render3 (8 epochs, `close_mosaic` left at 10). **In `Models/`**: see below |
 | `pieces_s_tone2` | continues tone1's `last.pt`, 8 epochs, `merged_all4`, `--side-tone 0.6` | Finished 2026-11-15 00:04. **Not taken: better on board B, clearly worse on one board of the second test set.** Labelled corners (`scores/pieces_s_tone2_last.txt`): board B 97.2% / 26 of 98 exact (tone1 96.8% / 20), P read as p 16 times (39); ChessReD test 299 of 306 (the same); Fenit A 91% (89%). Through the app with the corner model in `Models/` (`runs/app_check/dark/`, `dark_h2/`; the build of c8afd31, tone1 against tone2): board B 94.48% / 16 -> 94.88% / **27** boards exact (more squares right on 40 photos, fewer on 14; two five-piece endgames that tone1 read upright, at 62 and 61 squares, are read half a turn off at 54); ChessReD test 295 -> 294; Fenit A 233 -> 230; all 115 tests pass. Then the second test set, as a test: 96.38% -> 96.34% of squares, **459 -> 407 boards exact** (108 gained, 160 lost). The whole loss is on one part, the chess-cv games (267 -> 210; 840 photos of eight games on one board and one piece set), and it is the kind of a piece, not its side: kings read as queens, queens and knights as rooks and kings; six of the eight games lose boards. The other four parts are level or better (Y-LIChess 55 -> 54, ChessQ 14 -> 14, samryan 115 -> 115, chesscog 8 -> 14; squares up on each), and averaged by part instead of by photo tone2 is ahead (boards exact 27.6% -> 30.3%). So it is not shown better on unseen boards and is clearly worse on one of them; it stays out. Why is not known: the tone share (0.6 against 0.35) and eight more epochs changed together. It passed the rule in `CLAUDE.md` (board B and ChessReD test); what kept it out is the second test set, which was thereby used to choose (see that section) |
 | `pieces_s_low1` | continues **tone1's** `last.pt`, 8 epochs, `merged_all5` (as `merged_all4`, with 6,000 more renders, six in ten of them seen from 12 to 32 degrees above the board: 26,000 renders), `--side-tone 0.35` | Finished 2026-11-15 07:59 (a first start at 00:05 from tone2 was stopped when tone2 failed the second test set). **Not taken: better on board B, worse on Fenit board A and on one board of the second test set.** Labelled corners (`scores/pieces_s_low1_last.txt`): board B 97.0% / 22 of 98 exact (tone1 96.8% / 20), P read as p 22 times (39); ChessReD test 301 of 306 (299); Fenit A 99.66% / 84% (99.74% / 89%). Through the app with the corner model in `Models/` (`runs/app_check/low1/` against `window/now_*`, one build): board B 94.48% / 16 -> 95.08% / **24** boards exact (more squares right on 31 photos, fewer on 15, sign test p = 0.03; side wrong on 61 -> 37 squares, kinds as before); ChessReD test 295 -> 296, as 3:4 photos 282 -> 279 (neither beyond noise); **Fenit A 234 -> 212 of 286** (fewer squares right on 31 photos, more on 9, p = 0.0007): bishops read as queens (3 -> 14 squares), rooks as queens, more pawns on empty squares. Then the second test set, as a test (`runs/app_check/low1_h2/` against `window_h2/now_*`): 97.00% -> 96.91% of squares, **464 -> 440 boards exact**. By part: Y-LIChess 60 -> 43 of 200 (fewer squares right on 70 photos, more on 19; pawns read as bishops and rooks, 35 -> 88 squares), samryan 115 -> 102 of 500 and the chess-cv games 267 -> 266 of 840 (squares level on both), ChessQ 14 -> 14, chesscog 8 -> 15 of 29 (more right on 13 photos, fewer on none). It passed the rule in `CLAUDE.md`; what speaks against it is a board it was trained on (Fenit A, a development set) and one unseen board. What the two have in common is a shorter piece read as a taller one, which is what a low camera does to a piece; that the low views are the cause is a guess, the run also had 6,000 more renders and eight more epochs |
-| `pieces_s_crop2` | continues tone1's `last.pt`, 8 epochs, `merged_all5_crop` (the 17,013 photos of `merged_all5` with a corner label, cut down to the board), `--side-tone 0.35` | Finished 2026-11-15 11:45. Scored with `--crop-board`, against tone1 without it. Labelled corners (`scores/pieces_s_crop2_last.txt`): board B 97.1% / 24 of 98 exact (tone1 96.8% / 20), P read as p 10 times (39); Fenit A 99.80% / 92% (99.74% / 89%); ChessReD test 302 of 306 (299). End to end in Python with the corner model in `Models/` (`scores/crop2_endtoend.txt` against `runs/dumps/tone1.txt`): board B 94.28% / 19 -> 94.72% / 24 boards exact; Fenit A 231 -> 236 of 286; ChessReD test 297 -> 299. The first candidate that is ahead on all three development sets, by a little on each. With the side rule and the queen rule both on in Python, board B is 38 with crop2 against 45 with tone1; the queen rule's Python gain is not the app's (see its entry), so only the app will tell how the two compare with the rules on. It needs the app to give the piece model the board only (`board_crop`, not ported). **Not taken as it stands: on the second test set it trades boards.** In Python at the app's photo size, as a test, tone1 -> crop2, both with canon1's corners (`runs/heldout2_crop2.sh`, `scores/heldout2_1280_{tone1,crop2}_canon1.txt`), boards exact: samryan 94 -> 153 of 500 and the chess-cv games 46 -> 84 of 840 (both photographed from straight above; squares 96.20% -> 97.51% and 95.99% -> 96.58%), ChessQ 12 -> 16 of 50 (squares 93.84% -> 93.41%); the Y-LIChess games 41 -> 32 of 102 (98.28% -> 97.90%), its layouts 22 -> 20 of 98, chesscog 13 -> 8 of 29 (98.60% -> 97.63%). By photo 228 -> 313 of 1,619; averaged by part 26.0% -> 25.3%. Two parts gain much and two lose, as with tone2 and low1, so the port is not asked for. Two things differ from tone1 besides the crop: its photos include the low-view renders (low1 lost on Y-LIChess too), and a cropped set has only the photos with a corner label: `merged_all5_crop` has not one of the 4,243 Roboflow training photos (and 13,841 of the 25,997 renders). The crop itself is not judged by this run: one with the Roboflow photos in it (corners for 4,946 of them were derived for the corner model, `datasets/merged_rf/corners`, under other file names) and without the low views would be |
+| `pieces_s_crop2` | continues tone1's `last.pt`, 8 epochs, `merged_all5_crop` (the 17,013 photos of `merged_all5` with a corner label, cut down to the board), `--side-tone 0.35` | Finished 2026-11-15 11:45. Scored with `--crop-board`, against tone1 without it. Labelled corners (`scores/pieces_s_crop2_last.txt`): board B 97.1% / 24 of 98 exact (tone1 96.8% / 20), P read as p 10 times (39); Fenit A 99.80% / 92% (99.74% / 89%); ChessReD test 302 of 306 (299). End to end in Python with the corner model in `Models/` (`scores/crop2_endtoend.txt` against `runs/dumps/tone1.txt`): board B 94.28% / 19 -> 94.72% / 24 boards exact; Fenit A 231 -> 236 of 286; ChessReD test 297 -> 299. The first candidate that is ahead on all three development sets, by a little on each. With the side rule and the queen rule both on in Python, board B is 38 with crop2 against 45 with tone1; the queen rule's Python gain is not the app's (see its entry), so only the app will tell how the two compare with the rules on. It needs the app to give the piece model the board only (`board_crop`, not ported). **Not taken as it stands: on the second test set it trades boards.** In Python at the app's photo size, as a test, tone1 -> crop2, both with canon1's corners (`runs/heldout2_crop2.sh`, `scores/heldout2_1280_{tone1,crop2}_canon1.txt`), boards exact: samryan 94 -> 153 of 500 and the chess-cv games 46 -> 84 of 840 (both photographed from straight above; squares 96.20% -> 97.51% and 95.99% -> 96.58%), ChessQ 12 -> 16 of 50 (squares 93.84% -> 93.41%); the Y-LIChess games 41 -> 32 of 102 (98.28% -> 97.90%), its layouts 22 -> 20 of 98, chesscog 13 -> 8 of 29 (98.60% -> 97.63%). By photo 228 -> 313 of 1,619; averaged by part 26.0% -> 25.3%. Two parts gain much and two lose, as with tone2 and low1, so the port is not asked for. The two that gain are the two the Python reads furthest below the app with tone1 (samryan 94 against 115 through the app, chess-cv 46 against 267), so how much of that gain the app would see is not known: this is a statement about the Python's reading. A first read on the full-size photos (`heldout2_crop2_canon1_spot07_base.txt`) is in the list of uses of that set. Two things differ from tone1 besides the crop: its photos include the low-view renders (low1 lost on Y-LIChess too), and a cropped set has only the photos with a corner label: `merged_all5_crop` has not one of the 4,243 Roboflow training photos (and 13,841 of the 25,997 renders). The crop itself is not judged by this run: one with the Roboflow photos in it (corners for 4,946 of them were derived for the corner model, `datasets/merged_rf/corners`, under other file names) and without the low views would be |
 | `pieces_s_real1` | continues tone1's `last.pt`, 6 epochs, `merged_all4_real3` (`merged_all4` with every photo that is not one of our renders listed three times in its `train.txt`: 7,439 x 3 + 19,998 renders = 42,315 a round, real photos 53% instead of 27%), `--side-tone 0.35` | running since 11:45 on 2026-11-15, about 7.5 h. Why: tone2, low1 and the renders before them each traded one real board against another, and low1 lost kinds on Fenit A, a board it is trained on, as the renders grew to 78% of the photos. Whether the share of real photos is what does it is the question; no low views in this one |
 | `corners_s_canon1` | continues exp4's `last.pt`, `--kpt-sigma 0.1 --canonical-corners`, 12 epochs, `merged_rf_render` (as `merged_rf`, plus the renders whose corners are in the picture) | Finished 2026-11-14 11:12. `last.pt` (`scores/corners_s_canon1_last.txt`), median corner error in squares: **board B 0.27** (exp4 0.91; within half a square 83% against 32%), ChessReD test **0.14** (exp4 0.19, baseline 0.31), Fenit A 0.11. Which corner is a1 it gets right on ChessReD (301 of 306) and wrong on board B (11 of the 90 boards it finds there; the app takes a1 from the pieces). The first learned corner model that passes the package's tests (103 of 103, the G033 endgame fixture read right with the grid fit off). **In `Models/`**: see below |
 | `corners_s_exp2` | continues exp1 `last.pt`, `--kpt-sigma 0.05`, 20 epochs | dropped: exp3 and exp4 already show what a tighter tolerance does |
@@ -627,9 +627,10 @@ median colour of the pieces it calls White and of those it calls Black. A
 piece called Black whose colour is twice as near White's as the other Black
 pieces' is made White. Three guards: the two colours must be three spreads
 apart and White's the lighter; a piece with another standing in front of the
-patch its colour is measured on is left out (without that, five pieces of
-ChessReD test were changed, all wrongly, all behind a piece of the other
-side); and it works one way only, Black to White, because a light piece in a
+patch its colour is measured on is left out (without that, three pieces of
+ChessReD test are changed in Python, and five while the rule still worked
+both ways: all wrongly, all behind a piece of the other side); and it works
+one way only, Black to White, because a light piece in a
 shadow is as dark as a black one and little makes a dark piece light.
 
 End to end in Python with the pair in `Models/` (`--one-piece-per-spot 0.7
@@ -641,16 +642,23 @@ End to end in Python with the pair in `Models/` (`--one-piece-per-spot 0.7
 
 What it does to pieces that are right was measured where the sides are
 known: the 9,178 real photos of `merged_all5` with their labelled boxes
-(eleven sources; `runs/dumps/truth_all5.jsonl`). Changing sides both ways,
-the rule changes a right piece on 301 photos (3.3%), and four in five of the
+(eleven sources; `side_rule_check.py`, which writes
+`runs/dumps/truth_all5.jsonl`). Changing sides both ways, as the rule first
+did (that form is no longer in the code),
+it changed a right piece on 301 photos (3.3%), and four in five of the
 408 pieces are light pieces made Black: chesscog's light wood in the shadow
 of its spot lamps (229), then the tournament photos of
 `chess-vision-ljby5`, where hands cover pieces. One way, it is 65 photos
-(0.7%): 48 of ljby5's 1,500 and 17 of the other 7,678 (0.2%). Of white
-pieces relabelled Black one at a time it puts 76% back. Stricter numbers
+(0.7%): 48 of ljby5's 1,500 and 17 of the other 7,678 (0.2%). Of one
+white piece a photo relabelled Black it puts 76% back. Stricter numbers
 change fewer right pieces and mend fewer wrong ones: `nearer` 3 takes the
 65 photos to 42 and board B's 36 boards to 30; `apart` 6, to 55 and 34;
-both, to 37 and 28. The numbers stay where board B had them.
+both, to 37 and 28. The numbers stay where board B had them. Round
+them board B is flat only a little way (`runs/dumps/tone1_fenit_B.jsonl`,
+36 boards at the numbers as they are): `nearer` 1.5 to 2 gives 36 and 2.5
+gives 35; `chroma` 3 to 5 gives 36, 2.5 gives 35 and 2 gives 33; `apart` 2
+to 4 gives 36 and 1.5 gives 37; `cover` 0.1 to 0.2 gives 36 and 0.3 to 0.5
+gives 37.
 
 Then the second test set, as a test, in Python with the same flags for both
 (`runs/scores/heldout2_pair_tone1_canon1_spot07_base.txt` against
@@ -665,10 +673,14 @@ The two-way rule, run there first, changed 71 pieces for 14 squares more
 and one board fewer; that it was no better than a coin there is what sent
 me to the training photos, where the shadow showed. These Python runs
 left out `--max-side 1280` by mistake: they read the full-size photos, which
-ultralytics shrinks without smoothing, so samryan and the chess-cv games
-read far lower than through the app (6.6% and 5.1% of boards against 23%
-and 32%). Like is compared with like, but on poorer readings than the
-app's; what counts is the next paragraph.
+ultralytics shrinks without smoothing. That is why samryan reads so low in
+them (6.6% of boards; 18.8% with the flag, `heldout2_1280_tone1_canon1.txt`;
+23% through the app). The chess-cv games read low in Python with the flag
+or without (5.1% and 5.5% of boards, against 32% through the app), which
+the flag does not explain: the Python reads those photos without their
+EXIF turn (said where a1 is a dark square, above), and whether that is all
+of the gap has not been measured. Like is compared with like, but on
+poorer readings than the app's; what counts is the next paragraph.
 
 **Through the app** (`app_check` built from b3e18dd, pull request #28 in;
 the pair in `Models/`, `--odd-sides off` -> `on`, photo by photo;
@@ -679,9 +691,9 @@ gained and none lost. The one that loses is a five-piece endgame whose pawn
 is mended and which a1 from the pieces then reads half a turn round (63 ->
 54 squares, exact once turned). ChessReD test (295) and Fenit A (234): no
 reading differs. Second test set, as a test, by part: not one reading
-differs on any of the 1,619 photos. The app changes fewer pieces than the
-Python (41 against 48 on board B, none against 53 on the second test set)
-because it reads the photos better to begin with. So the rule is worth
+differs on any of the 1,619 photos (readings were compared there, pieces
+were not counted: one made White beside the board would not show). On board
+B the app changes 41 pieces where the Python changes 48. So the rule is worth
 fifteen boards on board B and nothing, either way, on the nineteen boards
 of the second test set: on by default in the app since pull request #30.
 
@@ -709,9 +721,9 @@ read as a queen and 2 the white one. `one_king_a_side` leaves them: it
 crowns a piece only if the model gave it a "king" score of 0.02, and these
 the model is sure are queens. A game position has both kings, and a king is
 seldom not found at all, so a side left without one takes its queen; of two
-queens, the one the model is less sure of (on board B that picks the king
-13 times and the queen 4; the taller box, measured in squares at its foot,
-13 and 7).
+queens, the one the model is less sure of (tried on board B's dump: 13
+photos gain a square and 4 lose one; with the taller box, measured in
+squares at its foot, 13 and 7).
 
 End to end in Python, on top of the side rule
 (`runs/scores/odd_sides_tone1.txt` -> `queen_for_king_tone1.txt`): **board
@@ -735,23 +747,38 @@ than the app's.
 app-side session on the development lists (pull request #29; the pair in
 `Models/`, one build; neither / queen for king / odd sides / both): board B
 16 / 17 / 31 / 32 boards exact; Fenit A 234 -> 230 with it (boards set up
-without two kings); ChessReD test unchanged. The Python gain (36 -> 45)
-does not carry over because the two read the model's scores differently:
-`evaluate.py` makes a piece's scores for other kinds from overlapping
-boxes, the app has the model's own twelve scores for the one box. On board
+without two kings); ChessReD test unchanged. Why the Python gain (36 ->
+45) does not carry over has not been measured. The two differ in the
+scores a piece has for other kinds (`evaluate.py` makes them from
+overlapping boxes, the app has the model's own twelve scores for the one
+box) and in the boxes themselves. What has been counted is this. On board
 B through the app 22 kings are read as queens; 11 of them are on readings
 that already have two "kings" (on 8 the model itself called another piece a
 king, on 3 the one-king rule crowned one), which the rule leaves alone; and
 where the switch acts (10 photos) the queen it crowns is the king on 3, a
-real queen on 2 and no queen of that side at all on 5. What to look at
-instead, with the app's scores written out (`app_check --pieces`, asked of
-the app-side session): a reading with two kings of which one is not, and
-which piece to crown.
+real queen on 2 and no queen of that side at all on 5.
 
-**What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
-16 boards are right, 30 are one square off and 16 two. The one square: P
-read as p 8 times, a black pawn on an empty square 6, Q as q 3, K as k 3,
-r as q 3. The phantom pawn is the head of a tall piece seen as a pawn of
+**The king step with the app's scores: tried, nothing taken.** With every
+piece's twelve scores written out (`app_check --pieces`,
+`runs/app_check/now30/pieces_*.json`) and what follows the pieces replayed
+in Python (`swift_reference.replay_pieces`, which gives the app's reading
+on all 692 development photos; `runs/dumps/king_replay.py`): on board B the
+model reads 28 kings as queens, and 27 of them have some "king" score, half
+of them under the 0.02 the rule asks for. Crowning a queen that has any
+king score before anything else crowns the king on 13 of the 21 kingless
+sides in reach instead of 6, and gives board B 31 -> 33 boards exact (more
+squares right on 5 photos, fewer on 3: a crowned king can turn a1) and
+Fenit A 234 -> 232; no floor at all for any piece, the same on board B and
+230 on Fenit A. Two boards for two: the step is left as it is.
+
+**What is left on board B through the app** (with the side of single
+pieces on, `runs/app_check/now30/now_fenit_B.txt`): 31 boards are right, 22
+are one square off, 10 two, and 18 are eight or more off (14 of them
+photos of one endgame, read half a turn round and with a side or a kind
+wrong as well). The one square: a black pawn on an empty square 6 times, r
+as q 3, k as q 3, r as b 2, the rest once each. Before the side of single
+pieces (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`) it was 16, 30 and
+16, and the one square was P read as p 8 times. The phantom pawn is the head of a tall piece seen as a pawn of
 its own: its box lies inside the king's or queen's, with too little overlap
 for the model's own NMS to drop it. **Tried and not taken:** dropping a box
 of which more than a share lies inside the larger box of a more confident
@@ -1332,8 +1359,13 @@ that the count is known:
 9. The side rule was then read here through the app, by part, before it
    was asked to be on by default: no reading differs.
 10. `pieces_s_crop2`, ahead on all three development sets, was read here
-   in Python before its app-side port was asked for, and the port was not
-   asked for: two parts gain much, two lose.
+   twice in Python before its app-side port was asked for, and the port
+   was not asked for. First on the full-size photos, by the same mistake
+   as above (`heldout2_crop2_canon1_spot07_base.txt` against
+   `heldout2_pair_tone1_canon1_spot07_base.txt`), then with `--max-side
+   1280`. Both say two parts gain much (samryan, the chess-cv games) and
+   chesscog and the Y-LIChess layouts lose; the Y-LIChess games gain in the
+   first (24 -> 29 boards) and lose in the second (41 -> 32).
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else

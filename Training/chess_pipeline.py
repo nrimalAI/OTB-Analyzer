@@ -417,11 +417,13 @@ def odd_sides(detections, colours, chroma=CHROMA_WEIGHT, nearer=SIDE_NEARER,
     patch (patch_hidden) is neither counted nor changed.
 
     The numbers were chosen on Fenit board B (brown "white" pieces, some of
-    which the model calls Black), where from 1.5 to 2 for `nearer`, 2 to 4
-    for `chroma`, 1.5 to 4 for `apart` and 0.2 to 0.5 for `cover` the result
-    is the same, and on the real training photos with their labelled sides,
-    where stricter numbers change fewer right pieces and mend fewer wrong
-    ones (Training/README.md, "The side of single pieces")."""
+    which the model calls Black), where the boards read fully right are the
+    same from 1.5 to 2 for `nearer`, 3 to 5 for `chroma`, 2 to 4 for `apart`
+    and 0.1 to 0.2 for `cover` (outside that they change by a board or a
+    few), and on the real training photos with their labelled sides
+    (side_rule_check.py), where stricter numbers change fewer right pieces
+    and mend fewer wrong ones (Training/README.md, "The side of single
+    pieces")."""
     idx = [k for k, c in enumerate(colours)
            if c is not None and not patch_hidden(detections, k, cover)]
     point = {k: np.array([colours[k][0], chroma * colours[k][1], chroma * colours[k][2]])

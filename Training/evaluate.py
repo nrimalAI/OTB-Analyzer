@@ -363,11 +363,13 @@ def main():
                     help="make White the single pieces called Black whose colour is "
                          "plainly the White side's in this photo (chess_pipeline.odd_sides)")
     ap.add_argument("--dump-pieces", metavar="FILE",
-                    help="write one JSON line a photo to FILE: the photo, the labelled "
-                         "board, the homography used, and every piece as it is given to "
-                         "the squares (class, confidence, box, colour as piece_colours "
-                         "measures it), to try a rule on the pieces without running the "
-                         "models again")
+                    help="write one JSON line to FILE for every photo whose board is "
+                         "found: the photo, the labelled board, the homography used, and "
+                         "every piece as it is given to the squares (class, confidence, "
+                         "box, colour as piece_colours measures it), to try a rule on the "
+                         "sides of the pieces without running the models again. It has "
+                         "neither the boxes under --conf nor a piece's scores for other "
+                         "kinds: for a rule on kinds use app_check --pieces")
     ap.add_argument("--grid-corners", action="store_true",
                     help="replace the corners by the classical grid fit "
                          "(grid_corners.py) where it accepts its own result; the "
@@ -414,6 +416,8 @@ def main():
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
+    if args.queen_for_king and not args.one_king:
+        ap.error("--queen-for-king acts inside the one-king step: give --one-king too")
     if (args.fit_window or args.shift_fit) and not args.grid_corners:
         ap.error("--fit-window and --shift-fit act on the grid fit: they need --grid-corners")
     if args.a1_dark and (args.gt_corners or args.a1_from_pieces is None):
