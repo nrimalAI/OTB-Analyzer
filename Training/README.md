@@ -581,12 +581,16 @@ Then once on the second test set, as a test
 98.28% of squares, 35 -> 41 of 102 boards exact; layouts 90.53% -> 90.80%
 (one window moved); ChessQ, chesscog, samryan and chess-cv unchanged, not
 one window moved. What it cannot mend is a photo where the corner model is
-a rank off too. What it gets wrong: a model whose four corners all lie
-more than half a square off the same way moves a window that was right.
-None was seen, but the margin is thin: on a fit left alone the largest
-mean offset of the model's corners is 0.72 squares on board B and 0.70 on
-ChessReD test, and only the corners' disagreement with each other keeps
-those windows where they are.
+a rank off too. What it gets wrong: a window that was right is moved when
+the model's corners lie, on average, more than half a square off along a
+rank or file and each within 0.75 of the whole square, so every corner at
+least a quarter of a square off the same way. None was seen, but the
+margin is thin: on a fit left alone the largest mean offset of the model's
+corners is 0.72 squares on board B and 0.70 on ChessReD test in Python,
+and only the corners' disagreement with each other keeps those windows
+where they are (through the app, on the 2,000 photos left alone where both
+found the board, the corner least far off the common way is never more
+than 0.14 squares off it).
 
 Through the app (app-side session's port, `app_check --fit-window on|off`;
 `docs/RECOGNITION.md`, "What the model's choice of window is worth"), the

@@ -103,9 +103,11 @@ def window_by_model(fit_corners, model_corners, near=WINDOW_NEAR):
     four lie within `near` squares of the same shift by one square (one rank,
     one file or both), the window is moved by it. Otherwise nothing changes:
     when the model's corners are near the fit's, and when they are too far
-    off or too unlike a shift to be believed. (What it gets wrong: a model
-    whose four corners all lie more than half a square off the same way
-    moves a window that was right.)
+    off or too unlike a shift to be believed. (What it gets wrong: a window
+    that was right is moved when the model's corners lie, on average, more
+    than half a square off along a rank or file and each of them within
+    `near` of the whole square, i.e. every corner at least a quarter of a
+    square off the same way at 0.75.)
 
     Returns (corners, (files, ranks)): the four corners in the order given,
     and the shift made, (0, 0) for none."""
