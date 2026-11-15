@@ -664,20 +664,28 @@ and the fit both found the board, how many windows the rule moved.
   has no say.
 - **How near the rule came to moving a window it should not.** It needs
   the mean of the four corners' offsets to round to a square, so to be
-  over half a square. Of the 2,000 photos left alone on which both found
-  the board, four have a mean over 0.4: two of board B (0.85 and 0.62) and
-  two of ChessQ (0.69 and 0.59). On each the model's worst corner is a
-  square and more from the fit's (4.2, 2.7, 1.5 and 1.4 squares) and the
-  four corners do not agree on one shift, so nothing moves. On every
-  other photo the mean is under 0.33. Nothing here says what a corner model that is itself a whole square off would
-  do: the rule would then move a right window, and no photo of these sets
-  shows it.
+  over half a square on a rank or a file. Of the 2,000 photos left alone
+  on which both found the board, four have such a mean: two of board B
+  (0.85 and 0.62 squares) and two of ChessQ (0.69 and 0.59). On those the
+  mean alone would have moved a window that was right, and only the
+  corners' disagreement held it: 4, 3, 2 and 2 of the four corners lie
+  outside the tolerance of 0.75, the furthest 3.5, 1.7, 1.1 and 1.3
+  squares from the shift (the model's worst corner is 4.2, 2.7, 1.5 and
+  1.4 squares from the fit's, along a rank or a file). On every other
+  photo the mean is under 0.33. **The weak spot**: a corner model that is
+  off the same way by more than half a square on average (and less than
+  a square and a half), with every corner within 0.75 of the whole
+  square, moves a window that was right. That takes every corner at
+  least a quarter of a square off that way: 0.26, 0.26, 0.75 and 0.75
+  along a rank move a window. No photo of these sets comes near it: on
+  the 2,000 left alone, the corner least far off the common way is never
+  more than 0.14 squares off it.
 - **Windows moved on purpose** (`app_check --window F --shift-fit 0,1`; a
   window is moved back when every corner of the model lies within 0.75
   squares of where the fit had it, so each of the four directions gives
   the same count): board B 80 of 95, Fenit A 273 of 274, ChessReD test 287
-  of 288. In Python the reference counts 60 of 93, 272 of 278 and 287 of
-  289: on board B the app's corners of the model and of the fit lie
+  of 288. In Python the reference counts 60 of 92, 277 of 278 and 287 of
+  289 (`Training/README.md`): on board B the app's corners of the model and of the fit lie
   nearer each other than the Python's do, for reasons not measured (the
   two resize the photo for the model differently, and their fits differ
   on some photos). With 0.5
@@ -709,9 +717,10 @@ and the fit both found the board, how many windows the rule moved.
   no say where only one of the two finds the board (257 of the 1,619
   photos of the second held-out set: the fit alone, or the model's
   corners where the fit rejects itself), or where the model is off by a
-  rank as well. And it trusts the
-  corner model to be less than a whole square off: true of this one on
-  these sets, and to be measured again with every new corner model.
+  rank as well. And it trusts the corner model not to be off the same way
+  by more than half a square on average with every corner a quarter of a
+  square or more off: true of this one on these sets by a wide margin,
+  and to be measured again with every new corner model.
 
 ## What a dark a1 is worth
 
