@@ -409,10 +409,27 @@ so for the third pair it is no longer a set that nothing was chosen on.)
     pieces overrule it on 24 boards, 16 by half a turn and 8 by a quarter.
     The head start of 6 for the corner model's a1 was chosen on ChessReD
     test, where no value changes anything with this pair. On the
-    development sets, head start 6 / 12 / 20 / 40 / none of the pieces:
-    Fenit A 231 / 243 / 251 / 255 / 255 boards, board B 94.36% / 94.36% /
-    93.83% / 92.20% / 76.50% of squares (16 / 16 / 16 / 15 / 7 boards),
-    ChessReD test 295 throughout.
+    development sets, head start 0 / 3 / 6 / 9 / 12 / 15 / 20 / 40 / none
+    of the pieces: Fenit A 214 / 223 / 231 / 236 / 243 / 247 / 251 / 255 /
+    255 boards; board B 94.36% of squares from 0 to 12, then 94.23% /
+    93.83% / 92.20% / 76.50% (16 boards up to 20, then 15 and 7); ChessReD
+    test 292 / 294 boards at 0 and 3, 295 from 6 up.
+  - **A head start of 12 was tried and fails the test; 6 stays.** The
+    development sets speak for it: 12 boards gained on Fenit A, nothing
+    lost on board B or ChessReD test. On the second held-out set it reads
+    25 photos worse and 5 better than 6 does (two-sided sign test p <
+    0.001): 95.86% -> 95.71% of squares, 439 -> 440 boards. Y-LIChess 14
+    photos worse and 2 better, samryan 10 and 1, ChessQ 1 and 2, chesscog
+    and chess-cv not one photo different; as 3:4 photos nothing moves on
+    ChessReD test and board B. On boards the corner model has not seen its
+    a1 is wrong often enough that the pieces must be able to overrule it;
+    Fenit A is a board it was trained on, and board B did not show the
+    cost. (The test set was used to reject a change here, not to pick a
+    value; it is one more look at that set. Values under 6 were not tried
+    on it: the development sets are against them, and the test set is not
+    there to find one.) A single number does not serve both kinds of
+    board: what could is something that tells a board the corner model
+    knows from one it does not.
   - **The grid fit** changes nothing at all on samryan, chess-cv and
     chesscog (not one photo reads differently), mends board B (131 squares
     on 11 photos, 2 lost) and ChessQ, and costs on Y-LIChess: 54 photos
@@ -421,11 +438,11 @@ so for the third pair it is no longer a set that nothing was chosen on.)
     off, on 16 of the 18 by the count of the reviewer of pull request #20).
     Over the second held-out set that is 0.4 points of squares lost and 5
     boards gained.
-  - **Neither is changed here.** What to do about it (a larger head start,
-    which the figures above speak for; the model's corners where the fit is
-    far from them) belongs in the reference first, chosen on board B, Fenit
-    A and ChessReD test; Y-LIChess is part of the test set and shows the
-    cost, it cannot be used to tune it away.
+  - **Neither step is changed.** What to do about the grid fit (the
+    model's corners where the fit is far from them) belongs in the
+    reference first, chosen on board B, Fenit A and ChessReD test and then
+    tested; Y-LIChess is part of the test set and shows the cost, it cannot
+    be used to tune it away.
 - **The rule for the kings** is worth 109 boards of the second held-out set
   (330 -> 439), one on board B and one on Fenit A, none on ChessReD test.
 - **What the app marks for the user to check** (confidence under 0.85), and
@@ -911,8 +928,9 @@ are wrong and the corner model does not correct them. The fixture as a 3:4
 photo scores +2.5 the right way up and the corner model has a1 at the
 wrong end, so it is read right with a head start under 5 and turned from 5
 up (the reviewer of pull request #20 tried 0, 3, 4, 5, 6 and 12). A smaller
-head start is not on offer: Fenit A wants a larger one ("What the app
-reads with the third pair"). Pull request #19 puts this corner model in
+head start is not on offer: it loses boards on Fenit A and on ChessReD
+test, and a larger one fails the second held-out set ("What the app reads
+with the third pair"). Pull request #19 puts this corner model in
 `Models/` all the same, because the pair reads far more boards, also as
 3:4 photos, and the owner was told of this cost with the way to take the
 corner model out again. The tests say so each time they
