@@ -54,8 +54,8 @@ now.
    of the same shift by one square (a rank, a file or both), the fit's
    window is moved by it, along the fit's own lines. Nothing is moved when
    the model's corners are nearer the fit's than half a square on average,
-   when they are more than a square off, or when the four do not agree on
-   one shift. The steps after this one (the dark a1, the pieces) see the
+   when they are a square and a half or more off on average, or when the
+   four do not agree on one shift. The steps after this one (the dark a1, the pieces) see the
    window as moved.
 4. Piece model: boxes, each with the model's score for every class. The
    class with the highest score is what the piece is taken for, and that
@@ -344,10 +344,18 @@ before.
   to move it back, give corners that are no board, and go through the
   recognizer's own code on a drawn board: the fit's lines with the
   model's window where the model has the board a rank on, the fit's
-  window where the rule is off, and no move where the fit stands alone or
-  rejects itself. One builds the recognizer as the app does and with the
-  rule switched off and requires the two to differ there, since the four
-  fixture photos read the same either way.
+  window where the rule is off, where the model is two ranks on or one of
+  its corners does not agree with the other three, and no move where the
+  fit stands alone or rejects itself. One builds the recognizer as the
+  app does and with the rule switched off and requires the two to differ
+  there (`corners(model:in:)`, the method `recognize` calls), since the
+  four fixture photos read the same either way; another requires that
+  what `app_check --window` is given is what that method does on the
+  fixture photos. **No test runs a photo whose window moves through
+  `recognize` itself**: the fixtures have none, and the one development
+  photo that has (Fenit A's, below) is not in the repository. What stands
+  in for it is `app_check`, whose readings change on exactly the photos
+  whose window `--window` reports as moved.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -598,7 +606,15 @@ the Mac mini on 2026-11-15 with the third pair through `app_check`,
 everything else as the app runs it (the dark a1 on), the rule off and on
 through the same binary; with it off every photo reads as in the last
 column of "What a dark a1 is worth". The development sets were run first;
-the second held-out set was then run once, as a test. Squares right; boards
+the second held-out set was then run once, as a test. **It is not a blind
+test of this rule on Y-LIChess**: the fault the rule mends, a window a rank
+off, was found on Y-LIChess photos of that very set (by the reviewers of
+pull requests #20 and #24), and all 18 windows it moves there are those
+photos. Its figures for Y-LIChess say that the fault found there is
+mended; what is blind in them is that nothing else changed, there or on
+the other four parts. Nothing in the rule was set on that set: the
+tolerance is the reference's, from board B, and the rule was on by default
+before the set was run. Squares right; boards
 exact; boards exact or half a turn away; and, of the photos where the model
 and the fit both found the board, how many windows the rule moved.
 
@@ -624,8 +640,8 @@ and the fit both found the board, how many windows the rule moved.
   full boards named there are among them: read at 19 to 24 squares of 64
   before, a rank off and turned by a quarter, they now have 61 to 64
   right, five of them all 64 (`wood_0150`, `0156`, `0158`, `0165`,
-  `0178`) and the others one to three squares short. `wood_0148` (Black's pieces alone) goes from 43 to 63. In all,
-  17 photos gain 665 squares.
+  `0178`) and the others one to three squares short. `wood_0148` (Black's
+  pieces alone) goes from 43 to 63. In all, 17 photos gain 665 squares.
 - **The one that loses squares is mended too.** `wood_0202` is a layout
   with every piece on one half of the board, kinds and sides in no order a
   game has. It goes from 24 squares to 0: before, a rank off and a quarter
@@ -652,8 +668,8 @@ and the fit both found the board, how many windows the rule moved.
   the board, four have a mean over 0.4: two of board B (0.85 and 0.62) and
   two of ChessQ (0.69 and 0.59). On each the model's worst corner is a
   square and more from the fit's (4.2, 2.7, 1.5 and 1.4 squares) and the
-  four corners do not agree on one shift, so nothing moves. On every other photo the mean is 0.32 or less. Nothing
-  here says what a corner model that is itself a whole square off would
+  four corners do not agree on one shift, so nothing moves. On every
+  other photo the mean is under 0.33. Nothing here says what a corner model that is itself a whole square off would
   do: the rule would then move a right window, and no photo of these sets
   shows it.
 - **Windows moved on purpose** (`app_check --window F --shift-fit 0,1`; a
@@ -661,8 +677,10 @@ and the fit both found the board, how many windows the rule moved.
   squares of where the fit had it, so each of the four directions gives
   the same count): board B 80 of 95, Fenit A 273 of 274, ChessReD test 287
   of 288. In Python the reference counts 60 of 93, 272 of 278 and 287 of
-  289: the app's corner model, fed by Vision's resize, lies nearer the fit
-  on board B than the Python's reading of the same model does. With 0.5
+  289: on board B the app's corners of the model and of the fit lie
+  nearer each other than the Python's do, for reasons not measured (the
+  two resize the photo for the model differently, and their fits differ
+  on some photos). With 0.5
   and 0.95 for the tolerance the app's count on board B is 68 and 88
   (Python 46 and 66). On the second held-out set (not to be chosen on,
   and it was not) 0.5 and 0.95 would move the same 18 windows.
@@ -677,10 +695,11 @@ and the fit both found the board, how many windows the rule moved.
 - **Against the goal** on boards nobody trained on: 464 of 1,619 photos
   fully right (29%) and still 16 of board B's 100; the goal is 85%.
 - **What the app marks** (confidence under 0.85) on the second held-out
-  set: 58% of the wrong pieces (52% without the rule: the wrong pieces
-  fall from 3,038 to 2,717 and the marked ones among them stay 1,581,
-  so the pieces the window put right were hardly ever marked), 8.3% of
-  the right ones, 2.7 squares a photo.
+  set: 58% of the wrong pieces (1,581 of 2,717; without the rule 52%,
+  1,582 of 3,038), 8.3% of the right ones (2,835 of 33,995; 2,798 of
+  33,533), 2.7 squares a photo. All of the change is Y-LIChess: 233 of
+  450 wrong pieces marked against 234 of 771, 286 of 3,015 right ones
+  against 249 of 2,553.
 - **Time**: none that can be measured; the rule is two four-point
   homographies. Processor time over a set with the rule against without:
   ChessReD test 65.8 s against 65.2 s, Fenit A 89.6 s against 89.7 s.

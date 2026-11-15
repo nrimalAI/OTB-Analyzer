@@ -53,7 +53,9 @@
 //                   Python on the same corners. With --shift-fit FILES,RANKS
 //                   the fit's window is first moved by that many squares on
 //                   purpose (as `evaluate.py --shift-fit`), to count how
-//                   many the model moves back.
+//                   many the model moves back. The rule is asked whatever
+//                   --fit-window, --grid-fit and --a1-prior say: they play
+//                   no part here.
 //   --grid FILE     run no model: write what the classical grid fit
 //                   (GridCorners, the port of grid_corners.py) makes of each
 //                   photo to FILE, for `swift_reference.py compare`.
@@ -139,12 +141,12 @@ var listPath: String?
 var redraw: Int?
 var portrait = false
 var verbose = false
-var a1Prior: Double? = 6
+var a1Prior: Double? = CoreMLBoardRecognizer.Default.a1Prior
 var a1PriorGiven = false
 var gridPath: String?
-var gridFit = true
+var gridFit = CoreMLBoardRecognizer.Default.gridFit
 var gridFitGiven = false
-var sidesFromColour = false
+var sidesFromColour = CoreMLBoardRecognizer.Default.sidesFromColour
 var sidesFromColourGiven = false
 var oneKing: Bool?
 var a1Dark: Bool?
@@ -195,8 +197,9 @@ while !arguments.isEmpty {
         windowPath = arguments.removeFirst()
     case "--shift-fit":
         let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Int($0) }
-        guard values.count == 2, let files = values[0], let ranks = values[1] else {
-            fail("--shift-fit takes two whole numbers with a comma between them: files,ranks")
+        guard values.count == 2, let files = values[0], let ranks = values[1], (files, ranks) != (0, 0)
+        else {
+            fail("--shift-fit takes two whole numbers, not both 0, with a comma between them: files,ranks")
         }
         shiftFit = (files, ranks)
     case "--flag-below":

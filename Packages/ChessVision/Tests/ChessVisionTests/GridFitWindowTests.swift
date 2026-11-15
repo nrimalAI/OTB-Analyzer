@@ -212,12 +212,28 @@ struct GridFitWindowTests {
         #expect(GridCorners.windowByModel(fit: line, model: rank).corners == line)
         #expect(GridCorners.shifted(line, files: 0, ranks: 1) == nil)
         #expect(GridCorners.shifted(Array(fit.dropLast()), files: 0, ranks: 1) == nil)
-        // A corner of the model's that is not a number.
-        for bad in [CGFloat.nan, .infinity] {
-            var model = rank
-            model[2].x = bad
-            let window = GridCorners.windowByModel(fit: fit, model: model)
-            #expect(window.corners == fit && !window.moved)
+        // A corner of the model's that is not a number: on a board seen
+        // from above (where the projection itself gives up) and on one seen
+        // at a slant (where it gives a point that is not a number).
+        let slant = [
+            CGPoint(x: 150, y: 820), CGPoint(x: 260, y: 240),
+            CGPoint(x: 790, y: 215), CGPoint(x: 930, y: 790),
+        ]
+        for board in [fit, slant] {
+            let on = try #require(GridCorners.shifted(board, files: 0, ranks: 1))
+            #expect(GridCorners.windowByModel(fit: board, model: on).moved)
+            for bad in [CGFloat.nan, .infinity, -.infinity] {
+                for corner in 0..<4 {
+                    var model = on
+                    model[corner].x = bad
+                    var window = GridCorners.windowByModel(fit: board, model: model)
+                    #expect(window.corners == board && !window.moved)
+                    model = on
+                    model[corner].y = bad
+                    window = GridCorners.windowByModel(fit: board, model: model)
+                    #expect(window.corners == board && !window.moved)
+                }
+            }
         }
         // A tolerance of nothing moves nothing but an exact shift.
         var near = rank
@@ -258,6 +274,19 @@ struct GridFitWindowTests {
         let agreed = try #require(CoreMLBoardRecognizer.corners(
             model: agreeing, in: image, gridFit: true, fitWindow: true))
         #expect(agreed.corners == GridCorners.turned(found, nearestTo: agreeing))
+
+        // A model two ranks on, and one with three corners a rank on and
+        // the fourth where the fit has it: not to be believed, the fit's
+        // window stays (the tolerance is the reference's, not a wider one).
+        let twoOn = try #require(GridCorners.shifted(truth, files: 0, ranks: 2))
+        var unlike = rank
+        unlike[2] = truth[2]
+        for model in [twoOn, unlike] {
+            let kept = try #require(CoreMLBoardRecognizer.corners(
+                model: model, in: image, gridFit: true, fitWindow: true))
+            #expect(kept.corners == GridCorners.turned(found, nearestTo: model))
+            #expect(Self.distance(kept.corners, truth) < 3)
+        }
 
         // The fit alone, the fit rejecting itself, the fit switched off:
         // the rule has nothing to say.

@@ -254,9 +254,10 @@ struct GridSquareColoursTests {
                 #expect(GridCorners.squareColours(in: image, corners: ring, whole: whole) == alone)
             }
             let model = fit.corners.map { CGPoint(x: $0.x + 20, y: $0.y - 15) }
-            let handed = try #require(
-                CoreMLBoardRecognizer.corners(model: model, in: image, gridFit: true, fitWindow: false, whole: whole))
-            let own = try #require(CoreMLBoardRecognizer.corners(model: model, in: image, gridFit: true, fitWindow: false))
+            let handed = try #require(CoreMLBoardRecognizer.corners(
+                model: model, in: image, gridFit: true, fitWindow: false, whole: whole))
+            let own = try #require(CoreMLBoardRecognizer.corners(
+                model: model, in: image, gridFit: true, fitWindow: false))
             #expect(handed.corners == own.corners && handed.fromModel == own.fromModel)
 
             // A working image that is not the whole photo's (here: of its
