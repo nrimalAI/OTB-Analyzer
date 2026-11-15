@@ -147,19 +147,21 @@ import Testing
         #expect(CoreMLBoardRecognizer.Default.gridFit)
     }
 
-    /// The side of single pieces is off unless asked for (it is in the
-    /// reference to be measured through the app first), and the recognizer
-    /// hands its own setting on to what follows the models (`place`, the
-    /// method `recognize` calls): a drawn board with two cream pawns the
-    /// model calls Black.
+    /// The side of single pieces is on unless switched off
+    /// (`docs/RECOGNITION.md`, "What the side of single pieces is worth"),
+    /// and the recognizer hands its own setting on to what follows the
+    /// models (`place`, the method `recognize` calls). The fixture photos
+    /// read the same with the step and without, so they would not notice
+    /// it missing: here a drawn board with two cream pawns the model calls
+    /// Black.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
-    func testOddSidesIsOffByDefaultAndReachesWhatFollowsTheModels() throws {
+    func testOddSidesIsOnByDefaultAndReachesWhatFollowsTheModels() throws {
         let models = try Self.models.get()
         let asBuilt = try makeRecognizer()
-        let asked = try CoreMLBoardRecognizer(
-            cornerModel: models.corners, pieceModel: models.pieces, oddSides: true)
-        #expect(asBuilt.oddSides == false && CoreMLBoardRecognizer.Default.oddSides == false)
-        #expect(asked.oddSides == true)
+        let without = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, oddSides: false)
+        #expect(asBuilt.oddSides == true && CoreMLBoardRecognizer.Default.oddSides == true)
+        #expect(without.oddSides == false)
 
         let (image, found) = try OddSidesTests.drawn()
         let corners = [
@@ -172,13 +174,14 @@ import Testing
             return placed.pieces.values.filter { $0.piece.color == .white }.count
         }
         #expect(found.filter { $0.color == .white }.count == 6)
-        #expect(try whites(asBuilt) == 6)
-        #expect(try whites(asked) == 8)
+        #expect(try whites(asBuilt) == 8)
+        #expect(try whites(without) == 6)
     }
 
-    /// A queen for a king is off unless asked for, as the side of single
-    /// pieces is, and the recognizer hands its own setting on to what
-    /// follows the models.
+    /// A queen for a king is off unless asked for (through the app it gains
+    /// a board of Fenit board B and loses four of Fenit A,
+    /// `docs/RECOGNITION.md`, "A queen for a king"), and the recognizer
+    /// hands its own setting on to what follows the models.
     @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
     func testQueenForKingIsOffByDefaultAndReachesWhatFollowsTheModels() throws {
         let models = try Self.models.get()
@@ -217,11 +220,14 @@ import Testing
         let fixtures = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
         let manifest = try JSONDecoder().decode(
             [String: String].self, from: Data(contentsOf: fixtures.appending(path: "expected.json")))
-        // As the app runs it, and with both switches that are off asked for.
+        // With both colour steps off, and as the app runs it but with the
+        // queen for a king asked for.
         let recognizers = [
-            try makeRecognizer(),
             try CoreMLBoardRecognizer(
-                cornerModel: models.corners, pieceModel: models.pieces, oddSides: true, queenForKing: true),
+                cornerModel: models.corners, pieceModel: models.pieces, oddSides: false),
+            try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, queenForKing: true),
+            try makeRecognizer(),
         ]
         for file in manifest.keys.sorted() {
             let source = try #require(
@@ -258,8 +264,12 @@ import Testing
                 }
             }
             // With the colour steps off a piece stands as the model read it.
-            let asBuilt = try recognizers[0].diagnosePieces(photo)
-            #expect(asBuilt.pieces.allSatisfy { $0.label == $0.modelLabel }, "\(file)")
+            let plain = try recognizers[0].diagnosePieces(photo)
+            #expect(plain.pieces.allSatisfy { $0.label == $0.modelLabel }, "\(file)")
+            // On the fixtures the side of single pieces changes nothing.
+            let asBuilt = try recognizers[2].diagnosePieces(photo)
+            #expect(asBuilt.pieces.map(\.label) == plain.pieces.map(\.label), "\(file)")
+            #expect(asBuilt.placement == plain.placement, "\(file)")
         }
     }
 

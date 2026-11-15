@@ -25,8 +25,8 @@
 //                   pieces where they contradict the piece model (default
 //                   off, as in the app).
 //   --odd-sides on|off  a piece called Black becomes White when its colour is
-//                   plainly the White side's in this photo (default off, as
-//                   in the app).
+//                   plainly the White side's in this photo (the app's
+//                   default: on).
 //   --one-king on|off  exactly one king a side, from the scores the piece
 //                   model gave each piece for every kind (the app's default:
 //                   on).

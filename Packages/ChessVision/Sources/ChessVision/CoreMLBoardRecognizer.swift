@@ -52,7 +52,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let a1Dark: Bool
     /// Internal for testing.
     let fitWindow: Bool
-    /// Internal for testing: the app's default must stay off.
+    /// Internal for testing.
     let oddSides: Bool
     /// Internal for testing: the app's default must stay off.
     let queenForKing: Bool
@@ -66,7 +66,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         public static let oneKing = true
         public static let a1Dark = true
         public static let fitWindow = true
-        public static let oddSides = false
+        public static let oddSides = true
         public static let queenForKing = false
     }
 
@@ -114,16 +114,18 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///   - oddSides: a piece the piece model calls Black becomes White when
     ///     its colour in the photo is plainly the White side's: twice as
     ///     near the colour of the pieces called White as that of the other
-    ///     pieces called Black (`OddSides`). Off unless asked for: it is in
-    ///     the reference to be measured through the app first
-    ///     (`Training/README.md`, "The side of single pieces").
+    ///     pieces called Black (`OddSides`). On: through the app it mends
+    ///     15 boards of Fenit board B, the board its numbers were chosen
+    ///     on, and changes no reading of the other development sets nor of
+    ///     the second held-out test set (`docs/RECOGNITION.md`, "What the
+    ///     side of single pieces is worth").
     ///   - queenForKing: with `oneKing`, a side left without a king and
     ///     without a piece the model gave a "king" score takes its queen
     ///     for one, of several the one the model is least sure of
-    ///     (`OneKingASide`). Off unless asked for: in the reference to be
-    ///     measured through the app first (`Training/README.md`, "A side
-    ///     without a king takes its queen"). Has no effect with `oneKing`
-    ///     off.
+    ///     (`OneKingASide`). Off unless asked for: through the app it gains
+    ///     one board of Fenit board B and loses four of Fenit A
+    ///     (`docs/RECOGNITION.md`, "A queen for a king"). Has no effect
+    ///     with `oneKing` off.
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
