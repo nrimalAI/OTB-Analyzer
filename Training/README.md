@@ -540,7 +540,7 @@ turns on a known board and makes them on an unknown one, and the unknown
 one is what the app is for.
 
 **The corner model picks the grid fit's window (2026-11-15; in the
-reference, not yet in the app).** The classical fit finds the lines of the
+reference and, since pull request #25, in the app, on by default).** The classical fit finds the lines of the
 grid more exactly than a model does, but it has to choose which 8x8 squares
 of the grid are the board, and a border that looks like a rank of squares
 makes it take a window one rank off: 16 to 18 photos of the Y-LIChess
@@ -571,8 +571,26 @@ Then once on the second test set, as a test
 (one window moved); ChessQ, chesscog, samryan and chess-cv unchanged, not
 one window moved. What it cannot mend is a photo where the corner model is
 a rank off too, and a model that is consistently one square off would move
-a right window: none was seen. The app-side session has been asked to port
-it.
+a right window: none was seen.
+
+Through the app (app-side session's port, `app_check --fit-window on|off`;
+`docs/RECOGNITION.md`, "What the model's choice of window is worth"), the
+pair in `Models/`, off -> on: ChessReD test and board B unchanged, no
+window moved; Fenit A 233 -> 234 boards exact (one endgame whose window
+the app's fit had a file off, 55 -> 64 squares); second test set, once, as
+a test: 96.38% -> 97.00% of squares, 459 -> 464 boards exact, 18 windows
+moved, all on Y-LIChess (89.80% -> 94.81%; 17 of the 18 gain, one ends on
+the right squares half a turn round), and readings a quarter turn off go
+from 19 to 1. Swift and Python make the same shift on all 2,019 photos
+where both found the board.
+
+The gain on Y-LIChess is not a blind test of the rule: the fault was found
+on those very photos, and all the windows moved are theirs. What is blind
+is that nothing else on the second test set changed. The tolerance came
+from board B and was not looked at on the second test set; through the app
+on board B windows moved on purpose come back on 68 / 80 / 88 of 95 at
+0.5 / 0.75 / 0.95, so a wider tolerance is an open choice for the
+development sets.
 
 **What is left on board B through the app** (`runs/app_check/tone1/tone1_canon1_fenit_B.txt`):
 16 boards are right, 30 are one square off and 16 two. The one square: P
@@ -807,17 +825,17 @@ tests, and the first corner model does not. Until pull request #15 the piece
 model beside it was the baseline piece weights exported with NMS across
 classes.
 
-**What a new model has to beat** (through `app_check` built from c8afd31
-or later, with the app's defaults: grid fit on, a1 on a dark square, head
-start 6, one king a side, colour step off, each photo decoded once; the
-pair in `Models/`, `runs/app_check/dark/now_*.txt`, and `dark_h2/now_*.txt`
-for the second test set): ChessReD test 295 of
-306 boards exact, two more once turned by 180 degrees; Fenit board B 94.48%
-of squares, 16 boards exact, every board found; Fenit A 98.09% of squares,
-233 of 286 exact; second test set 96.38% and 459 of 1,619;
-as 3:4 photos ChessReD test 282, board B 94.45%. The outputs in
-`runs/app_check/tone1/` are from the build before a1 on a dark square:
-re-run the pair in `Models/` with the build a candidate is run with. Compare two models only through the same
+**What a new model has to beat** (through `app_check` built from 0b9cd6f
+or later, with the app's defaults: grid fit on, its window where the corner
+model has the board, a1 on a dark square, head start 6, one king a side,
+colour step off, each photo decoded once; the pair in `Models/`,
+`runs/app_check/window/now_*.txt`, and `window_h2/now_*.txt` for the second
+test set): ChessReD test 295 of 306 boards exact, two more once turned by
+180 degrees; Fenit board B 94.48% of squares, 16 boards exact, every board
+found; Fenit A 98.14% of squares, 234 of 286 exact; second test set 97.00%
+and 464 of 1,619; as 3:4 photos ChessReD test 282, board B 94.45%. Outputs
+in `runs/app_check/dark*/` and `tone1/` are from earlier builds: re-run the
+pair in `Models/` with the build a candidate is run with. Compare two models only through the same
 build of `app_check`: every app-side step moved these numbers a little, and
 before pull request #9 it read different pixels. And the model has to pass
 the fixture tests of `./Scripts/swift-test.sh`: the four fixtures with the
