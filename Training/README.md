@@ -423,6 +423,32 @@ pieces marked on board B 57% (147 of 259; render3 54% of 351), ChessReD
 test 50% (12 of 24), Fenit A 23%; right pieces marked on board B 15%; on
 the second test set 49% of wrong pieces and 8.2% of right ones.
 
+**What the app-side steps are worth with this pair** (app-side session, its
+build of the same source; per-photo outputs `runs/app_check/tone1_switches/`;
+tables in `docs/RECOGNITION.md`, "What the app reads with the third pair").
+Much less than before, and on two sets they cost:
+
+- *a1 from the pieces.* Board B needs it: 76.5% of squares without, 94.3%
+  with (the corner model's own a1 is wrong there). On Fenit A, where the
+  corner model has a1 right by itself, the pieces overrule it: 254 boards
+  exact without the step, 230 with (16 turned by a half, 8 by a quarter).
+  The head start given to the model's own a1 (`--a1-prior`, 6 in the app)
+  at 6 / 12 / 20 / 40 / pieces off: Fenit A 231 / 243 / 251 / 255 / 255
+  boards; board B 94.36 / 94.36 / 93.83 / 92.20 / 76.50% of squares;
+  ChessReD test 295 at every value. So 12 would cost nothing on these three
+  sets and gain 12 boards on Fenit A. Not changed here. No value mends the
+  two G033 endgames: they score better turned at any head start.
+- *The grid fit.* It mends board B (+131 squares on 11 photos, 2 lost) and
+  changes one Fenit A photo for the worse. On the second test set it
+  changes nothing on three parts, mends ChessQ, and on Y-LIChess 54 photos
+  gain 196 squares and 21 lose 680: on 18 of them the fit accepts a grid
+  that is not the board, mostly one rank off. The development sets have no
+  such photo, so a rule against it cannot be chosen on them, only shown to
+  cost nothing there.
+- Quarter turns are a real part of what is left: with the app's defaults 26
+  boards of the second test set are exact once turned by a quarter (12 by a
+  half), and 8 against 16 on Fenit A.
+
 The goal is still far: 16% of boards fully right on board B and 27% on the
 second test set, where the target is 85%. What is wrong on board B now,
 with labelled corners: P read as p 39 times, kings read as queens 23 times,
@@ -519,7 +545,8 @@ right ones marked, 2.7 squares a photo (first pair 79%, 48%, 11.3); at 0.7
 20% and 3.3%, at 0.5 7.8% and 1.3%.
 
 **What the app-side steps are worth with it** (app-side session, the build
-of ae9dd12; tables in `docs/RECOGNITION.md`, "What the app reads now";
+of ae9dd12; tables in `docs/RECOGNITION.md`, "What the app read with the
+second pair";
 per-photo outputs `runs/app_check/render3_switches/`). The rule for the
 kings off: ChessReD test 288 boards exact (the same), board B 88.45% and 5
 (on: 88.55% and 6), Fenit A 184 (on: 183; both losses are positions without
