@@ -642,6 +642,51 @@ so for the third pair it is no longer a set that nothing was chosen on.)
   Much as with the second pair: 2.7 squares a photo on unseen boards, half
   of the wrong pieces among them. The threshold is the owner's to move.
 
+## The side of single pieces: off, and what it does on the development sets
+
+The second half of step 5 (`OddSides`), ported on 2026-11-15 at the
+reference's request and **switched off in the app**: the reference chose
+its numbers on board B, and whether it goes on is decided from a run
+through the app on the development sets and on the second held-out set by
+part, which is the training session's to make and is not made here
+(`Training/README.md`, "The side of single pieces"). What follows is only
+the check of the port, on the three development sets: the third pair
+through `app_check`, everything else as the app runs it, the step off and
+on through the same binary; with it off every photo reads as in "What the
+model's choice of window is worth". Squares right; boards exact; boards
+exact or half a turn away.
+
+| Set (photos) | Step off (the app) | Step on | Pieces made White |
+|---|---|---|---|
+| Fenit board B (100) | 94.48%; 16; 19 | 94.94%; 31; 35 | 41 on 34 photos |
+| Fenit A (286) | 98.14%; 234; 256 | 98.14%; 234; 256 | none |
+| ChessReD test (306) | 99.80%; 295; 297 | 99.80%; 295; 297 | none |
+
+- **Board B is the board the numbers were chosen on**, so its gain is not
+  a test of the rule; Fenit A and ChessReD test say that it leaves alone
+  boards the model reads well, photo for photo.
+- On board B 34 photos read differently. 38 squares that were wrong are
+  right, 3 stay wrong, and on 33 of the 34 photos no square is lost; 15
+  more boards are fully right.
+- **One photo loses squares and is mended all the same**:
+  `8-6K1-7P-5p2-4k3-6P1-8-8.jpg`, five pieces. Without the step it has 63
+  squares, a white pawn read as black. With it every piece is right, and
+  the pieces, now three White and two Black, are read the other way
+  round: 54 squares, all 64 once turned by half (one tap). It is an
+  endgame that points the wrong way ("Known weak spot"), and the wrong
+  pawn had happened to hold it.
+- **The Swift against the Python on the same boxes** (`app_check
+  --colours`, `swift_reference.py colours`): the same class for every one
+  of the 11,776 pieces of the three sets, from the Python's colours and
+  from the Swift's, and the same answer on which pieces stand behind
+  another (955 of them).
+- Time, as processor seconds over a set, on against off: board B 21.3
+  against 18.0, Fenit A 95.9 against 92.2, ChessReD test 67.7 against
+  72.7. The step reads the middle of every piece's box once; single runs
+  on a Mac mini that was training.
+- A piece whose side the step changes keeps the model's confidence, as
+  in the reference, so the app marks it no more than before.
+
 ## What the model's choice of window is worth
 
 The rule of step 3: where the corner model and the grid fit both find the
