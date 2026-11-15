@@ -7,6 +7,7 @@ is checked against this folder's Python and not against a second opinion.
     python swift_reference.py king-cases
     python swift_reference.py dark-cases
     python swift_reference.py window-cases
+    python swift_reference.py odd-cases
     python swift_reference.py grid --list photos.json --out python_grid.json
     python swift_reference.py compare --python python_grid.json --swift swift_grid.json
     python swift_reference.py colours --swift swift_colours.json [--list photos.json]
@@ -60,6 +61,17 @@ the tolerance), the model's corners a rotation on, other tolerances; and where
 a window lies when it is moved on purpose (evaluate.py --shift-fit). Written
 to Fixtures/window_cases.json, replayed by GridFitWindowTests.
 
+odd-cases: the side of single pieces. What chess_pipeline.odd_sides and
+patch_hidden make of detections with their colours: boards where the model
+calls a few light pieces Black, each of the rule's conditions from both
+sides (twice as near; three spreads apart, with the spread on its floor and
+above it; White the lighter side, and equally light; two pieces a side; a
+fifth of the patch covered, a foot lower and level), pieces without a
+colour, a box of no width, random boards with boxes that overlap, and the
+drawn picture of colour-cases with three of its brown pieces called Black.
+Written to Fixtures/odd_cases.json, replayed by OddSidesTests. Needs
+colour_pieces.png as colour-cases writes it.
+
 grid: what grid_corners.find_grid makes of each photo of a list (a JSON object
 whose keys are photo paths, e.g. one written by `evaluate.py --dump-list`):
 the corners before the validity checks, the confidence and the numbers the
@@ -71,7 +83,9 @@ colours: the colour step on photos, Swift against Python on the same boxes.
 of a list, the colour Swift measures for each piece and the sides it ends up
 with; this reads that file, measures the colours and decides the sides in
 Python (evaluate.piece_colours, chess_pipeline.sides_from_colour) and counts
-where the two differ. `--list`: the list given to app_check, when its photo
+where the two differ. The same for the side of single pieces
+(chess_pipeline.odd_sides, patch_hidden), from the Python's own colours and
+from the Swift's. `--list`: the list given to app_check, when its photo
 paths are relative.
 
 dark: a1 is a dark square, on photos, Swift against Python on the same
@@ -100,8 +114,9 @@ import numpy as np
 from chess_pipeline import (
     Detection, EDGE_MARGIN, FEN_LETTER, KING_FLOOR, KINDS, PIECE_CLASSES, assign_detections, assign_squares,
     board_square, board_to_fen_placement, colour_patch, fen_placement_to_board, homography,
-    one_king_a_side, orient_by_pieces, colour_sides, project, pulled_board_point, sides_from_colour,
-    two_groups, white_side_score, window_by_model, WINDOW_NEAR,
+    odd_sides, one_king_a_side, orient_by_pieces, colour_sides, patch_hidden, project, pulled_board_point,
+    sides_from_colour, two_groups, white_side_score, window_by_model, WINDOW_NEAR,
+    CHROMA_WEIGHT, COLOUR_PATCH, SIDE_APART, SIDE_HIDDEN, SIDE_NEARER, SIDE_SPREAD_FLOOR,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -634,6 +649,242 @@ def colour_cases(seed):
           f"({sum(g['group'] is None for g in groups)} without a split), "
           f"{len(sides)} sets of detections {tally}, "
           f"{len(pieces)} drawn pieces ({sum(s == 'white' for s, _ in pieces)} brown)")
+
+
+def odd_cases(seed):
+    """chess_pipeline.odd_sides on detections and colours built from a few numbers."""
+    import cv2
+    from evaluate import piece_colours
+    rng = random.Random(seed)
+    kinds = ["king", "queen", "rook", "bishop", "knight", "pawn"]
+    cases, tally = [], {"changed": 0, "pieces changed": 0, "hidden": 0}
+
+    def margins(detections, colours, chroma, nearer, apart, cover):
+        # No case may hang on the last bits of the arithmetic: every
+        # comparison the rule makes is this far from a tie, or exactly on it
+        # where the case is there for the tie.
+        for k, det in enumerate(detections):
+            x1, y1, x2, y2 = det.bbox
+            w, h = x2 - x1, y2 - y1
+            l, r, t, b = COLOUR_PATCH
+            px1, py1, px2, py2 = x1 + l * w, y1 + t * h, x1 + r * w, y1 + b * h
+            area = (px2 - px1) * (py2 - py1)
+            for j, other in enumerate(detections):
+                if j == k or area <= 0:
+                    continue
+                assert other.bbox[3] == y2 or abs(other.bbox[3] - y2) > 1e-6
+                iw = min(px2, other.bbox[2]) - max(px1, other.bbox[0])
+                ih = min(py2, other.bbox[3]) - max(py1, other.bbox[1])
+                if iw > 0 and ih > 0:
+                    assert abs(iw * ih - cover * area) > 1e-6 * area
+        idx = [k for k, c in enumerate(colours) if c is not None and not patch_hidden(detections, k, cover)]
+        point = {k: np.array([colours[k][0], chroma * colours[k][1], chroma * colours[k][2]]) for k in idx}
+        side = {k: detections[k].cls.split("_", 1)[0] for k in idx}
+        groups = {s: [k for k in idx if side[k] == s] for s in ("white", "black")}
+        if min(len(groups["white"]), len(groups["black"])) < 2:
+            return
+        centre = {s: np.median([point[k] for k in groups[s]], axis=0) for s in groups}
+        gap = centre["white"][0] - centre["black"][0]
+        assert gap == 0 or abs(gap) > 1e-6
+        if gap <= 0:
+            return
+        spread = float(np.median([np.linalg.norm(point[k] - centre[side[k]]) for k in idx]))
+        assert abs(spread - SIDE_SPREAD_FLOOR) > 1e-6
+        spread = max(SIDE_SPREAD_FLOOR, spread)
+        apart_by = np.linalg.norm(centre["white"] - centre["black"]) - apart * spread
+        assert abs(apart_by) > 1e-6
+        if apart_by < 0:
+            return
+        for k in groups["black"]:
+            own = np.median([point[j] for j in groups["black"] if j != k], axis=0)
+            assert abs(nearer * np.linalg.norm(point[k] - centre["white"]) - np.linalg.norm(point[k] - own)) > 1e-6
+
+    def record(name, detections, colours, chroma=CHROMA_WEIGHT, nearer=SIDE_NEARER, apart=SIDE_APART,
+               cover=SIDE_HIDDEN):
+        margins(detections, colours, chroma, nearer, apart, cover)
+        result = odd_sides(detections, colours, chroma=chroma, nearer=nearer, apart=apart, cover=cover)
+        hidden = [patch_hidden(detections, k, cover) for k in range(len(detections))]
+        changed = [k for k, (a, b) in enumerate(zip(detections, result)) if a.cls != b.cls]
+        assert all(detections[k].cls.startswith("black_") and result[k].cls.startswith("white_")
+                   and not hidden[k] and colours[k] is not None for k in changed)
+        assert all((a.confidence, a.bbox, a.cls.split("_")[1]) == (b.confidence, b.bbox, b.cls.split("_")[1])
+                   for a, b in zip(detections, result))
+        tally["changed"] += bool(changed)
+        tally["pieces changed"] += len(changed)
+        tally["hidden"] += sum(hidden)
+        cases.append(dict(
+            name=name, chroma=chroma, nearer=nearer, apart=apart, cover=cover,
+            detections=[dict(cls=d.cls, confidence=d.confidence, box=list(d.bbox)) for d in detections],
+            colours=[None if c is None else list(c) for c in colours], hidden=hidden,
+            sides=[d.cls for d in result]))
+        return changed
+
+    def row(said, colours, boxes=None):
+        # Pieces side by side, none in front of another unless boxes are given.
+        boxes = boxes or [(100.0 * k, 100.0, 100.0 * k + 60, 220.0) for k in range(len(said))]
+        return [Detection(f"{side}_{kinds[k % 6]}", 0.9 - 0.01 * k, box)
+                for k, (side, box) in enumerate(zip(said, boxes))], list(colours)
+
+    def greys(light, dark, n=6, step=1.0):
+        offsets = [step * v for v in (-2, -1, 0, 0, 1, 2)][:n]
+        return [(light + o, 0.0, 0.0) for o in offsets], [(dark + o, 0.0, 0.0) for o in offsets]
+
+    # 1. The rule at work: six light and six dark pieces read rightly, and
+    # one, two, three light ones the model calls Black.
+    whites, blacks = greys(70.0, 20.0)
+    for odd in (0, 1, 2, 3):
+        said = ["white"] * 6 + ["black"] * 6 + ["black"] * odd
+        changed = record(f"{odd} light pieces called Black", *row(said, whites + blacks + [(69.0, 0.0, 0.0)] * odd))
+        assert changed == list(range(12, 12 + odd))
+    # One way only: a dark piece called White stays White.
+    assert record("a dark piece called White", *row(["white"] * 7 + ["black"] * 6,
+                                                   whites + [(21.0, 0.0, 0.0)] + blacks)) == []
+    # 2. Twice as near: a piece called Black at L* = t is 70 - t from White
+    # and t - 20 from the other Black pieces; twice as near from 53.33 on.
+    for t, moves in ((53.3, False), (53.4, True), (45.0, False), (60.0, True)):
+        changed = record(f"called Black at L* {t}", *row(["white"] * 6 + ["black"] * 7, whites + blacks + [(t, 0.0, 0.0)]))
+        assert changed == ([12] if moves else [])
+    # ... and with other numbers for "nearer".
+    for nearer, moves in ((1.5, True), (3.0, False)):
+        changed = record(f"called Black at L* 52, nearer {nearer}",
+                         *row(["white"] * 6 + ["black"] * 7, whites + blacks + [(52.0, 0.0, 0.0)]), nearer=nearer)
+        assert changed == ([12] if moves else [])
+    # 3. Three spreads apart. The spread on its floor of 3: the two sides 8.9
+    # and 9.1 apart. The spread above the floor (pieces 5 from their side's
+    # colour): 14.9 and 15.1 apart. The piece called Black has White's colour.
+    for gap, moves in ((8.9, False), (9.1, True)):
+        whites2, blacks2 = greys(40.0 + gap, 40.0, step=0.0)
+        changed = record(f"the sides {gap} apart, the spread on its floor",
+                         *row(["white"] * 6 + ["black"] * 7, whites2 + blacks2 + [(40.0 + gap, 0.0, 0.0)]))
+        assert changed == ([12] if moves else [])
+    for gap, moves in ((14.9, False), (15.1, True)):
+        # each piece 5 from its side's colour, by its colour and not its lightness
+        whites2 = [(40.0 + gap, 5.0 * s / CHROMA_WEIGHT, 0.0) for s in (-1, 1, -1, 1, -1, 1)]
+        blacks2 = [(40.0, 5.0 * s / CHROMA_WEIGHT, 0.0) for s in (-1, 1, -1, 1, -1, 1)]
+        whites2 += [(40.0 + gap, 0.0, 0.0)]
+        changed = record(f"the sides {gap} apart, a spread of 5",
+                         *row(["white"] * 7 + ["black"] * 7, whites2 + blacks2 + [(40.0 + gap, 0.0, 0.0)]))
+        assert changed == ([13] if moves else [])
+    for apart, moves in ((2.0, True), (4.0, False)):
+        whites2, blacks2 = greys(50.0, 40.0, step=0.0)
+        changed = record(f"the sides 10 apart, apart {apart}",
+                         *row(["white"] * 6 + ["black"] * 7, whites2 + blacks2 + [(50.0, 0.0, 0.0)]), apart=apart)
+        assert changed == ([12] if moves else [])
+    # 4. White must be the lighter side: the model's sides the wrong way
+    # round, and two sides equally light that differ in colour only.
+    assert record("the pieces called White are the darker", *row(
+        ["black"] * 6 + ["white"] * 6 + ["black"], whites + blacks + [(21.0, 0.0, 0.0)])) == []
+    level_w = [(40.0, 10.0, 0.0)] * 6
+    level_b = [(40.0, -10.0, 0.0)] * 6
+    assert record("the two sides equally light", *row(
+        ["white"] * 6 + ["black"] * 7, level_w + level_b + [(40.0, 10.0, 0.0)])) == []
+    assert record("White lighter by a hair", *row(
+        ["white"] * 6 + ["black"] * 7, [(40.001, 10.0, 0.0)] * 6 + level_b + [(40.001, 10.0, 0.0)])) == [12]
+    # The colour counts four times the lightness: brown and black equally
+    # dark but for a little.
+    brown, ebony = (32.0, 2.0, 4.0), (28.0, 0.0, 0.0)
+    assert record("brown pieces hardly lighter than the black", *row(
+        ["white"] * 5 + ["black"] * 6, [brown] * 5 + [ebony] * 5 + [brown])) == [10]
+    assert record("the same with the colour counting once", *row(
+        ["white"] * 5 + ["black"] * 6, [brown] * 5 + [ebony] * 5 + [brown]), chroma=1.0) == []
+    # 5. Two pieces a side, with a colour.
+    light, dark = (70.0, 0.0, 0.0), (20.0, 0.0, 0.0)
+    assert record("one piece called White", *row(["white"] + ["black"] * 4, [light] + [dark] * 3 + [light])) == []
+    assert record("two pieces called White", *row(["white"] * 2 + ["black"] * 4, [light] * 2 + [dark] * 3 + [light])) == [5]
+    assert record("one piece called Black", *row(["white"] * 4 + ["black"], [light] * 4 + [light])) == []
+    assert record("two pieces called Black", *row(["white"] * 4 + ["black"] * 2, [light] * 4 + [dark, light])) == [5]
+    assert record("two pieces called Black, both light", *row(["white"] * 4 + ["black"] * 2, [light] * 6)) == []
+    assert record("of three called White two have no colour", *row(
+        ["white"] * 3 + ["black"] * 4, [light, None, None] + [dark] * 3 + [light])) == []
+    assert record("the piece called Black has no colour", *row(
+        ["white"] * 3 + ["black"] * 4, [light] * 3 + [dark] * 3 + [None])) == []
+    assert record("no piece at all", [], []) == []
+    # 6. A piece in front. The odd piece's box is (100, 100)-(160, 220): its
+    # patch is 24 wide and 78 high. A box in front (its foot lower) covers
+    # a strip of the patch's right side.
+    def scene(front, odd_colour=light, said="black"):
+        boxes = [(100.0, 100.0, 160.0, 220.0), front]
+        boxes += [(300.0 + 100 * k, 100.0, 360.0 + 100 * k, 220.0) for k in range(6)]
+        return row([said, "black"] + ["white"] * 3 + ["black"] * 3, [odd_colour, dark] + [light] * 3 + [dark] * 3, boxes)
+    for share, moves in ((0.19, True), (0.21, False), (0.5, False)):
+        front = (142.0 - share * 24.0, 120.0, 200.0, 260.0)
+        assert record(f"{share} of the patch behind a piece in front", *scene(front)) == ([0] if moves else [])
+        assert cases[-1]["hidden"][0] == (not moves)
+    # The same half covered by a box whose foot is higher, and one whose
+    # foot is level: neither stands in front.
+    assert record("half the patch behind a box whose foot is higher", *scene((130.0, 120.0, 200.0, 215.0))) == [0]
+    assert record("half the patch behind a box whose foot is level", *scene((130.0, 150.0, 200.0, 220.0))) == [0]
+    for cover, moves in ((0.4, True), (0.3, False)):
+        assert record(f"a third of the patch covered, cover {cover}",
+                      *scene((142.0 - 24.0 / 3, 120.0, 200.0, 260.0)), cover=cover) == ([0] if moves else [])
+    # A piece behind another is not counted either: of the two pieces
+    # called White that would make a side, one is hidden.
+    boxes = [(100.0, 100.0, 160.0, 220.0), (120.0, 120.0, 200.0, 260.0), (300.0, 100.0, 360.0, 220.0)]
+    boxes += [(500.0 + 100 * k, 100.0, 560.0 + 100 * k, 220.0) for k in range(4)]
+    assert record("one of two pieces called White is hidden", *row(
+        ["white", "black", "white"] + ["black"] * 4, [light, dark, light] + [dark] * 3 + [light], boxes)) == []
+    assert record("the same with the box in front moved away", *row(
+        ["white", "black", "white"] + ["black"] * 4, [light, dark, light] + [dark] * 3 + [light],
+        [boxes[0], (200.0, 120.0, 280.0, 260.0)] + boxes[2:])) == [6]
+    # A box of no width has a pixel of colour and no patch to be seen on.
+    flat = [(100.0 * k, 100.0, 100.0 * k + 60, 220.0) for k in range(6)] + [(700.0, 100.0, 700.0, 220.0)]
+    assert record("a box of no width", *row(["white"] * 3 + ["black"] * 4, [light] * 3 + [dark] * 3 + [light], flat)) == []
+    assert cases[-1]["hidden"][6]
+
+    # 7. Random boards: pieces on a grid of places with boxes that reach
+    # over their neighbours, two colours with some scatter, some light
+    # pieces called Black, some dark ones called White, some in shadow,
+    # some without a colour.
+    made = len(cases)
+    fired = 0
+    while len(cases) < made + 60:
+        n = rng.randint(4, 24)
+        places = rng.sample([(i, j) for i in range(8) for j in range(8)], n)
+        white_at = (rng.uniform(45, 85), rng.uniform(-3, 12), rng.uniform(-5, 30))
+        black_at = (rng.uniform(10, 45), rng.uniform(-3, 5), rng.uniform(-5, 8))
+        noise = rng.choice([0.5, 2.0, 5.0, 9.0])
+        detections, colours = [], []
+        for k, (i, j) in enumerate(places):
+            truth = rng.choice(["white", "black"])
+            at = white_at if truth == "white" else black_at
+            colour = tuple(round(v + rng.gauss(0, noise), 3) for v in at)
+            if truth == "white" and rng.random() < 0.1:
+                colour = (round(colour[0] - rng.uniform(10, 35), 3), colour[1], colour[2])     # in shadow
+            said = truth
+            if rng.random() < 0.15:
+                said = "black" if truth == "white" else "white"
+            cx, foot = 100 + 100 * i + rng.uniform(-15, 15), 180 + 95 * j + rng.uniform(-15, 15)
+            w, h = rng.uniform(45, 95), rng.uniform(90, 190)
+            detections.append(Detection(f"{said}_{rng.choice(kinds)}", round(rng.uniform(0.3, 0.99), 3),
+                                        tuple(round(v, 2) for v in (cx - w / 2, foot - h, cx + w / 2, foot))))
+            colours.append(None if rng.random() < 0.05 else colour)
+        try:
+            fired += bool(record(f"random {len(cases) - made}", detections, colours))
+        except AssertionError:
+            continue                              # a case on the edge of a comparison: another one
+    assert 15 <= fired <= 45, fired               # the random boards show both outcomes
+
+    # 8. The drawn picture of colour-cases, with three of its brown pieces
+    # called Black and the rest read rightly.
+    name = "colour_pieces.png"
+    img, pieces = drawn_pieces(seed)
+    assert np.array_equal(cv2.imread(str(FIXTURES / name)), img), "run colour-cases first, with the same seed"
+    brown_ones = [k for k, (side, _) in enumerate(pieces) if side == "white"]
+    wrong = brown_ones[1::3][:3]
+    detections = [Detection(f"{'black' if k in wrong else side}_{kinds[k % 6]}", 0.9 - 0.01 * k, bbox)
+                  for k, (side, bbox) in enumerate(pieces)]
+    detections.append(Detection("black_pawn", 0.4, (500.0, 100.0, 540.0, 180.0)))    # beside the picture
+    cols = piece_colours(FIXTURES / name, detections)
+    assert len(wrong) == 3 and record("the drawn picture", detections, cols) == wrong
+    picture = dict(cases.pop(), file=name)
+
+    out = dict(nearer=SIDE_NEARER, apart=SIDE_APART, spread_floor=SIDE_SPREAD_FLOOR, hidden=SIDE_HIDDEN,
+               chroma=CHROMA_WEIGHT, cases=cases, picture=picture)
+    path = FIXTURES / "odd_cases.json"
+    path.write_text(json.dumps(out, separators=(",", ":")) + "\n")
+    print(f"{len(cases)} sets of detections and the drawn picture: a piece changed in {tally['changed']}, "
+          f"{tally['pieces changed']} pieces in all; {tally['hidden']} pieces behind another")
+    print(f"written to {path} ({path.stat().st_size // 1024} kB)")
 
 
 def king_cases(seed):
@@ -1182,6 +1433,10 @@ def compare_colours(swift_path, list_path):
     base = Path(list_path).resolve().parent if list_path else Path.cwd()
     photos = pieces = no_colour_differs = side_differs = final_differs = 0
     fired_py = fired_sw = photos_side_differs = photos_final_differs = split_differs = 0
+    # The side of single pieces: from the Python's colours, and from the Swift's.
+    odd = dict(py=0, sw=0, photos_py=0, photos_sw=0, differ=0, photos_differ=0, differ_on_swift_colours=0,
+               hidden_differ=0, hidden=0)
+    has_odd = True
     off = []
     for photo in sorted(sw):
         found = sw[photo]
@@ -1208,6 +1463,29 @@ def compare_colours(swift_path, list_path):
         photos_final_differs += finals_here > 0
         fired_py += any(cls != d["cls"] for cls, d in zip(final, found))
         fired_sw += any(d["final"] != d["cls"] for d in found)
+        if found and "odd" not in found[0]:
+            has_odd = False                       # a file written before app_check knew the step
+        elif found:
+            mine = [d.cls for d in odd_sides(detections, cols)]
+            on_theirs = [d.cls for d in odd_sides(
+                detections, [None if d["colour"] is None else tuple(d["colour"]) for d in found])]
+            theirs = [d["odd"] for d in found]
+            hidden = [patch_hidden(detections, k) for k in range(len(detections))]
+            n_py = sum(a != d.cls for a, d in zip(mine, detections))
+            n_sw = sum(a != d.cls for a, d in zip(theirs, detections))
+            differ = sum(a != b for a, b in zip(mine, theirs))
+            odd["py"] += n_py
+            odd["sw"] += n_sw
+            odd["photos_py"] += n_py > 0
+            odd["photos_sw"] += n_sw > 0
+            odd["differ"] += differ
+            odd["photos_differ"] += differ > 0
+            odd["differ_on_swift_colours"] += sum(a != b for a, b in zip(on_theirs, theirs))
+            odd["hidden"] += sum(hidden)
+            odd["hidden_differ"] += sum(a != d["hidden"] for a, d in zip(hidden, found))
+            if differ:
+                print(f"  {Path(photo).name}: the side of single pieces differs for {differ} of "
+                      f"{len(detections)} pieces (Python changed {n_py}, Swift {n_sw})")
         if sides_here or finals_here:
             print(f"  {Path(photo).name}: {len(detections)} pieces, side by colour differs for "
                   f"{sides_here}, final class for {finals_here}")
@@ -1220,12 +1498,17 @@ def compare_colours(swift_path, list_path):
           f"(split in one and none in the other: {split_differs} photos)")
     print(f"the step changed a side: Python on {fired_py} photos, Swift on {fired_sw}; "
           f"final classes differ: {final_differs} pieces on {photos_final_differs} photos")
+    if has_odd:
+        print(f"the side of single pieces: Python made {odd['py']} pieces White on {odd['photos_py']} photos, "
+              f"Swift {odd['sw']} on {odd['photos_sw']}; classes differ: {odd['differ']} pieces on "
+              f"{odd['photos_differ']} photos (from the Swift's own colours: {odd['differ_on_swift_colours']}); "
+              f"pieces behind another: {odd['hidden']}, told differently: {odd['hidden_differ']}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "dark-cases",
-                                     "window-cases", "grid", "compare", "colours", "dark", "window"])
+                                     "window-cases", "odd-cases", "grid", "compare", "colours", "dark", "window"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
     ap.add_argument("--out", help="grid: where to write the reference")
     ap.add_argument("--limit", type=int, default=0, help="grid: only the first N photos")
@@ -1254,6 +1537,8 @@ def main():
         dark_cases()
     elif args.what == "window-cases":
         window_cases(args.seed)
+    elif args.what == "odd-cases":
+        odd_cases(args.seed)
     elif args.what == "dark":
         compare_dark(args.swift, args.list)
     elif args.what == "window":

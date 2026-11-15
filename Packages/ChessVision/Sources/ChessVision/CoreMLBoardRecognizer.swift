@@ -52,6 +52,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let a1Dark: Bool
     /// Internal for testing.
     let fitWindow: Bool
+    /// Internal for testing: the app's default must stay off.
+    let oddSides: Bool
 
     /// What the app runs with where nothing else is asked for.
     public enum Default {
@@ -61,6 +63,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         public static let oneKing = true
         public static let a1Dark = true
         public static let fitWindow = true
+        public static let oddSides = false
     }
 
     /// - Parameters:
@@ -104,6 +107,12 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     (`GridCorners.windowByModel`). The fit takes a window one rank or
     ///     file off where a border looks like a rank of squares. Has no
     ///     effect where the fit is off, rejects itself or stands alone.
+    ///   - oddSides: a piece the piece model calls Black becomes White when
+    ///     its colour in the photo is plainly the White side's: twice as
+    ///     near the colour of the pieces called White as that of the other
+    ///     pieces called Black (`OddSides`). Off unless asked for: it is in
+    ///     the reference to be measured through the app first
+    ///     (`Training/README.md`, "The side of single pieces").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -114,7 +123,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         sidesFromColour: Bool = Default.sidesFromColour,
         oneKing: Bool = Default.oneKing,
         a1Dark: Bool = Default.a1Dark,
-        fitWindow: Bool = Default.fitWindow
+        fitWindow: Bool = Default.fitWindow,
+        oddSides: Bool = Default.oddSides
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
@@ -126,6 +136,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.oneKing = oneKing
         self.a1Dark = a1Dark
         self.fitWindow = fitWindow
+        self.oddSides = oddSides
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -223,15 +234,15 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
         Self.place(
             found, corners: corners, cornersFromModel: cornersFromModel, in: image,
-            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: a1Prior, a1Dark: a1Dark,
-            pull: pull, whole: whole)
+            sidesFromColour: sidesFromColour, oddSides: oddSides, oneKing: oneKing,
+            a1Prior: a1Prior, a1Dark: a1Dark, pull: pull, whole: whole)
     }
 
     /// What follows the two models, in `evaluate.py`'s order: the sides from
-    /// the colours first, since the kings are counted by side and which
-    /// corner is a1 is read from sides and kinds; then one king a side; then
-    /// a1, among the ways round the colours of the squares allow; then the
-    /// squares. Returns the corners as finally turned and the board; nil
+    /// the colours first (the whole board's, then single pieces'), since
+    /// the kings are counted by side and which corner is a1 is read from
+    /// sides and kinds; then one king a side; then a1, among the ways round
+    /// the colours of the squares allow; then the squares. Returns the corners as finally turned and the board; nil
     /// when the corners are not a board. `whole`: the photo at the grid
     /// fit's working size, when the caller has it. Internal for testing.
     static func place(
@@ -240,6 +251,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         cornersFromModel: Bool,
         in image: CGImage,
         sidesFromColour: Bool,
+        oddSides: Bool,
         oneKing: Bool,
         a1Prior: Double?,
         a1Dark: Bool,
@@ -248,8 +260,15 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
         var corners = located
         var detections = found
-        if sidesFromColour {
-            detections = PieceSides.fromColour(detections, in: image)
+        if sidesFromColour || oddSides {
+            // One measurement for both steps: neither moves a box.
+            let colours = PieceSides.colours(of: detections, in: image)
+            if sidesFromColour {
+                detections = PieceSides.fromColour(detections, colours: colours)
+            }
+            if oddSides {
+                detections = OddSides.apply(detections, colours: colours)
+            }
         }
         if oneKing {
             detections = OneKingASide.apply(detections)
