@@ -40,14 +40,16 @@ extension GridCorners {
     }
 
     /// `whole`: the whole photo at the working size (`workingImage(of:)`),
-    /// when the caller has it already.
+    /// when the caller has it already; one that does not have the whole
+    /// photo's origin, scale and size is not used.
     static func squareColours(
         in photo: CGImage, corners: [CGPoint], whole: GrayImage.Working?
     ) -> SquareColours {
         guard corners.count == 4,
               corners.allSatisfy({ $0.x.isFinite && $0.y.isFinite }),
               // The same pixels as the grid fit and the models read.
-              let working = whole ?? workingImage(of: photo)
+              let working = whole.flatMap({ GrayImage.isWhole($0, of: photo) ? $0 : nil })
+                ?? workingImage(of: photo)
         else { return SquareColours(rotations: nil, strength: 0) }
         return squareColours(working.gray, ring: corners.map {
             (Double($0.x) * working.scale, Double($0.y) * working.scale)
@@ -80,6 +82,12 @@ extension GridCorners {
         let lo = GridMath.percentile(sorted: sorted, 25)
         let hi = GridMath.percentile(sorted: sorted, 75)
         guard !(hi - lo < leastContrast) else { return none }
+        // (Two places where the arithmetic is not NumPy 1.26's to the last
+        // bit: it takes the percentiles' difference of two float32 cells in
+        // float32, and compares the cells with the middle in float32. A cell
+        // would have to lie within 8 millionths of a grey level of the
+        // middle, with the split on its threshold, for the answer to differ;
+        // on 2,311 photos it never did.)
         let middle = (lo + hi) / 2
 
         var cellsOf = [0, 0], lightOf = [0, 0]   // [even, odd]

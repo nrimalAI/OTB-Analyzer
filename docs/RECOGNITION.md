@@ -275,11 +275,13 @@ before.
   tests place drawn pieces through the recognizer's own code and fail if the
   kings are counted before the sides from the colours or after a1.
 - `Training/swift_reference.py dark-cases` writes `Fixtures/dark_cases.json`:
-  what `dark_corner_rotations` makes of 16 chequered pictures that both
+  what `dark_corner_rotations` makes of 20 chequered pictures that both
   sides draw from a few numbers (which corner is dark, the ring of corners
   in each rotation, and each of the three thresholds from both sides: 40
-  cells seen and 32, 15 grey levels and 14, a split of 0.5 and one cell
-  less), of the five drawn boards of `grid-cases` with their true corners in
+  cells seen and 39, on a board turned in the picture so that its edge
+  takes cells one at a time; 15 grey levels and 14; a split of 0.5 and one
+  cell less; and cells exactly at the middle grey, which are not light),
+  of the five drawn boards of `grid-cases` with their true corners in
   the four rotations, a square along, a square up and half a square off,
   of the drawn table without a board, and of the four fixture photos on the
   corners the Python's grid fit gives them, in the four rotations; and
@@ -293,7 +295,13 @@ before.
   that say "a quarter on" get the better of the two rotations the colours
   allow, pieces that agree with the colours and a half turn are left to
   the pieces, and on a picture whose colours say nothing all four
-  rotations stay open.
+  rotations stay open. One more builds the recognizer as the app does and
+  with the rule switched off, and requires that the two place those
+  pieces differently: the four fixture photos read the same either way,
+  so without it nothing would notice the rule missing from `recognize`.
+  Two places where the Swift arithmetic is not NumPy 1.26's to the last
+  bit are named in `GridSquareColours.swift`; neither changed an answer
+  on the 2,311 photos compared.
 - Lab is computed by the formula on both sides, with OpenCV's matrix and
   white point. `cv2.cvtColor` is not used: for float pixels it interpolates
   in a 33×33×33 table and is off from the formula by up to 0.19 in L*, 0.47
@@ -569,14 +577,14 @@ by a quarter.
   pieces: 60 of the 85 photos, and 14 of the 15 on the development sets,
   have nine or fewer.
 - **The 13 that lose** are 12 Y-LIChess photos and one of samryan. Eight
-  of the twelve are full boards (30 or 32 pieces) that were read at 25
+  of the twelve are full boards (30 to 32 pieces) that were read at 25
   squares of 64 or fewer before and lose one or two more: the corners
   there are not the board's (the grid fit accepts a grid a rank off on
   such photos, "What the app reads with the third pair"), the colours
   find a light a1 as the corners came, and a quarter turn is forced on
-  what was wrong already. Three are layouts with every piece on one half
-  of the board (19, 17 and 16 squares before; 0, 0 and 4 after, one of
-  them now exact once turned by half). The last, and samryan's, are
+  what was wrong already. Three are layouts with every piece on one part
+  of the board, a half or a corner of it (19, 17 and 16 squares before;
+  0, 0 and 4 after, one of them now exact once turned by half). The last, and samryan's, are
   endgames that were a quarter off and are now half a turn off with one
   square fewer. No board that was fully right is lost.
 - **Against the goal** on boards nobody trained on: 459 of 1,619 photos
@@ -601,10 +609,13 @@ by a quarter.
   the strength of the split within one cell of 32 on every one of them
   (equal at the 95th percentile of each set).
 - **Time**: none that can be measured. The photo is shrunk to the grid
-  fit's working size once, for the fit and for the colours (Fenit A, 286
-  photos: 116.3 s with the rule, 116.2 s without, on a machine that was
-  training at the time). Shrinking it a second time for the colours cost
-  65 to 100 ms a photo.
+  fit's working size once, for the fit and for the colours. Processor
+  time over a whole set, with the rule against without: ChessReD test
+  65.5 s against 65.5 s, Fenit A 88.8 s against 88.6 s. Shrinking the
+  photo a second time for the colours cost 20.0 s and 28.4 s more on
+  those sets (65 and 99 ms a photo) and 14 ms a photo on board B, whose
+  photos are smaller. Single runs on a Mac mini that was training at the
+  time; nothing was timed on a phone.
 - **What the app marks** (confidence under 0.85) on the second held-out
   set with the rule: 52% of the wrong pieces (49% without), 8.3% of the
   right ones and 2.7 squares a photo, as before.

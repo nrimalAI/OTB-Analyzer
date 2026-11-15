@@ -40,8 +40,9 @@ photos piece for piece.
 
 dark-cases: a1 is a dark square. What grid_corners.dark_corner_rotations
 makes of chequered pictures that both sides draw from a few numbers (each of
-its three thresholds from both sides: cells seen, contrast, how cleanly the
-colours split), of the drawn boards of grid-cases and of the four fixture
+its three thresholds from both sides: 40 cells seen and 39, on a board turned
+in the picture; contrast; how cleanly the colours split; a cell exactly at
+the middle grey), of the drawn boards of grid-cases and of the four fixture
 photos, each with rings of corners in every rotation and a square off; and
 which rotation chess_pipeline.orient_by_pieces chooses for the cases of
 orientation_cases.json when only two of the four are allowed (turns=).
@@ -740,13 +741,31 @@ def checker(spec):
     ox, oy = spec["origin"]
     c = spec["cell"]
     swapped = {tuple(t) for t in spec["swapped"]}
+    other = {(i, j): level for i, j, level in spec.get("levels", [])}
     for j in range(8):
         for i in range(8):
             even = ((i + j) % 2 == 0) != ((i, j) in swapped)
             x0, y0 = max(ox + i * c, 0), max(oy + j * c, 0)
             img[y0:max(oy + (j + 1) * c, 0), x0:max(ox + (i + 1) * c, 0)] = \
-                spec["even"] if even else spec["odd"]
+                other.get((i, j), spec["even"] if even else spec["odd"])
     return img
+
+
+def turned_checker(spec):
+    """A chequered board turned in the picture, so that the picture's edge
+    cuts across its cells one at a time: the pixel (x, y) lies on the board
+    at u = ((x - cx) cos + (y - cy) sin) / cell + 4,
+    v = (-(x - cx) sin + (y - cy) cos) / cell + 4, in the cell (floor u,
+    floor v) when both are within 0..8. The Swift test computes the same."""
+    cx, cy = spec["centre"]
+    c, s, cell = spec["cos"], spec["sin"], spec["cell"]
+    yy, xx = np.mgrid[0:spec["height"], 0:spec["width"]].astype(np.float64)
+    u = ((xx - cx) * c + (yy - cy) * s) / cell + 4
+    v = (-(xx - cx) * s + (yy - cy) * c) / cell + 4
+    inside = (u >= 0) & (u < 8) & (v >= 0) & (v < 8)
+    even = (np.floor(u) + np.floor(v)) % 2 == 0
+    img = np.where(even, spec["even"], spec["odd"])
+    return np.where(inside, img, spec["background"]).astype(np.uint8)
 
 
 def dark_cases():
@@ -764,11 +783,12 @@ def dark_cases():
 
     # 1. chequered pictures drawn from numbers: the thresholds, from both sides
     def spec(name, even=60, odd=200, width=400, height=400, origin=(40, 40), swapped=(), turn=0,
-             background=128):
+             background=128, levels=()):
         ox, oy = origin
         ring = [(ox, oy), (ox, oy + 320), (ox + 320, oy + 320), (ox + 320, oy)]
         s = dict(name=name, width=width, height=height, cell=40, origin=list(origin), even=even,
-                 odd=odd, background=background, swapped=[list(t) for t in swapped])
+                 odd=odd, background=background, swapped=[list(t) for t in swapped],
+                 levels=[list(t) for t in levels])
         grey = checker(s)
         s.update(answer(cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR), turned(ring, turn)))
         return s
@@ -794,6 +814,10 @@ def dark_cases():
              swapped=evens[:8] + odds[:8], turn=3),
         spec("nearly all cells one colour", swapped=odds[:27]),
         spec("one colour all over", even=90, odd=90),
+        # Cells exactly at the middle between the two colours are not light:
+        # with them light the split would be under 0.5.
+        spec("nine cells exactly at the middle grey: not light", swapped=odds[:8],
+             levels=[(i, j, 130) for i, j in evens[:9]]),
     ]
     want = {"15 grey levels apart: enough": [0, 2], "14 grey levels apart: too few": None,
             "three columns off the picture: 40 cells seen, enough": [0, 2],
@@ -805,6 +829,40 @@ def dark_cases():
         if c["name"] in want:
             assert c["rotations"] == want[c["name"]], (c["name"], c["rotations"], c["strength"])
     assert next(c for c in checkers if c["name"].startswith("a quarter of each"))["strength"] == 0.5
+    assert checkers[-1]["rotations"] == [0, 2] and checkers[-1]["strength"] == 0.75
+
+    # 1b. the same board turned in the picture, the picture cut narrower one
+    # pixel at a time: the edge then takes cells one by one, and the widest
+    # picture with 39 cells seen and the narrowest with 40 are kept (cut along
+    # the board, as above, cells go eight at a time)
+    from grid_corners import _cell_values
+
+    def turned_spec(width):
+        s = dict(width=width, height=560, cell=40, centre=[280.0, 280.0], cos=0.96, sin=0.28,
+                 even=60, odd=200, background=128)
+        cx, cy = s["centre"]
+        ring = [(cx + ((U - 4) * s["cos"] - (V - 4) * s["sin"]) * s["cell"],
+                 cy + ((U - 4) * s["sin"] + (V - 4) * s["cos"]) * s["cell"])
+                for U, V in ((0, 0), (0, 8), (8, 8), (8, 0))]
+        grey = turned_checker(s)
+        v = _cell_values(grey.astype(np.float32), homography(ring), 0, 0, 8, 8)
+        s["seen"] = int((~np.isnan(v).all(axis=2)).sum())
+        s.update(answer(cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR), ring))
+        return s
+
+    by_seen = {}
+    for width in range(560, 200, -1):
+        s = turned_spec(width)
+        by_seen.setdefault(s["seen"], s)             # the widest picture for each count
+        if s["seen"] < 39:
+            break
+    narrowest_40 = [turned_spec(w) for w in range(by_seen[39]["width"] + 1, by_seen[39]["width"] + 3)]
+    turned_boards = [by_seen[64], next(s for s in narrowest_40 if s["seen"] == 40), by_seen[39]]
+    for s in turned_boards:
+        s["name"] = f"turned in the picture, {s['width']} wide: {s['seen']} cells seen"
+    assert [s["seen"] for s in turned_boards] == [64, 40, 39]
+    assert turned_boards[0]["rotations"] == [0, 2] and turned_boards[1]["rotations"] == [0, 2]
+    assert turned_boards[2]["rotations"] is None and turned_boards[2]["strength"] == 0.0
 
     # 2. the drawn boards of grid-cases (PNG: the same pixels on both sides)
     recorded = json.loads((FIXTURES / "grid_cases.json").read_text())
@@ -852,10 +910,11 @@ def dark_cases():
             assert k in turns and case["scores"][k] == max(case["scores"][t] for t in turns)
             chosen[key].append(k)
 
-    out = dict(checkers=checkers, boards=boards, photos=photos, orientation=chosen)
+    out = dict(checkers=checkers, turned=turned_boards, boards=boards, photos=photos,
+               orientation=chosen)
     path = FIXTURES / "dark_cases.json"
     path.write_text(json.dumps(out, separators=(",", ":")) + "\n")
-    for group in ("checkers", "boards", "photos"):
+    for group in ("checkers", "turned", "boards", "photos"):
         for c in out[group]:
             print(f"{c.get('name') or c['file'] + ', ' + c['label']}: {c['rotations']} "
                   f"strength {c['strength']:.4f}")

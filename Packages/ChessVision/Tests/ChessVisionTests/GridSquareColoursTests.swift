@@ -23,6 +23,24 @@ struct GridSquareColoursTests {
             let odd: Int
             let background: Int
             let swapped: [[Int]]
+            /// Cells at a grey of their own: column, row, level.
+            let levels: [[Int]]
+            let ring: [[Double]]
+            let rotations: [Int]?
+            let strength: Double
+        }
+        struct Turned: Decodable {
+            let name: String
+            let width: Int
+            let height: Int
+            let cell: Double
+            let centre: [Double]
+            let cos: Double
+            let sin: Double
+            let even: Int
+            let odd: Int
+            let background: Int
+            let seen: Int
             let ring: [[Double]]
             let rotations: [Int]?
             let strength: Double
@@ -35,6 +53,7 @@ struct GridSquareColoursTests {
             let strength: Double
         }
         let checkers: [Checker]
+        let turned: [Turned]
         let boards: [Picture]
         let photos: [Picture]
     }
@@ -59,13 +78,16 @@ struct GridSquareColoursTests {
     /// The chequered picture of a recorded case, as `swift_reference.checker`
     /// draws it: 8×8 cells from `origin`, the cells whose column and row add
     /// up to an even number at `even`, the others at `odd`, the ones listed
-    /// in `swapped` the other way round.
+    /// in `swapped` the other way round, the ones in `levels` at a grey of
+    /// their own.
     private static func checker(_ c: Recorded.Checker) -> GrayImage {
         var gray = GrayImage(width: c.width, height: c.height, fill: Float(c.background))
         let swapped = Set(c.swapped.map { $0[0] * 8 + $0[1] })
+        let other = Dictionary(uniqueKeysWithValues: c.levels.map { ($0[0] * 8 + $0[1], $0[2]) })
         for j in 0..<8 {
             for i in 0..<8 {
                 let even = ((i + j) % 2 == 0) != swapped.contains(i * 8 + j)
+                let level = Float(other[i * 8 + j] ?? (even ? c.even : c.odd))
                 let x0 = max(c.origin[0] + i * c.cell, 0)
                 let x1 = min(max(c.origin[0] + (i + 1) * c.cell, 0), c.width)
                 let y0 = max(c.origin[1] + j * c.cell, 0)
@@ -73,9 +95,27 @@ struct GridSquareColoursTests {
                 guard x0 < x1, y0 < y1 else { continue }
                 for y in y0..<y1 {
                     for x in x0..<x1 {
-                        gray[x, y] = Float(even ? c.even : c.odd)
+                        gray[x, y] = level
                     }
                 }
+            }
+        }
+        return gray
+    }
+
+    /// The same board turned in the picture, as `swift_reference.turned_checker`
+    /// draws it: the pixel (x, y) lies on the board at (u, v), in the cell
+    /// (floor u, floor v) when both are within 0..<8.
+    private static func turnedChecker(_ c: Recorded.Turned) -> GrayImage {
+        var gray = GrayImage(width: c.width, height: c.height, fill: Float(c.background))
+        for y in 0..<c.height {
+            for x in 0..<c.width {
+                let dx = Double(x) - c.centre[0], dy = Double(y) - c.centre[1]
+                let u = (dx * c.cos + dy * c.sin) / c.cell + 4
+                let v = (-dx * c.sin + dy * c.cos) / c.cell + 4
+                guard u >= 0, u < 8, v >= 0, v < 8 else { continue }
+                let even = (Int(u.rounded(.down)) + Int(v.rounded(.down))) % 2 == 0
+                gray[x, y] = Float(even ? c.even : c.odd)
             }
         }
         return gray
@@ -85,12 +125,14 @@ struct GridSquareColoursTests {
 
     /// Chequered pictures both sides draw from the same numbers, so that the
     /// answers must be equal to the last digit: which corner is dark, the
-    /// ring in each rotation, and each of the three thresholds from both
-    /// sides (40 cells seen, 15 grey levels between the colours, a split of
-    /// 0.5).
+    /// ring in each rotation, the thresholds for the contrast (15 grey
+    /// levels and 14) and for the split (0.5 and one cell less), cells seen
+    /// in whole columns (40 and 32; one by one in the next test), and cells
+    /// exactly at the middle grey, which are not light.
     @Test func testChequeredPicturesComeOutAsInPython() throws {
         let recorded = try Self.recorded.get()
-        #expect(recorded.checkers.count >= 16)
+        #expect(recorded.checkers.count >= 17)
+        #expect(recorded.checkers.contains { !$0.levels.isEmpty })
         var answered = 0, refused = 0
         for c in recorded.checkers {
             let mine = GridCorners.squareColours(
@@ -104,6 +146,21 @@ struct GridSquareColoursTests {
         #expect(GridCorners.leastCells == 40)
         #expect(GridCorners.leastContrast == 15)
         #expect(GridCorners.leastStrength == 0.5)
+    }
+
+    /// 40 cells must be seen, and 39 are too few: a board turned in the
+    /// picture, which is cut narrower until its edge has taken cells one at
+    /// a time down to 40, and one pixel further to 39.
+    @Test func testFortyCellsAreEnoughAndThirtyNineAreNot() throws {
+        let recorded = try Self.recorded.get()
+        #expect(recorded.turned.map(\.seen) == [64, 40, 39])
+        for c in recorded.turned {
+            let mine = GridCorners.squareColours(
+                Self.turnedChecker(c), ring: c.ring.map { ($0[0], $0[1]) })
+            #expect(mine.rotations == c.rotations, "\(c.name)")
+            #expect(abs(mine.strength - c.strength) < 1e-12, "\(c.name): \(mine.strength)")
+            #expect((mine.rotations != nil) == (c.seen >= 40), "\(c.name)")
+        }
     }
 
     /// The boards drawn for the grid fit (PNG: the same pixels on both
@@ -185,9 +242,11 @@ struct GridSquareColoursTests {
         for file in ["grid_board_pieces.png", "test_000102.jpg"] {
             let image = try Self.image(file)
             let whole = try #require(GridCorners.workingImage(of: image))
+            #expect(GrayImage.isWhole(whole, of: image))
             let fit = try #require(GridCorners.find(in: image))
-            #expect(GridCorners.find(in: image, whole: whole)?.corners == fit.corners, "\(file)")
-            #expect(GridCorners.find(in: image, whole: whole)?.confidence == fit.confidence, "\(file)")
+            let handedFit = GridCorners.find(in: image, whole: whole)
+            #expect(handedFit?.corners == fit.corners, "\(file)")
+            #expect(handedFit?.confidence == fit.confidence, "\(file)")
             for turn in 0..<4 {
                 let ring = Array(fit.corners[turn...] + fit.corners[..<turn])
                 let alone = GridCorners.squareColours(in: image, corners: ring)
@@ -199,15 +258,34 @@ struct GridSquareColoursTests {
                 CoreMLBoardRecognizer.corners(model: model, in: image, gridFit: true, whole: whole))
             let own = try #require(CoreMLBoardRecognizer.corners(model: model, in: image, gridFit: true))
             #expect(handed.corners == own.corners && handed.fromModel == own.fromModel)
+
+            // A working image that is not the whole photo's (here: of its
+            // top left part only) is not used.
+            let part = try #require(GrayImage.working(
+                from: image, priorBox: CGRect(x: 0, y: 0, width: image.width / 2, height: image.height / 2),
+                pad: 0))
+            #expect(part.originX == 0 && part.originY == 0)
+            #expect(!GrayImage.isWhole(part, of: image))
+            #expect(GridCorners.squareColours(in: image, corners: fit.corners, whole: part)
+                == GridCorners.squareColours(in: image, corners: fit.corners))
         }
         #expect(recorded.photos.contains { $0.file == "test_000102.jpg" })
     }
 
     // MARK: - In the recognizer
 
+    /// The bare drawn board and its true corners as recorded, which start on
+    /// a light square (also for `EndToEndFixtureTests`).
+    static func plainBoard() throws -> (image: CGImage, light: [CGPoint]) {
+        let recorded = try Self.recorded.get()
+        let light = Self.points(try #require(
+            recorded.boards.first { $0.file == "grid_board_plain.png" && $0.label == "turned by 0" }).ring)
+        return (try Self.image("grid_board_plain.png"), light)
+    }
+
     /// Boxes standing on the middles of squares of the board whose corners
-    /// (a1, a8, h8, h1) are `frame`.
-    private static func pieces(
+    /// (a1, a8, h8, h1) are `frame` (also for `EndToEndFixtureTests`).
+    static func pieces(
         _ placement: String, on frame: [CGPoint]
     ) throws -> [PieceDetection] {
         let toImage = try #require(GridMath.homography(
@@ -239,10 +317,7 @@ struct GridSquareColoursTests {
     /// corners, as recorded, start on a light square: the pieces stand as if
     /// that corner were a1 (a start position, which says so loudly).
     @Test func testThePiecesChooseBetweenTheTwoWaysTheColoursAllow() throws {
-        let recorded = try Self.recorded.get()
-        let image = try Self.image("grid_board_plain.png")
-        let light = Self.points(try #require(
-            recorded.boards.first { $0.file == "grid_board_plain.png" && $0.label == "turned by 0" }).ring)
+        let (image, light) = try Self.plainBoard()
         #expect(GridCorners.squareColours(in: image, corners: light).rotations == [1, 3])
         let found = try Self.pieces("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPP1/RNBQK3", on: light)
 

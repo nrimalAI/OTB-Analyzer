@@ -158,10 +158,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             in: image, square: square, letterbox: letterbox, whole: whole)
         else { throw RecognitionError.boardNotFound }
         let detections = try detectPieces(in: square, letterbox: letterbox)
-        guard let placed = Self.place(
+        guard let placed = place(
             detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
-            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: a1Prior, a1Dark: a1Dark,
-            pull: pull, whole: whole)
+            whole: whole)
         else { throw RecognitionError.boardNotFound }
 
         return RecognitionResult(
@@ -186,6 +185,19 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             // The grid fit may still find the board.
         }
         return Self.corners(model: modelCorners, in: image, gridFit: gridFit, whole: whole)
+    }
+
+    /// What follows the two models, with this recognizer's settings: the one
+    /// place where they are handed on, so that a test can see that each of
+    /// them arrives (`EndToEndFixtureTests`). Internal for testing.
+    func place(
+        _ found: [PieceDetection], corners: [CGPoint], cornersFromModel: Bool, in image: CGImage,
+        whole: GrayImage.Working? = nil
+    ) -> (corners: [CGPoint], pieces: [Square: RecognizedPiece])? {
+        Self.place(
+            found, corners: corners, cornersFromModel: cornersFromModel, in: image,
+            sidesFromColour: sidesFromColour, oneKing: oneKing, a1Prior: a1Prior, a1Dark: a1Dark,
+            pull: pull, whole: whole)
     }
 
     /// What follows the two models, in `evaluate.py`'s order: the sides from

@@ -169,7 +169,9 @@ while !arguments.isEmpty {
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--a1-dark takes on or off") }
         a1Dark = value == "on"
-    case "--dark": darkPath = arguments.isEmpty ? nil : arguments.removeFirst()
+    case "--dark":
+        guard !arguments.isEmpty else { fail("--dark takes the file to write") }
+        darkPath = arguments.removeFirst()
     case "--flag-below":
         let values = (arguments.isEmpty ? "" : arguments.removeFirst()).split(separator: ",").map { Float($0) }
         guard !values.isEmpty, values.allSatisfy({ $0 != nil }) else {

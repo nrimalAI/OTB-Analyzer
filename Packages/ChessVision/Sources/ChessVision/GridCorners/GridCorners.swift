@@ -64,9 +64,10 @@ public enum GridCorners {
     }
 
     /// As `find`. `whole`: the whole photo at the working size
-    /// (`workingImage(of:)`), when the caller has it already; the shrink is
-    /// a fifth to a quarter of what the recognizer takes on a large photo,
-    /// and the square colours (`squareColours`) read the same image.
+    /// (`workingImage(of:)`), when the caller has it already: shrinking a
+    /// large photo takes tens of milliseconds, and the square colours
+    /// (`squareColours`) read the same image. One that does not have the
+    /// whole photo's origin, scale and size is not used.
     static func find(in image: CGImage, priorBox: CGRect? = nil, whole: GrayImage.Working?) -> Fit? {
         let result = findGrid(image, priorBox: priorBox, whole: whole)
         guard result.confidence > 0, let corners = result.corners else { return nil }
@@ -206,9 +207,8 @@ public enum GridCorners {
         _ image: CGImage, priorBox: CGRect?, whole: GrayImage.Working? = nil
     ) -> (corners: [CGPoint]?, info: Info) {
         var info = Info()
-        guard let working = (priorBox == nil ? whole : nil)
-            ?? GrayImage.working(from: image, priorBox: priorBox)
-        else {
+        let handed = whole.flatMap { priorBox == nil && GrayImage.isWhole($0, of: image) ? $0 : nil }
+        guard let working = handed ?? GrayImage.working(from: image, priorBox: priorBox) else {
             return (nil, info)
         }
         let corners = detect(
