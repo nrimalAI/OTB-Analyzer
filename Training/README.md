@@ -771,6 +771,23 @@ squares right on 5 photos, fewer on 3: a crowned king can turn a1) and
 Fenit A 234 -> 232; no floor at all for any piece, the same on board B and
 230 on Fenit A. Two boards for two: the step is left as it is.
 
+**A larger input for the piece model: probed, not trained (2026-11-15).**
+On board B's photos a piece is 20 to 28 pixels tall in the model's 640
+pixel input. `evaluate.py --pieces-imgsz` and `export_coreml.py
+--pieces-imgsz` give the same weights a larger input, and the app takes
+such a model as it is (it reads the input's side from the model). With
+`pieces_s_tone1`, which was trained at 640: labelled corners in Python
+(`scores/pieces_s_tone1_imgsz{960,1280}.txt`), 640 / 960 / 1280: Fenit A
+89% / 91% / 78% of boards exact, ChessReD test 97.7% / 98.4% / 93.1%, board
+B 20 / 12 / 1 of 98 (at 960 the sides go: P read as p 53 times against 39,
+K as k 24 against 5; of the kinds, k as q 11 against 23 and r as q 17
+against 7). Through the app at 960 (`runs/app_check/hi/` against `now30/`):
+board B 31 -> 14 boards exact, Fenit A 234 -> 221, ChessReD test 295 ->
+293. So a model that never saw pieces that large gains nothing from them
+through the app; what a model trained at 960 would do is not known. It
+would cost about two and a quarter times the training time and as much on
+the phone.
+
 **What is left on board B through the app** (with the side of single
 pieces on, `runs/app_check/now30/now_fenit_B.txt`): 31 boards are right, 22
 are one square off, 10 two, and 18 are eight or more off (14 of them

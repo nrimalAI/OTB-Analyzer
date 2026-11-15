@@ -333,6 +333,9 @@ def main():
     ap.add_argument("--pull", type=float, default=0.30,
                     help="anchor pull toward board center (see chess_pipeline)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--pieces-imgsz", type=int, default=640,
+                    help="the side the piece model's input is drawn at (640: as exported; "
+                         "more only to see what a model with a larger input would read)")
     ap.add_argument("--corner-imgsz", type=int, default=640,
                     help="corner-model inference resolution (kpt precision lever)")
     ap.add_argument("--two-pass", action="store_true",
@@ -546,7 +549,7 @@ def main():
             # For --one-king every box down to a low confidence is wanted: the
             # ones below --conf only say what else each piece might be.
             pr = piece_model(piece_input, conf=min(args.conf, 0.02) if args.one_king else args.conf,
-                             verbose=False, device=args.device)[0]
+                             imgsz=args.pieces_imgsz, verbose=False, device=args.device)[0]
             if pr.boxes is not None:
                 for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
                                           pr.boxes.conf.tolist()):
