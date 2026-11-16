@@ -7,7 +7,12 @@
 //
 //   swift run -c release app_check --models ../../Models --list photos.json
 //
-//   --models DIR    folder with BoardCorners.mlpackage and Pieces.mlpackage
+//   --models DIR    folder with BoardCorners.mlpackage and Pieces.mlpackage,
+//                   and PieceKinds.mlpackage (the piece classifier) where
+//                   there is one, as in the app's bundle
+//   --piece-kinds on|off  with a PieceKinds.mlpackage: each piece's kind from
+//                   the classifier and the piece model together (the app's
+//                   default: on)
 //   --list FILE     JSON object: photo path -> piece placement (first FEN field).
 //                   Relative paths are taken from the folder of FILE.
 //                   `evaluate.py --dump-list` writes one for a test split.
@@ -176,6 +181,7 @@ var sidesFromColourGiven = false
 var oneKing: Bool?
 var oddSides: Bool?
 var queenForKing: Bool?
+var pieceKinds: Bool?
 var a1Dark: Bool?
 var darkPath: String?
 var fitWindow: Bool?
@@ -217,6 +223,10 @@ while !arguments.isEmpty {
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--queen-for-king takes on or off") }
         queenForKing = value == "on"
+    case "--piece-kinds":
+        let value = arguments.isEmpty ? "" : arguments.removeFirst()
+        guard value == "on" || value == "off" else { fail("--piece-kinds takes on or off") }
+        pieceKinds = value == "on"
     case "--a1-dark":
         let value = arguments.isEmpty ? "" : arguments.removeFirst()
         guard value == "on" || value == "off" else { fail("--a1-dark takes on or off") }
@@ -377,6 +387,10 @@ do {
     let pieces = try MLModel(
         contentsOf: MLModel.compileModel(at: models.appending(path: "Pieces.mlpackage")),
         configuration: config)
+    let kindsPackage = models.appending(path: "PieceKinds.mlpackage")
+    let kinds = FileManager.default.fileExists(atPath: kindsPackage.path)
+        ? try MLModel(contentsOf: MLModel.compileModel(at: kindsPackage), configuration: config)
+        : nil
     // What is not given stays the app's default, whatever that is.
     recognizer = try CoreMLBoardRecognizer(
         cornerModel: corners, pieceModel: pieces, a1Prior: a1Prior, gridFit: gridFit,
@@ -385,7 +399,9 @@ do {
         a1Dark: a1Dark ?? CoreMLBoardRecognizer.Default.a1Dark,
         fitWindow: fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow,
         oddSides: oddSides ?? CoreMLBoardRecognizer.Default.oddSides,
-        queenForKing: queenForKing ?? CoreMLBoardRecognizer.Default.queenForKing)
+        queenForKing: queenForKing ?? CoreMLBoardRecognizer.Default.queenForKing,
+        kindModel: kinds,
+        pieceKinds: pieceKinds ?? CoreMLBoardRecognizer.Default.pieceKinds)
 } catch {
     fail("could not load the models in \(modelsPath): \(error)")
 }
@@ -602,6 +618,8 @@ if let piecesPath {
         "odd_sides": oddSides ?? CoreMLBoardRecognizer.Default.oddSides,
         "one_king": oneKing ?? CoreMLBoardRecognizer.Default.oneKing,
         "queen_for_king": queenForKing ?? CoreMLBoardRecognizer.Default.queenForKing,
+        "piece_kinds": FileManager.default.fileExists(atPath: models.appending(path: "PieceKinds.mlpackage").path)
+            && (pieceKinds ?? CoreMLBoardRecognizer.Default.pieceKinds),
         "a1_dark": a1Dark ?? CoreMLBoardRecognizer.Default.a1Dark,
         "fit_window": fitWindow ?? CoreMLBoardRecognizer.Default.fitWindow,
     ]
@@ -706,7 +724,7 @@ func percent(_ part: Int, _ whole: Int) -> String {
     String(format: "%.2f%%", 100 * Double(part) / Double(max(whole, 1)))
 }
 print("""
-    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oddSides.map { ", odd sides \($0 ? "on" : "off")" } ?? "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(queenForKing.map { ", queen for king \($0 ? "on" : "off")" } ?? "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
+    \(photos) photos through the app's recognizer\(redraw.map { ", redrawn at \($0)" } ?? "")\(portrait ? ", as 3:4 photos" : "")\(a1PriorGiven ? ", a1 prior \(a1Prior.map { String($0) } ?? "off")" : "")\(gridFitGiven ? ", grid fit \(gridFit ? "on" : "off")" : "")\(sidesFromColourGiven ? ", sides from colour \(sidesFromColour ? "on" : "off")" : "")\(oddSides.map { ", odd sides \($0 ? "on" : "off")" } ?? "")\(oneKing.map { ", one king a side \($0 ? "on" : "off")" } ?? "")\(queenForKing.map { ", queen for king \($0 ? "on" : "off")" } ?? "")\(FileManager.default.fileExists(atPath: models.appending(path: "PieceKinds.mlpackage").path) ? ", piece classifier \((pieceKinds ?? CoreMLBoardRecognizer.Default.pieceKinds) ? "on" : "off")" : "")\(a1Dark.map { ", a1 dark \($0 ? "on" : "off")" } ?? "")\(fitWindow.map { ", fit window \($0 ? "on" : "off")" } ?? "")
       squares right: \(percent(squaresRight, photos * 64))
       boards exact: \(exact) of \(photos) (\(percent(exact, photos)))
       boards exact once turned 180 degrees: \(exactTurned) of \(photos) (\(percent(exactTurned, photos)))

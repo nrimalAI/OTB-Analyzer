@@ -33,7 +33,7 @@ from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, board_crop, colour_patch, fen_placement_to_board, homography, project,
     odd_sides, one_king_a_side, orient_by_pieces, sides_from_colour, window_by_model, WINDOW_NEAR,
-    CLASSIFIER_MARGIN, CLASSIFIER_SIDE, classifier_scale, classifier_square, kinds_from_classifier,
+    CLASSIFIER_MARGIN, CLASSIFIER_SIDE, CLASSIFIER_SURE, classifier_scale, classifier_square, kinds_from_classifier,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -237,7 +237,8 @@ def classify_pieces(model, img, detections, sx, sy, args):
         probs = [[(a + b) / 2 for a, b in zip(p, q)] for p, q in zip(probs, flipped)]
     names = [model.names[i] for i in range(len(model.names))]
     if args.classifier_mode == "kind-product":
-        return kinds_from_classifier(detections, [dict(zip(names, p)) for p in probs])
+        return kinds_from_classifier(detections, [dict(zip(names, p)) for p in probs],
+                                     sure=args.classifier_sure)
     out = []
     for d, p in zip(detections, probs):
         best = max(range(len(p)), key=p.__getitem__)
@@ -453,6 +454,8 @@ def main():
                          "kind-product: as kind, the classifier's kind scores times the detector's")
     ap.add_argument("--classifier-min", type=float, default=0.6)
     ap.add_argument("--classifier-size", type=int, default=CLASSIFIER_SIDE)
+    ap.add_argument("--classifier-sure", type=float, default=CLASSIFIER_SURE,
+                    help="kind-product: pieces the piece model gives at least this are left as they are")
     ap.add_argument("--classifier-margin", type=float, default=CLASSIFIER_MARGIN)
     ap.add_argument("--classifier-flip", action="store_true", help="average the classifier over the crop and its mirror")
     ap.add_argument("--tta-flip", action="store_true",
@@ -725,9 +728,11 @@ def main():
             odd_boards += any(d.cls != c for d, c in zip(detections, before))
         if args.one_king and not args.gt_boxes:
             before = [d.cls for d in detections]
+            own_scores = kind_scores_of(detections, every_box)
             detections = one_king_a_side(detections,
-                                         classifier_kinds if classifier_kinds is not None
-                                         else kind_scores_of(detections, every_box),
+                                         [c if c is not None else o for c, o in
+                                          zip(classifier_kinds, own_scores)]
+                                         if classifier_kinds is not None else own_scores,
                                          queen_for_king=args.queen_for_king)
             kings_changed += any(d.cls != c for d, c in zip(detections, before))
         turns = None

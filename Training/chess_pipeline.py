@@ -528,6 +528,9 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR, queen_for_king=Fa
 CLASSIFIER_PHOTO_SIDE = 1280
 CLASSIFIER_MARGIN = 1.2
 CLASSIFIER_SIDE = 128
+# A piece the piece model gives at least this score is left as it is: on the
+# development sets the classifier then gains as much and changes fewer pieces.
+CLASSIFIER_SURE = 0.9
 
 
 def classifier_scale(width, height, max_side=CLASSIFIER_PHOTO_SIDE):
@@ -545,7 +548,7 @@ def classifier_square(bbox, scale, margin=CLASSIFIER_MARGIN):
     return x0, y0, side
 
 
-def kinds_from_classifier(detections, class_probs):
+def kinds_from_classifier(detections, class_probs, sure=CLASSIFIER_SURE):
     """The detections with their kinds from the piece classifier and the
     piece model together, and for each the scores by kind one king a side
     is then given.
@@ -560,10 +563,17 @@ def kinds_from_classifier(detections, class_probs):
     its confidence for its own kind and the rest shared evenly among the
     other five. The kind with the largest product, normalised, is taken;
     its share becomes the confidence, and all six shares the kind scores.
-    (Ties go to the kind first in KINDS.)"""
+    (Ties go to the kind first in KINDS.)
+
+    A piece the piece model gives `sure` or more is left as it is, and its
+    kind scores are None: the caller keeps the piece model's own."""
     out, scores = [], []
     for d, probs in zip(detections, class_probs):
         side, own = d.cls.split("_", 1)
+        if d.confidence >= sure:
+            out.append(d)
+            scores.append(None)
+            continue
         from_classifier = dict.fromkeys(KINDS, 0.0)
         for label, p in probs.items():
             from_classifier[label.split("_", 1)[1]] += float(p)
