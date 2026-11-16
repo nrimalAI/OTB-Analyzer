@@ -27,6 +27,12 @@ Notes:
   run's dataset file and continued with `train.py resume`, like the above.
 - --close-mosaic N: ultralytics switches mosaic off for the last N epochs and
   its default is 10, so a run of 10 epochs or fewer has no mosaic at all.
+- --lr0 RATE: without it ultralytics picks the optimiser and the rate itself
+  (AdamW at 0.000625 for these models), also for a run that continues trained
+  weights, and warms up for three epochs. That is a fresh start's rate: four
+  runs that continued pieces_s_tone1 at it each read some boards better and
+  others worse (Training/README.md). --lr0 fixes AdamW at the rate given and
+  one epoch of warm-up, for continuing a trained model gently.
 """
 
 import argparse
@@ -74,6 +80,9 @@ def main():
     ap.add_argument("--side-tone", type=float, default=None, metavar="P",
                     help="pieces only: show each training photo in another tone "
                          "with this probability (side_tone.py)")
+    ap.add_argument("--lr0", type=float, default=None, metavar="RATE",
+                    help="AdamW at this learning rate with one epoch of warm-up, instead "
+                         "of ultralytics' own choice (for continuing trained weights)")
     ap.add_argument("--close-mosaic", type=int, default=None, metavar="N",
                     help="epochs at the end without mosaic (ultralytics' default: 10)")
     args = ap.parse_args()
@@ -111,7 +120,7 @@ def main():
             side_tone.patch(float(tone))
             print(f"side tone {float(tone):g}, as {data_file} says")
         given = [f for f in ("data", "epochs", "patience", "device", "imgsz", "kpt_sigma", "side_tone",
-                             "close_mosaic")
+                             "close_mosaic", "lr0")
                  if getattr(args, f) is not None] + (["canonical_corners"] if args.canonical_corners else [])
         if given:
             print(f"resume keeps the run's own settings; ignored here: {', '.join(given)}")
@@ -145,6 +154,8 @@ def main():
         overrides["imgsz"] = args.imgsz
     if args.close_mosaic is not None:
         overrides["close_mosaic"] = args.close_mosaic
+    if args.lr0 is not None:
+        overrides.update(optimizer="AdamW", lr0=args.lr0, warmup_epochs=1.0)
 
     # Keep runs under Training/runs/ wherever the script is started from
     # (recent ultralytics would otherwise put them at the repo root).
