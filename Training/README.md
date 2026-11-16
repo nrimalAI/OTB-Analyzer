@@ -1340,6 +1340,42 @@ was in `Models/`, and why it was taken out again.
 **Things that are not in the repo.** The Roboflow API key (only needed to
 fetch more Roboflow projects: `export ROBOFLOW_API_KEY=...`).
 
+### What is wrong on unseen boards now, and a piece classifier (2026-11-15 night)
+
+Through the app with the pair in `Models/` (`runs/app_check/window_h2/now_*.txt`,
+`now30/now_fenit_B.txt`), wrong squares by kind of error:
+
+| Set | Boards exact | Wrong squares | Side wrong | Kind wrong | Missing | Extra | Most common |
+|---|---|---|---|---|---|---|---|
+| chess-cv games (840) | 267 | 1,082 | 0 | 1,078 | 1 | 3 | k->q 175, b->n 155, q->r 124, N->B 80 |
+| samryan (500) | 115 | 1,120 | 8 | 833 | 137 | 142 | b->r 90, R->B 90, k->q 85, B->P 84 |
+| Y-LIChess (200) | 60 | 664 | 3 | 184 | 214 | 263 | pieces a square off (P/p, K/k) |
+| ChessQ (50) | 14 | 210 | 4 | 115 | 41 | 50 | P->B 34, p->b 15 |
+| chesscog real (29) | 8 | 34 | 0 | 34 | 0 | 0 | p->b 24 |
+| board B (100) | 31 | 324 | 22 | 103 | 101 | 98 | pawns a square off, k->q 16, r->q 16 |
+
+So on unseen piece sets the side is now nearly always right, and what is left is
+the kind of piece (and on Y-LIChess and board B, tall pieces landing a square
+off). About 98% of squares are right; 85% of boards exact needs about 99.75%.
+
+**Test-time augmentation does not help** (`evaluate.py --tta`, ultralytics'
+flips and two smaller scales; `--tta-flip`, the photo and its mirror image with
+the scores of matched boxes averaged). tone1, labelled corners, board B / Fenit A
+/ ChessReD test boards exact: alone 20 of 98 / 239 / 299; `--tta` 24 / 229 / 296;
+`--tta-flip` 22 / 238 / 299. Not worth reading every photo twice on a phone.
+
+**A piece classifier as a second stage** (in work). The detector reads the
+photo at 640 px, where a piece is 20 to 50 px tall. `make_piece_crops.py` cuts
+every labelled piece of `merged_all4_shape1` out of the 1280-px copies (a
+square of 1.2 times the box's longer side, a second copy shifted and scaled by
+up to 12%, 30% of the renders' pieces kept): `datasets/crops1`, 556,292 crops
+to train on, 18,667 from the val photos. `train.py classify` trains a
+YOLO11s-cls on them at 128 px (left-right flips allowed; under
+`runs/detect/<name>` so that `queue.sh` handles it), and `evaluate.py
+--classifier <pt> [--classifier-mode replace|product|confident]` re-reads every
+box the detector kept. Training it on the CPU while a piece run had the GPU
+slowed that run fourfold: classifier runs go through the queue too.
+
 ## Second held-out test set (2026-11): `datasets/heldout2`
 
 Fenit's board B is 100 photos of one board, and settings have been chosen on
