@@ -235,6 +235,19 @@ def classify_pieces(model, img, detections, sx, sy, args, size=None):
         cls, conf = d.cls, d.confidence
         if args.classifier_mode == "replace":
             cls, conf = names[best], p[best]
+        elif args.classifier_mode in ("kind", "kind-product"):
+            side = d.cls.split("_", 1)[0]
+            kinds = {}
+            for name, v in zip(names, p):
+                kinds[name.split("_", 1)[1]] = kinds.get(name.split("_", 1)[1], 0.0) + v
+            if args.classifier_mode == "kind-product":
+                own = d.cls.split("_", 1)[1]
+                rest = (1 - d.confidence) / (len(kinds) - 1)
+                kinds = {k: v * (d.confidence if k == own else rest) for k, v in kinds.items()}
+                total = sum(kinds.values()) or 1e-9
+                kinds = {k: v / total for k, v in kinds.items()}
+            kind = max(kinds, key=kinds.get)
+            cls, conf = side + "_" + kind, kinds[kind]
         elif args.classifier_mode == "confident":
             if p[best] >= args.classifier_min:
                 cls, conf = names[best], p[best]
@@ -429,10 +442,12 @@ def main():
     ap.add_argument("--classifier", metavar="PT",
                     help="a piece classifier (make_piece_crops.py + yolo classify) that reads every "
                          "box the piece model kept, cut out of the photo, and gives its kind and side")
-    ap.add_argument("--classifier-mode", default="replace", choices=["replace", "product", "confident"],
+    ap.add_argument("--classifier-mode", default="replace", choices=["replace", "product", "confident", "kind", "kind-product"],
                     help="replace: the classifier's class; product: the classifier's scores times the "
                          "detector's (detector's class kept only if the classifier gives it some score); "
-                         "confident: the classifier's class where its score is >= --classifier-min")
+                         "confident: the classifier's class where its score is >= --classifier-min; "
+                         "kind: the classifier's kind (its two sides' scores summed), the detector's side; "
+                         "kind-product: as kind, the classifier's kind scores times the detector's")
     ap.add_argument("--classifier-min", type=float, default=0.6)
     ap.add_argument("--classifier-size", type=int, default=128)
     ap.add_argument("--classifier-margin", type=float, default=1.2)
