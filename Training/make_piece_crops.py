@@ -12,7 +12,8 @@ as the training set has it (1280-px copies; the app draws a photo into at most
 1280 px too) and resized to --size. Out: <out>/train/<class>/*.jpg and
 <out>/val/<class>/*.jpg, the layout `yolo classify` trains on.
 
---render-keep keeps that share of the pieces of our renders (render_*), so the
+--render-keep keeps that share of our render photos (render_*; a photo is kept
+or dropped whole), so the
 real photos are not drowned. Nothing from Fenit board B or the second test set
 is in the piece training sets, so nothing of them gets in here either.
 """
