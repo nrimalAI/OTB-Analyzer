@@ -27,6 +27,9 @@ Notes:
   run's dataset file and continued with `train.py resume`, like the above.
 - --close-mosaic N: ultralytics switches mosaic off for the last N epochs and
   its default is 10, so a run of 10 epochs or fewer has no mosaic at all.
+- classify: a piece classifier on the crops make_piece_crops.py cuts out
+  (folder data, 128 px, left-right flips allowed: a mirrored piece is the same
+  piece). Weights in runs/detect/<name>/ (where queue.sh looks); evaluate.py --classifier.
 - --lr0 RATE: without it ultralytics picks the optimiser and the rate itself
   (AdamW at 0.000625 for these models), also for a run that continues trained
   weights, and warms up for three epochs. That is a fresh start's rate: four
@@ -61,7 +64,7 @@ COMMON = dict(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("task", choices=["corners", "pieces", "resume"])
+    ap.add_argument("task", choices=["corners", "pieces", "classify", "resume"])
     ap.add_argument("--data", help="dataset file (not needed for resume)")
     ap.add_argument("--model", default=None, help="base checkpoint override")
     ap.add_argument("--epochs", type=int, default=None)
@@ -96,6 +99,10 @@ def main():
         import canonical_corners
         ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
         saved = ckpt.get("train_args", {})
+        if saved.get("task") == "classify":
+            extra = {"batch": args.batch} if args.batch else {}
+            YOLO(args.model).train(resume=True, **extra)
+            return
         data_file = Path(str(saved.get("data", "")))
         marked = data_file.is_file() and bool(
             (yaml.safe_load(data_file.read_text()) or {}).get("canonical_corners"))
@@ -136,6 +143,23 @@ def main():
     if args.side_tone is not None and not 0 < args.side_tone <= 1:
         ap.error("--side-tone takes a probability over 0, up to 1")
 
+    if args.task == "classify":
+        if args.kpt_sigma or args.canonical_corners or args.side_tone:
+            ap.error("--kpt-sigma, --canonical-corners and --side-tone are not for the classifier")
+        overrides = dict(imgsz=args.imgsz or 128, epochs=args.epochs or 6, batch=args.batch or 256,
+                         workers=4, fliplr=0.5, hsv_v=0.25, erasing=0.2, plots=False)
+        if args.patience is not None:
+            overrides["patience"] = args.patience
+        if args.device:
+            overrides["device"] = args.device
+        if args.lr0 is not None:
+            overrides.update(optimizer="AdamW", lr0=args.lr0, warmup_epochs=1.0)
+        YOLO(args.model or "yolo11s-cls.pt").train(
+            # under runs/detect/ like the piece runs: queue.sh looks for every
+            # run that is not a corner run there
+            data=args.data, project=str(HERE / "runs" / "detect"), name=args.name or "classify",
+            **overrides)
+        return
     if args.task == "corners":
         base = args.model or "yolo11n-pose.pt"
     else:
