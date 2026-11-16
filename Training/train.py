@@ -100,6 +100,10 @@ def main():
         ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
         saved = ckpt.get("train_args", {})
         if saved.get("task") == "classify":
+            given = [f for f in ("data", "epochs", "patience", "device", "imgsz", "lr0", "close_mosaic")
+                     if getattr(args, f) is not None]
+            if given:
+                print(f"resume keeps the run's own settings; ignored here: {', '.join(given)}")
             extra = {"batch": args.batch} if args.batch else {}
             YOLO(args.model).train(resume=True, **extra)
             return
@@ -144,8 +148,8 @@ def main():
         ap.error("--side-tone takes a probability over 0, up to 1")
 
     if args.task == "classify":
-        if args.kpt_sigma or args.canonical_corners or args.side_tone:
-            ap.error("--kpt-sigma, --canonical-corners and --side-tone are not for the classifier")
+        if args.kpt_sigma or args.canonical_corners or args.side_tone or args.close_mosaic is not None:
+            ap.error("--kpt-sigma, --canonical-corners, --side-tone and --close-mosaic are not for the classifier")
         overrides = dict(imgsz=args.imgsz or 128, epochs=args.epochs or 6, batch=args.batch or 256,
                          workers=4, fliplr=0.5, hsv_v=0.25, erasing=0.2, plots=False)
         if args.patience is not None:

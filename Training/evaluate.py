@@ -202,8 +202,9 @@ def fuse_flip(a, b, min_iou=0.5):
 
 
 def classify_pieces(model, img, detections, sx, sy, args, size=None):
-    """Each box (photo coordinates; img is the photo as the piece model read it,
-    so a box is divided by sx, sy) cut out as make_piece_crops.py cuts the
+    """Each box (in the scored photo's coordinates; img is the whole photo as
+    the piece model was given it before any --crop-board cut, so a box is
+    divided by sx, sy) cut out as make_piece_crops.py cuts the
     training crops, read by the classifier; the class is then set by
     --classifier-mode."""
     import cv2
@@ -214,7 +215,7 @@ def classify_pieces(model, img, detections, sx, sy, args, size=None):
         x1, y1, x2, y2 = d.bbox
         x1, x2, y1, y2 = x1 / sx, x2 / sx, y1 / sy, y2 / sy
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        s = int(round(max(x2 - x1, y2 - y1) * args.classifier_margin))
+        s = max(2, int(round(max(x2 - x1, y2 - y1) * args.classifier_margin)))
         x0, y0 = int(round(cx - s / 2)), int(round(cy - s / 2))
         pad = max(0, -x0, -y0, x0 + s - W, y0 + s - H)
         src = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_REPLICATE) if pad else img
@@ -511,6 +512,15 @@ def main():
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
+    if args.classifier and args.one_king:
+        ap.error("--classifier with --one-king: the king rule would re-decide kinds on the "
+                 "detector's scores, not the classifier's; not supported")
+    if args.classifier and args.gt_boxes and args.classifier_mode != "replace":
+        ap.error("--classifier with --gt-boxes needs --classifier-mode replace: the other modes "
+                 "fall back on the labelled class")
+    if args.tta and args.pieces_model and not args.pieces_model.endswith(".pt"):
+        ap.error("--tta needs a PyTorch piece model (.pt): ultralytics ignores augment for an "
+                 "exported model (--tta-flip works with either)")
     if args.queen_for_king and not args.one_king:
         ap.error("--queen-for-king acts inside the one-king step: give --one-king too")
     if (args.fit_window or args.shift_fit) and not args.grid_corners:

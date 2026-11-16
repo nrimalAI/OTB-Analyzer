@@ -22,7 +22,7 @@ give train.py a data.yaml whose `path` is absolute (train.py makes one when
 it copies the file for --side-tone).
 
 A real photo is one whose file name does not start with `render__`; a
-render batch is the files render_<seed, two digits>*.jpg of
+render batch is the files render_<seed, three digits>*.jpg of
 datasets/render/pieces/images that have a label file.
 """
 
