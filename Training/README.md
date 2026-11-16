@@ -1343,7 +1343,8 @@ fetch more Roboflow projects: `export ROBOFLOW_API_KEY=...`).
 ### What is wrong on unseen boards now, and a piece classifier (2026-11-15 night)
 
 Through the app with the pair in `Models/` (`runs/app_check/window_h2/now_*.txt`,
-`now30/now_fenit_B.txt`), wrong squares by kind of error:
+`now30/now_fenit_B.txt`), wrong squares by kind of error (look 11 at the second
+test set in the list under "Second held-out test set"):
 
 | Set | Boards exact | Wrong squares | Side wrong | Kind wrong | Missing | Extra | Most common |
 |---|---|---|---|---|---|---|---|
@@ -1428,6 +1429,12 @@ that the count is known:
    1280`. Both say two parts gain much (samryan, the chess-cv games) and
    chesscog and the Y-LIChess layouts lose; the Y-LIChess games gain in the
    first (24 -> 29 boards) and lose in the second (41 -> 32).
+11. The kinds of error left on unseen boards (2026-11-15, 23:00) were
+   counted here, from the app outputs already on disk
+   (`runs/app_check/window_h2/now_*.txt`; no new reading): almost all
+   wrong squares are the kind of piece. That is why a piece classifier as
+   a second stage was tried next (README, "What is wrong on unseen boards
+   now"). Nothing was set on it, but the idea came from here.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else
