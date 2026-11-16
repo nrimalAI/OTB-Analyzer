@@ -177,6 +177,82 @@ def kind_scores_of(detections, every_box, max_iou=0.7):
     return out
 
 
+def fuse_flip(a, b, min_iou=0.5):
+    """Boxes (xyxy, cls, conf) of a photo and of its mirror image, mirrored back.
+    Pairs (greedy by IoU) average their per-class scores over both passes; a
+    box found in one pass only keeps half its score."""
+    pairs = sorted(((box_iou(x[0], y[0]), i, j) for i, x in enumerate(a)
+                    for j, y in enumerate(b)), reverse=True)
+    used_a, used_b, out = set(), set(), []
+    for iou, i, j in pairs:
+        if iou < min_iou:
+            break
+        if i in used_a or j in used_b:
+            continue
+        used_a.add(i); used_b.add(j)
+        scores = {}
+        for _, c, p in (a[i], b[j]):
+            scores[c] = scores.get(c, 0.0) + p / 2
+        cls = max(scores, key=scores.get)
+        box = [(u + v) / 2 for u, v in zip(a[i][0], b[j][0])]
+        out.append((box, cls, scores[cls]))
+    out += [(x[0], x[1], x[2] / 2) for i, x in enumerate(a) if i not in used_a]
+    out += [(y[0], y[1], y[2] / 2) for j, y in enumerate(b) if j not in used_b]
+    return out
+
+
+def classify_pieces(model, img, detections, sx, sy, args, size=None):
+    """Each box (in the scored photo's coordinates; img is the whole photo as
+    the piece model was given it before any --crop-board cut, so a box is
+    divided by sx, sy) cut out as make_piece_crops.py cuts the
+    training crops, read by the classifier; the class is then set by
+    --classifier-mode."""
+    import cv2
+    size = size or args.classifier_size
+    H, W = img.shape[:2]
+    crops = []
+    for d in detections:
+        x1, y1, x2, y2 = d.bbox
+        x1, x2, y1, y2 = x1 / sx, x2 / sx, y1 / sy, y2 / sy
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        s = max(2, int(round(max(x2 - x1, y2 - y1) * args.classifier_margin)))
+        x0, y0 = int(round(cx - s / 2)), int(round(cy - s / 2))
+        pad = max(0, -x0, -y0, x0 + s - W, y0 + s - H)
+        src = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_REPLICATE) if pad else img
+        crop = src[y0 + pad:y0 + pad + s, x0 + pad:x0 + pad + s]
+        interp = cv2.INTER_AREA if s > size else cv2.INTER_LINEAR
+        crops.append(cv2.resize(crop, (size, size), interpolation=interp))
+    def probs_of(images):
+        rs = model(images, imgsz=size, verbose=False, device=args.device)
+        return [r.probs.data.tolist() for r in rs]
+    probs = probs_of(crops)
+    if args.classifier_flip:
+        flipped = probs_of([c[:, ::-1].copy() for c in crops])
+        probs = [[(a + b) / 2 for a, b in zip(p, q)] for p, q in zip(probs, flipped)]
+    names = [model.names[i] for i in range(len(model.names))]
+    out = []
+    for d, p in zip(detections, probs):
+        best = max(range(len(p)), key=p.__getitem__)
+        cls, conf = d.cls, d.confidence
+        if args.classifier_mode == "replace":
+            cls, conf = names[best], p[best]
+        elif args.classifier_mode == "confident":
+            if p[best] >= args.classifier_min:
+                cls, conf = names[best], p[best]
+        else:
+            # product: the detector's class gets its confidence, the others
+            # what is left shared evenly; times the classifier's scores
+            k = len(p)
+            det = [(1 - d.confidence) / (k - 1)] * k
+            if d.cls in names:
+                det[names.index(d.cls)] = d.confidence
+            q = [a * b for a, b in zip(p, det)]
+            j = max(range(k), key=q.__getitem__)
+            cls, conf = names[j], q[j] / max(sum(q), 1e-9)
+        out.append(Detection(cls, float(conf), d.bbox))
+    return out
+
+
 def one_per_spot(detections, max_iou):
     """Detections without the ones that overlap a more confident detection
     (of any class) by more than max_iou."""
@@ -333,6 +409,9 @@ def main():
     ap.add_argument("--pull", type=float, default=0.30,
                     help="anchor pull toward board center (see chess_pipeline)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--pieces-imgsz", type=int, default=640,
+                    help="the side the piece model's input is drawn at (640: as exported; "
+                         "more only to see what a model with a larger input would read)")
     ap.add_argument("--corner-imgsz", type=int, default=640,
                     help="corner-model inference resolution (kpt precision lever)")
     ap.add_argument("--two-pass", action="store_true",
@@ -348,6 +427,23 @@ def main():
     ap.add_argument("--one-king", action="store_true",
                     help="exactly one king a side, from every kind the model scored "
                          "for each piece (chess_pipeline.one_king_a_side)")
+    ap.add_argument("--classifier", metavar="PT",
+                    help="a piece classifier (make_piece_crops.py + yolo classify) that reads every "
+                         "box the piece model kept, cut out of the photo, and gives its kind and side")
+    ap.add_argument("--classifier-mode", default="replace", choices=["replace", "product", "confident"],
+                    help="replace: the classifier's class; product: the classifier's scores times the "
+                         "detector's (detector's class kept only if the classifier gives it some score); "
+                         "confident: the classifier's class where its score is >= --classifier-min")
+    ap.add_argument("--classifier-min", type=float, default=0.6)
+    ap.add_argument("--classifier-size", type=int, default=128)
+    ap.add_argument("--classifier-margin", type=float, default=1.2)
+    ap.add_argument("--classifier-flip", action="store_true", help="average the classifier over the crop and its mirror")
+    ap.add_argument("--tta-flip", action="store_true",
+                    help="also read the photo flipped left-right; matched boxes average their "
+                         "scores per class, a box seen in one pass only keeps half its score")
+    ap.add_argument("--tta", action="store_true",
+                    help="test-time augmentation for the piece model (ultralytics augment=True: "
+                         "the photo also flipped left-right and at two smaller scales, boxes pooled before NMS)")
     ap.add_argument("--crop-board", action="store_true",
                     help="give the piece model only the part of the photo round the "
                          "board (chess_pipeline.board_crop), for a piece model trained "
@@ -416,6 +512,15 @@ def main():
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
+    if args.classifier and args.one_king:
+        ap.error("--classifier with --one-king: the king rule would re-decide kinds on the "
+                 "detector's scores, not the classifier's; not supported")
+    if args.classifier and args.gt_boxes and args.classifier_mode != "replace":
+        ap.error("--classifier with --gt-boxes needs --classifier-mode replace: the other modes "
+                 "fall back on the labelled class")
+    if args.tta and args.pieces_model and not args.pieces_model.endswith(".pt"):
+        ap.error("--tta needs a PyTorch piece model (.pt): ultralytics ignores augment for an "
+                 "exported model (--tta-flip works with either)")
     if args.queen_for_king and not args.one_king:
         ap.error("--queen-for-king acts inside the one-king step: give --one-king too")
     if (args.fit_window or args.shift_fit) and not args.grid_corners:
@@ -469,6 +574,11 @@ def main():
     exact_or_flipped = grid_rejected = grid_alone = sides_changed = kings_changed = 0
     dump = open(args.dump_pieces, "w") if args.dump_pieces else None
     odd_changed = odd_boards = 0
+    classifier_changed = 0
+    classifier = None
+    if args.classifier:
+        from ultralytics import YOLO
+        classifier = YOLO(args.classifier)
     a1_colour_unclear = a1_colour_moved = windows_moved = 0
     confusion = Counter()
 
@@ -546,19 +656,40 @@ def main():
             # For --one-king every box down to a low confidence is wanted: the
             # ones below --conf only say what else each piece might be.
             pr = piece_model(piece_input, conf=min(args.conf, 0.02) if args.one_king else args.conf,
-                             verbose=False, device=args.device)[0]
+                             imgsz=args.pieces_imgsz, verbose=False, device=args.device,
+                             augment=args.tta)[0]
+            found = []
             if pr.boxes is not None:
-                for box, cls, conf in zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
-                                          pr.boxes.conf.tolist()):
-                    x1, y1, x2, y2 = box
-                    detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
-                                                (x1 * sx + dx, y1 * sy + dy,
-                                                 x2 * sx + dx, y2 * sy + dy)))
+                found = list(zip(pr.boxes.xyxy.tolist(), pr.boxes.cls.tolist(),
+                                 pr.boxes.conf.tolist()))
+            if args.tta_flip:
+                import cv2
+                img = piece_input if not isinstance(piece_input, (str, Path)) else cv2.imread(str(piece_input))
+                width = img.shape[1]
+                pf = piece_model(img[:, ::-1].copy(), conf=min(args.conf, 0.02) if args.one_king else args.conf,
+                                 imgsz=args.pieces_imgsz, verbose=False, device=args.device)[0]
+                mirrored = []
+                if pf.boxes is not None:
+                    mirrored = [([width - b[2], b[1], width - b[0], b[3]], c, p)
+                                for b, c, p in zip(pf.boxes.xyxy.tolist(), pf.boxes.cls.tolist(),
+                                                   pf.boxes.conf.tolist())]
+                found = fuse_flip(found, mirrored)
+            for box, cls, conf in found:
+                x1, y1, x2, y2 = box
+                detections.append(Detection(PIECE_CLASSES[int(cls)], float(conf),
+                                            (x1 * sx + dx, y1 * sy + dy,
+                                             x2 * sx + dx, y2 * sy + dy)))
 
         every_box = detections
         detections = [d for d in detections if d.confidence >= args.conf or args.gt_boxes]
         if args.one_piece_per_spot is not None and not args.gt_boxes:
             detections = one_per_spot(detections, args.one_piece_per_spot)
+        if classifier is not None and detections:
+            import cv2
+            cimg = photo if as_array else cv2.imread(str(src))
+            before = [d.cls for d in detections]
+            detections = classify_pieces(classifier, cimg, detections, sx, sy, args)
+            classifier_changed += sum(d.cls != c for d, c in zip(detections, before))
         if args.sides_from_colour and not args.gt_boxes:
             before = [d.cls for d in detections]
             detections = sides_from_colour(detections, piece_colours(src, detections))
@@ -657,6 +788,8 @@ def main():
             print(f"grid fit's window moved by a square to where the corner model has the board: {windows_moved}")
         print(f"grid fit gave no result (model corners kept, if any): {grid_rejected}")
         print(f"grid fit used alone, the model found no board (a1 from the pieces): {grid_alone}")
+    if classifier is not None:
+        print(f"pieces the classifier changed: {classifier_changed}")
     if args.odd_sides:
         print(f"single pieces made White by their colour: {odd_changed} on {odd_boards} boards")
     if args.sides_from_colour:

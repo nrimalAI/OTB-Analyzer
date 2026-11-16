@@ -27,6 +27,15 @@ Notes:
   run's dataset file and continued with `train.py resume`, like the above.
 - --close-mosaic N: ultralytics switches mosaic off for the last N epochs and
   its default is 10, so a run of 10 epochs or fewer has no mosaic at all.
+- classify: a piece classifier on the crops make_piece_crops.py cuts out
+  (folder data, 128 px, left-right flips allowed: a mirrored piece is the same
+  piece). Weights in runs/detect/<name>/ (where queue.sh looks); evaluate.py --classifier.
+- --lr0 RATE: without it ultralytics picks the optimiser and the rate itself
+  (AdamW at 0.000625 for these models), also for a run that continues trained
+  weights, and warms up for three epochs. That is a fresh start's rate: four
+  runs that continued pieces_s_tone1 at it each read some boards better and
+  others worse (Training/README.md). --lr0 fixes AdamW at the rate given and
+  one epoch of warm-up, for continuing a trained model gently.
 """
 
 import argparse
@@ -55,7 +64,7 @@ COMMON = dict(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("task", choices=["corners", "pieces", "resume"])
+    ap.add_argument("task", choices=["corners", "pieces", "classify", "resume"])
     ap.add_argument("--data", help="dataset file (not needed for resume)")
     ap.add_argument("--model", default=None, help="base checkpoint override")
     ap.add_argument("--epochs", type=int, default=None)
@@ -74,6 +83,9 @@ def main():
     ap.add_argument("--side-tone", type=float, default=None, metavar="P",
                     help="pieces only: show each training photo in another tone "
                          "with this probability (side_tone.py)")
+    ap.add_argument("--lr0", type=float, default=None, metavar="RATE",
+                    help="AdamW at this learning rate with one epoch of warm-up, instead "
+                         "of ultralytics' own choice (for continuing trained weights)")
     ap.add_argument("--close-mosaic", type=int, default=None, metavar="N",
                     help="epochs at the end without mosaic (ultralytics' default: 10)")
     args = ap.parse_args()
@@ -87,6 +99,14 @@ def main():
         import canonical_corners
         ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
         saved = ckpt.get("train_args", {})
+        if saved.get("task") == "classify":
+            given = [f for f in ("data", "epochs", "patience", "device", "imgsz", "lr0", "close_mosaic")
+                     if getattr(args, f) is not None]
+            if given:
+                print(f"resume keeps the run's own settings; ignored here: {', '.join(given)}")
+            extra = {"batch": args.batch} if args.batch else {}
+            YOLO(args.model).train(resume=True, **extra)
+            return
         data_file = Path(str(saved.get("data", "")))
         marked = data_file.is_file() and bool(
             (yaml.safe_load(data_file.read_text()) or {}).get("canonical_corners"))
@@ -111,7 +131,7 @@ def main():
             side_tone.patch(float(tone))
             print(f"side tone {float(tone):g}, as {data_file} says")
         given = [f for f in ("data", "epochs", "patience", "device", "imgsz", "kpt_sigma", "side_tone",
-                             "close_mosaic")
+                             "close_mosaic", "lr0")
                  if getattr(args, f) is not None] + (["canonical_corners"] if args.canonical_corners else [])
         if given:
             print(f"resume keeps the run's own settings; ignored here: {', '.join(given)}")
@@ -127,6 +147,23 @@ def main():
     if args.side_tone is not None and not 0 < args.side_tone <= 1:
         ap.error("--side-tone takes a probability over 0, up to 1")
 
+    if args.task == "classify":
+        if args.kpt_sigma or args.canonical_corners or args.side_tone or args.close_mosaic is not None:
+            ap.error("--kpt-sigma, --canonical-corners, --side-tone and --close-mosaic are not for the classifier")
+        overrides = dict(imgsz=args.imgsz or 128, epochs=args.epochs or 6, batch=args.batch or 256,
+                         workers=4, fliplr=0.5, hsv_v=0.25, erasing=0.2, plots=False)
+        if args.patience is not None:
+            overrides["patience"] = args.patience
+        if args.device:
+            overrides["device"] = args.device
+        if args.lr0 is not None:
+            overrides.update(optimizer="AdamW", lr0=args.lr0, warmup_epochs=1.0)
+        YOLO(args.model or "yolo11s-cls.pt").train(
+            # under runs/detect/ like the piece runs: queue.sh looks for every
+            # run that is not a corner run there
+            data=args.data, project=str(HERE / "runs" / "detect"), name=args.name or "classify",
+            **overrides)
+        return
     if args.task == "corners":
         base = args.model or "yolo11n-pose.pt"
     else:
@@ -145,6 +182,8 @@ def main():
         overrides["imgsz"] = args.imgsz
     if args.close_mosaic is not None:
         overrides["close_mosaic"] = args.close_mosaic
+    if args.lr0 is not None:
+        overrides.update(optimizer="AdamW", lr0=args.lr0, warmup_epochs=1.0)
 
     # Keep runs under Training/runs/ wherever the script is started from
     # (recent ultralytics would otherwise put them at the repo root).

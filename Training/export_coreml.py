@@ -108,7 +108,7 @@ def plain_description(package):
     return True
 
 
-def export(weights, out_dir, base_name, **overrides):
+def export(weights, out_dir, base_name, imgsz=640, **overrides):
     for suffix, quant in VARIANTS.items():
         model = YOLO(weights)
         canonical = base_name == "BoardCorners" and is_canonical(model.names)
@@ -123,7 +123,7 @@ def export(weights, out_dir, base_name, **overrides):
                 model=A1Order(model),
                 **{**kw, "metadata": {**(kw.get("metadata") or {}), "names": {0: "board"}}})
         try:
-            path = model.export(format="coreml", imgsz=640,
+            path = model.export(format="coreml", imgsz=imgsz,
                                 **{**MODEL_ARGS[base_name], **overrides}, **quant)
         finally:
             if canonical:
@@ -147,6 +147,10 @@ def main():
     ap.add_argument("--pieces-nms-per-class", action="store_true",
                     help="export the piece model as it was before 2026-11-13, with "
                          "NMS within each class (to reproduce or restore that model)")
+    ap.add_argument("--pieces-imgsz", type=int, default=640,
+                    help="the side of the piece model's square input (640 unless the "
+                         "model was trained for a larger one; the app reads the side "
+                         "from the model)")
     args = ap.parse_args()
     if args.plain_description:
         for package in args.plain_description:
@@ -158,7 +162,8 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     export(args.corners, out, "BoardCorners")
-    export(args.pieces, out, "Pieces", agnostic_nms=not args.pieces_nms_per_class)
+    export(args.pieces, out, "Pieces", imgsz=args.pieces_imgsz,
+           agnostic_nms=not args.pieces_nms_per_class)
     print(
         "\nPick a variant per model (compare with evaluate.py), then rename to\n"
         f"  {out}/BoardCorners.mlpackage and {out}/Pieces.mlpackage\n"
