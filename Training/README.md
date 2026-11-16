@@ -1372,17 +1372,56 @@ the scores of matched boxes averaged). tone1, labelled corners, board B / Fenit 
 / ChessReD test boards exact: alone 20 of 98 / 239 / 299; `--tta` 24 / 229 / 296;
 `--tta-flip` 22 / 238 / 299. Not worth reading every photo twice on a phone.
 
-**A piece classifier as a second stage** (in work). The detector reads the
+**A piece classifier as a second stage (2026-11-16): better on every development set, vetoed by one part of the second test set; not in the app.** The detector reads the
 photo at 640 px, where a piece is 20 to 50 px tall. `make_piece_crops.py` cuts
 every labelled piece of `merged_all4_shape1` out of the 1280-px copies (a
 square of 1.2 times the box's longer side, a second copy shifted and scaled by
 up to 12%, 30% of the render photos kept): `datasets/crops1`, 556,292 crops
 to train on, 18,667 from the val photos. `train.py classify` trains a
-YOLO11s-cls on them at 128 px (left-right flips allowed; under
-`runs/detect/<name>` so that `queue.sh` handles it), and `evaluate.py
---classifier <pt> [--classifier-mode replace|product|confident]` re-reads every
-box the detector kept. Training it on the CPU while a piece run had the GPU
-slowed that run fourfold: classifier runs go through the queue too.
+YOLO11s-cls on them at 128 px (`cls_s_crops1`, 6 epochs, 98.3% top-1 on the
+val crops; weights `runs/detect/cls_s_crops1/`, CoreML export
+`runs/export_cls_s_crops1/cls_s_crops1.mlpackage`, 10 MB FP16, same top
+class as the `.pt` on 40 of 40 crops). Training it on the CPU while a piece
+run had the GPU slowed that run fourfold: classifier runs go through the queue.
+
+- **How it is used.** A crop cannot tell the side: on board B, whose
+  "white" pieces are brown, the classifier alone calls them black (P->p 356
+  times, `--classifier-mode replace`: 0 of 98 boards exact). So only the kind
+  is taken from it: its two sides' probabilities summed, times the piece
+  model's (its confidence for its own kind, the rest shared evenly), the side
+  the piece model's (`kind-product`, reference
+  `chess_pipeline.kinds_from_classifier`; the product's shares are also the
+  kind scores one king a side gets). A piece the piece model gives 0.9 or
+  more is left alone (`CLASSIFIER_SURE`; see below).
+- **Development sets** (with `pieces_s_shape1`): labelled corners in Python,
+  board B 27 -> 34 of 98, Fenit A 249 -> 262 of 270, ChessReD test 298 ->
+  301. Through the app (branch `app/piece-kinds`, `app_check --piece-kinds`,
+  `runs/app_check/kinds09/` against `pieces_s_shape1/`): **board B 43 -> 53
+  of 100**, Fenit A 230 -> 247, ChessReD test 297 -> 299; as 3:4 photos board
+  B 43 -> 53, ChessReD test 285 -> 290.
+- **Second test set (looks 13 and 14, replayed on the app's pieces with
+  `runs/dumps/cls_replay.py`; vetoes only).** Without the 0.9 rule: 640 ->
+  831 boards exact, chess-cv games 412 -> 584, Y-LIChess 61 -> 131, ChessQ
+  17 -> 18, chesscog real 23 -> 23, but **samryan 127 -> 75** (26 gained,
+  78 lost). The likely cause, views from straight above, was then looked for
+  on 600 new renders of an unused seed (`datasets/render_dev8`, 486 from 70
+  to 90 degrees): there the classifier gains (from above 157 -> 187 boards
+  exact, 34 gained, 4 lost; from the side 20 -> 22). Leaving pieces of 0.9 or
+  more alone was then chosen on the development sets alone, where it gains
+  as much as the classifier everywhere (replayed: board B 54, Fenit A 246,
+  ChessReD test 299) and changes fewer pieces. With it, the second test set:
+  640 -> 798, chess-cv 412 -> 563, Y-LIChess 61 -> 117, ChessQ 17 -> 18,
+  chesscog real 23 -> 21, **samryan 127 -> 99** (32 gained, 60 lost; its
+  squares 96.54% -> 96.78%). A part read worse, so it is not in the app:
+  whether a large gain with one part worse is acceptable is a question for
+  the owner (`.notes/training.md`, "Needs the owner").
+- **Where it is:** Swift `Packages/ChessVision/Sources/ChessVision/PieceKinds.swift`
+  and the recognizer's `kindModel:` / `pieceKinds:` on branch
+  `app/piece-kinds` (tests `PieceKindsTests` against `swift_reference.py
+  kinds-cases`); to ship it, copy the export to `Models/PieceKinds.mlpackage`
+  (the app loads it where the bundle has it). Swift and Python pick another
+  kind for 11 of 1,693 board B pieces (resampling of the crops; close calls
+  between queen and king, rook and bishop).
 
 ## Second held-out test set (2026-11): `datasets/heldout2`
 
@@ -1446,6 +1485,15 @@ that the count is known:
    passed the development sets (board B 31 -> 43, ChessReD test and Fenit
    A not worse) and the package's tests, before its pull request: 464 ->
    640 boards exact, no part worse. A veto only; nothing was chosen here.
+13. The piece classifier (`kind-product`, with `pieces_s_shape1`) was
+   replayed here on the app's pieces after it had gained on every
+   development set: 640 -> 831 boards exact, samryan 127 -> 75. Vetoed.
+   That samryan lost is why views from above were then looked into, on
+   renders, which showed nothing (README, "A piece classifier").
+14. The same with pieces of 0.9 or more left alone, a rule chosen on the
+   development sets after look 13: 640 -> 798, samryan 127 -> 99. Vetoed.
+   That look 13 led to a second try at all is the test set steering the
+   work; the rule itself was not set on it.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else
