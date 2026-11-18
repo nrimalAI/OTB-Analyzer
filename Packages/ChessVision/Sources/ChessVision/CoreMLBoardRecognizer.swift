@@ -148,8 +148,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     the piece model together (`PieceKinds`), where `kindModel` is
     ///     given. On: through the app with `pieces_s_shape1` it reads more
     ///     boards of every development set fully right (Fenit board B 43 ->
-    ///     54 of 100 as replayed in the reference; `Training/README.md`, "A
-    ///     piece classifier").
+    ///     53 of 100, Fenit A 230 -> 247, ChessReD test 297 -> 299) and of the
+    ///     second held-out test set (640 -> 817 of 1,619), with one part of
+    ///     that set worse (samryan, from straight above, 127 -> 104;
+    ///     `Training/README.md`, "A piece classifier").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -214,7 +216,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         try self.init(
             cornerModel: MLModel(contentsOf: cornersURL, configuration: config),
             pieceModel: MLModel(contentsOf: piecesURL, configuration: config),
-            kindModel: try kindsURL.map { try MLModel(contentsOf: $0, configuration: config) }
+            // Optional: a classifier that does not load leaves the piece
+            // model's kinds, not the app without a recognizer.
+            kindModel: kindsURL.flatMap { try? MLModel(contentsOf: $0, configuration: config) }
         )
     }
 
@@ -235,7 +239,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         guard let located = corners(
             model: try modelCorners(in: square, letterbox: letterbox), in: image, whole: whole)
         else { throw RecognitionError.boardNotFound }
-        let detections = try kinds(of: detectPieces(in: square, letterbox: letterbox), in: image)
+        let detections = kinds(of: try detectPieces(in: square, letterbox: letterbox), in: image)
         guard let placed = place(
             detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
             whole: whole)
@@ -252,10 +256,14 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     /// model together, where there is a classifier and `pieceKinds` is on;
     /// otherwise as the piece model gave them. `image`: the photo the boxes
     /// are in pixels of. Internal for testing.
-    func kinds(of found: [PieceDetection], in image: CGImage) throws -> [PieceDetection] {
+    func kinds(of found: [PieceDetection], in image: CGImage) -> [PieceDetection] {
         guard pieceKinds, let kindModel, !found.isEmpty else { return found }
-        return PieceKinds.apply(
-            found, classProbabilities: try PieceKinds.classProbabilities(of: found, in: image, model: kindModel))
+        // Where the classifier cannot read the pieces (a crop or Vision
+        // fails), the piece model's kinds stand: never no result for a
+        // photo that read before.
+        guard let probabilities = try? PieceKinds.classProbabilities(of: found, in: image, model: kindModel)
+        else { return found }
+        return PieceKinds.apply(found, classProbabilities: probabilities)
     }
 
     /// The corner model's corners where they are a board; nil for no board.
@@ -400,7 +408,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         let model = found.map(\.1)
         // As `recognize`: the kinds, then the sides.
         let detections = Self.sides(
-            of: try kinds(of: model, in: image), in: image, sidesFromColour: sidesFromColour,
+            of: kinds(of: model, in: image), in: image, sidesFromColour: sidesFromColour,
             oddSides: oddSides)
         let colours = PieceSides.colours(of: model, in: image)
 

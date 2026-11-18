@@ -63,10 +63,12 @@ enum PieceKinds {
     ) -> [PieceDetection] {
         zip(detections, classProbabilities).map { detection, probabilities in
             guard detection.confidence < sure else { return detection }
+            // Summed in a fixed order (labels sorted), so a reading does not
+            // depend on a dictionary's order.
             var fromClassifier = [Piece.Kind: Double]()
-            for (label, probability) in probabilities {
+            for label in probabilities.keys.sorted() {
                 guard let (kind, _) = CoreMLBoardRecognizer.pieceClass(fromLabel: label) else { continue }
-                fromClassifier[kind, default: 0] += Double(probability)
+                fromClassifier[kind, default: 0] += Double(probabilities[label]!)
             }
             let confidence = Double(detection.confidence)
             let rest = (1 - confidence) / Double(kinds.count - 1)
@@ -74,7 +76,7 @@ enum PieceKinds {
             for kind in kinds {
                 product[kind] = (fromClassifier[kind] ?? 0) * (kind == detection.piece ? confidence : rest)
             }
-            let total = product.values.reduce(0, +)
+            let total = kinds.reduce(0) { $0 + product[$1]! }
             guard total > 0 else {
                 return PieceDetection(
                     piece: detection.piece, color: detection.color, confidence: detection.confidence,
@@ -86,9 +88,16 @@ enum PieceKinds {
                 best = kind
             }
             let shares = product.mapValues { $0 / total }
+            // What the user is shown (the "check this piece" mark) stays the
+            // piece model's own score for the kind taken: the same as before
+            // where the kind did not change, and the piece model's (usually
+            // low) score for the new kind where it did, so a changed piece is
+            // marked. The share would hide wrong pieces (it is near 1 for most).
+            let shown = best == detection.piece
+                ? detection.confidence : Float(detection.kindScores[best] ?? 0)
             return PieceDetection(
                 piece: best, color: detection.color, confidence: Float(shares[best]!),
-                boundingBox: detection.boundingBox, kindScores: shares)
+                boundingBox: detection.boundingBox, kindScores: shares, shownConfidence: shown)
         }
     }
 
@@ -125,8 +134,9 @@ enum PieceKinds {
     /// `cv2.resize` to `round(width * scale)` by `round(height * scale)`.
     static func drawn(_ image: CGImage, scale: Double) -> CGImage? {
         guard scale < 1 else { return image }
-        let width = Int((Double(image.width) * scale).rounded())
-        let height = Int((Double(image.height) * scale).rounded())
+        // Python's round(): halves to the even neighbour.
+        let width = Int((Double(image.width) * scale).rounded(.toNearestOrEven))
+        let height = Int((Double(image.height) * scale).rounded(.toNearestOrEven))
         guard
             let space = CGColorSpace(name: CGColorSpace.sRGB),
             let context = CGContext(
@@ -142,22 +152,24 @@ enum PieceKinds {
     /// resized to the classifier's side; where it runs off the image, the
     /// edge pixels are repeated (`cv2.BORDER_REPLICATE`).
     static func crop(_ image: CGImage, x: Int, y: Int, side: Int) -> CGImage? {
-        // Core Image counts y from the bottom.
+        // Core Image counts y from the bottom. The photo is clamped (its edge
+        // pixels repeated without end), moved so that the square starts at the
+        // origin, scaled, and only then cut: scaling a cut square would read
+        // nothing beyond its edges and darken its border, where the reference
+        // (cv2.resize of a cut with its edges repeated) does not.
         let bottom = image.height - y - side
-        let clamped = CIImage(cgImage: image).clampedToExtent()
-        let cut = clamped
-            .cropped(to: CGRect(x: x, y: bottom, width: side, height: side))
+        let placed = CIImage(cgImage: image).clampedToExtent()
             .transformed(by: CGAffineTransform(translationX: CGFloat(-x), y: CGFloat(-bottom)))
         let factor = CGFloat(Self.side) / CGFloat(side)
         let resized: CIImage
         if side > Self.side, let lanczos = CIFilter(name: "CILanczosScaleTransform") {
             // Shrinking: averaging over the pixels, as the reference's INTER_AREA.
-            lanczos.setValue(cut, forKey: kCIInputImageKey)
+            lanczos.setValue(placed, forKey: kCIInputImageKey)
             lanczos.setValue(factor, forKey: kCIInputScaleKey)
             lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
-            resized = lanczos.outputImage ?? cut.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
+            resized = lanczos.outputImage ?? placed.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
         } else {
-            resized = cut.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
+            resized = placed.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
         }
         return context.createCGImage(
             resized, from: CGRect(x: 0, y: 0, width: Self.side, height: Self.side),

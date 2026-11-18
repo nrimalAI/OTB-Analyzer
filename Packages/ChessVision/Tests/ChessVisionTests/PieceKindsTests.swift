@@ -140,14 +140,51 @@ struct PieceKindsTests {
         }
     }
 
-    /// Without a classifier, or with it switched off, the pieces are the
-    /// piece model's.
-    @Test func withoutAClassifierThePiecesAreThePieceModels() throws {
+    /// With no probability for any label (the classifier gave nothing), a
+    /// piece keeps the piece model's kind and confidence, as in the reference.
+    @Test func emptyProbabilitiesKeepThePieceModelsPiece() throws {
         let piece = try OneKingASideTests.detection(
             "white_queen", confidence: 0.6, scores: ["queen": 0.6, "king": 0.3])
         #expect(PieceKinds.apply([], classProbabilities: []).isEmpty)
         let none = PieceKinds.apply([piece], classProbabilities: [[:]]).first
         #expect(none.map(Self.label) == "white_queen")
         #expect(none?.kindScores == [.queen: Double(piece.confidence)])
+    }
+
+    /// Shrunk (the Lanczos path) or enlarged, a crop of a photo of one colour
+    /// is that colour everywhere, its border included: the edges are repeated
+    /// before scaling, never read as empty.
+    @Test func scaledCropsKeepTheirBorders() throws {
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(CGContext(
+            data: nil, width: 300, height: 260, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(red: 200 / 255, green: 100 / 255, blue: 50 / 255, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 300, height: 260))
+        let image = try #require(context.makeImage())
+        for (x, y, side) in [(-20, -20, 256), (250, 200, 300), (10, 30, 64), (280, 240, 40)] {
+            let crop = try #require(PieceKinds.crop(image, x: x, y: y, side: side))
+            #expect(crop.width == PieceKinds.side && crop.height == PieceKinds.side)
+            for (px, py) in [(0, 0), (127, 0), (0, 127), (127, 127), (64, 64), (1, 126)] {
+                let (r, g) = try Self.pixel(crop, px, py)
+                #expect(abs(r - 200) <= 2 && abs(g - 100) <= 2, "side \(side) at \(px), \(py): \(r), \(g)")
+            }
+        }
+    }
+
+    /// What the user is shown stays the piece model's own score for the kind
+    /// taken, so a piece the classifier changes is marked for checking.
+    @Test func theShownConfidenceIsThePieceModels() throws {
+        let queen = try OneKingASideTests.detection(
+            "white_queen", confidence: 0.6, scores: ["queen": 0.6, "king": 0.3])
+        let asKing: [String: Float] = ["white_king": 0.9, "black_king": 0.05, "white_queen": 0.05]
+        let changed = try #require(PieceKinds.apply([queen], classProbabilities: [asKing]).first)
+        #expect(changed.piece == .king)
+        #expect(changed.shownConfidence == 0.3)
+        let asQueen: [String: Float] = ["white_queen": 0.95, "white_king": 0.05]
+        let kept = try #require(PieceKinds.apply([queen], classProbabilities: [asQueen]).first)
+        #expect(kept.piece == .queen)
+        #expect(kept.shownConfidence == 0.6)
+        #expect(kept.confidence > 0.6)
     }
 }

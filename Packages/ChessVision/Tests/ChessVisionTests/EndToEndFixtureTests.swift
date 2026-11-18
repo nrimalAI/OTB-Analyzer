@@ -3,6 +3,7 @@ import CoreML
 import ImageIO
 import Foundation
 import Testing
+import Vision
 
 @testable import ChessVision
 
@@ -116,6 +117,37 @@ import Testing
         #expect(try CoreMLBoardRecognizer(
             cornerModel: models.corners, pieceModel: models.pieces, kindModel: models.kinds,
             pieceKinds: false).pieceKinds == false)
+    }
+
+    /// The piece classifier as packaged reads a crop into the twelve labels'
+    /// probabilities; switched off, or without it, the pieces are the piece
+    /// model's as they were; switched on, it keeps every piece's box and side.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testPieceKindsReachWhatFollowsTheModel() throws {
+        let models = try Self.models.get()
+        guard let kinds = models.kinds else { return }  // no classifier in this models folder
+        let (image, drawn) = try OddSidesTests.drawn()
+        // Unsure pieces, so that none is left alone.
+        let found = drawn.map {
+            PieceDetection(piece: $0.piece, color: $0.color, confidence: 0.5, boundingBox: $0.boundingBox,
+                           kindScores: [$0.piece: 0.5])
+        }
+        let probabilities = try PieceKinds.classProbabilities(
+            of: found, in: image, model: try VNCoreMLModel(for: kinds))
+        #expect(probabilities.count == found.count)
+        for p in probabilities {
+            #expect(p.count == 12)
+            #expect(abs(p.values.reduce(0, +) - 1) < 0.01)
+        }
+        let off = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, kindModel: kinds, pieceKinds: false)
+        #expect(off.kinds(of: found, in: image).map(PieceKindsTests.label) == found.map(PieceKindsTests.label))
+        let none = try CoreMLBoardRecognizer(cornerModel: models.corners, pieceModel: models.pieces)
+        #expect(none.kinds(of: found, in: image).map(PieceKindsTests.label) == found.map(PieceKindsTests.label))
+        let on = try makeRecognizer().kinds(of: found, in: image)
+        #expect(on.count == found.count)
+        #expect(on.map(\.color) == found.map(\.color))
+        #expect(on.map(\.boundingBox) == found.map(\.boundingBox))
     }
 
     /// One king a side is on unless switched off (`docs/RECOGNITION.md`, "What

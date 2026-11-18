@@ -1423,16 +1423,28 @@ run had the GPU slowed that run fourfold: classifier runs go through the queue.
   ChessReD test 299) and changes fewer pieces. With it, the second test set:
   640 -> 798, chess-cv 412 -> 563, Y-LIChess 61 -> 117, ChessQ 17 -> 18,
   chesscog real 23 -> 21, **samryan 127 -> 99** (32 gained, 60 lost; its
-  squares 96.54% -> 96.78%). A part read worse, so it is not in the app:
-  whether a large gain with one part worse is acceptable is a question for
-  the owner (`.notes/training.md`, "Needs the owner").
+  squares 96.54% -> 96.78%). A part read worse, so under the rule kept then (the second test set may
+  only veto) it was held back and put to the owner, who chose to ship it
+  (2026-11-18; next bullet).
+- **`evaluate.py --classifier`:** the default mode is `kind-product` (the
+  rule the app uses); the older modes (`replace`, `product`, `confident`,
+  `kind`) now cut their crops as the reference does (the photo drawn at most
+  1,280 px), so their figures above can differ a little when re-run.
 - **A second classifier, `cls_s_crops2` (2026-11-17), is no better.** `cls_s_crops1` continued 4 epochs (`--lr0 0.0003`) on `datasets/crops2`: 703,232 crops cut from `merged_all4_shape3` (render seeds 1-4, 6, 7, 9; 30% of the render photos), 98.3% top-1 on the val crops as the first. Replayed on the app's pieces with shape1, 0.9 rule, against `cls_s_crops1`: board B 50 against 54, Fenit A 247 against 246, ChessReD test 299 for both. More crops of the same kind add nothing; the second test set was not read for it.
 - **Shipped on the owner's word (2026-11-18: "yes, ship it").** Through the app with the models in `Models/` (`app_check` built from `app/piece-kinds`; `runs/app_check/kinds09/`, `kinds_h2/` against `pieces_s_shape1/`, `shape1_h2/`): board B 43 -> 53 (10 gained, 0 lost, p = 0.002), Fenit A 230 -> 247, ChessReD test 297 -> 299; as 3:4 photos board B 43 -> 53, ChessReD test 285 -> 290. Second test set (look 15, a confirmation for the pull request): **640 -> 817 of 1,619** (264 gained, 87 lost), Y-LIChess 61 -> 117, chess-cv games 412 -> 556, ChessQ 17 -> 18, chesscog real 23 -> 22, **samryan 127 -> 104** (35 gained, 58 lost). Not timed on a phone: up to 32 crops a photo through a 128-px YOLO11s-cls.
+- **What the user is shown.** The "check this piece" mark (confidence under
+  0.85) stays the piece model's own score for the kind taken: where the
+  classifier changes a kind, that is the piece model's (usually low) score
+  for the new kind, so the piece is marked. (A first version showed the
+  classifier's share, near 1 for most pieces, and marked 22% of board B's
+  wrong pieces instead of 54%.) With it: board B 76 of 152 wrong pieces
+  marked (50%; before the classifier 98 of 182, 54%), 3.1 squares a photo;
+  samryan 686 of 854 (80%; before 750 of 968, 77%).
 - **Where it is:** Swift `Packages/ChessVision/Sources/ChessVision/PieceKinds.swift`
   and the recognizer's `kindModel:` / `pieceKinds:` on branch
   `app/piece-kinds` (tests `PieceKindsTests` against `swift_reference.py
-  kinds-cases`); to ship it, copy the export to `Models/PieceKinds.mlpackage`
-  (the app loads it where the bundle has it). Swift and Python pick another
+  kinds-cases`); the package is `Models/PieceKinds.mlpackage` (the app loads it where the
+  bundle has it; without it the app reads as before). Swift and Python pick another
   kind for 11 of 1,693 board B pieces (resampling of the crops; close calls
   between queen and king, rook and bishop).
 
@@ -1512,6 +1524,9 @@ that the count is known:
 15. The classifier with the 0.9 rule through the app itself, for the pull
    request that ships it on the owner's decision (2026-11-18): 640 -> 817,
    samryan 127 -> 104. Nothing was chosen on it.
+16. The same again after the review of that pull request changed the crop
+   (edges repeated before scaling) and what the user is shown: every count
+   the same (640 -> 817, samryan 127 -> 104). A confirmation only.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else
