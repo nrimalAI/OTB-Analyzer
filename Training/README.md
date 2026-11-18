@@ -1440,6 +1440,7 @@ run had the GPU slowed that run fourfold: classifier runs go through the queue.
   wrong pieces instead of 54%.) With it: board B 76 of 152 wrong pieces
   marked (50%; before the classifier 98 of 182, 54%), 3.1 squares a photo;
   samryan 686 of 854 (80%; before 750 of 968, 77%).
+- **Averaging the classifier over each crop and its mirror image** (2026-11-18; replayed on the app's pieces, 0.9 rule): board B 51 against 54 without it, Fenit A 247 against 246, ChessReD test 299 for both. Not worth twice the classifier's time.
 - **Where it is:** Swift `Packages/ChessVision/Sources/ChessVision/PieceKinds.swift`
   and the recognizer's `kindModel:` / `pieceKinds:` on branch
   `app/piece-kinds` (tests `PieceKindsTests` against `swift_reference.py
