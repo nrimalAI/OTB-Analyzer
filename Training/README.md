@@ -1040,7 +1040,9 @@ tests, and the first corner model does not. Until pull request #15 the piece
 model beside it was the baseline piece weights exported with NMS across
 classes.
 
-**What a new model has to beat since pull request #32 (2026-11-16): `pieces_s_shape1` with `corners_s_canon1`**, through the same `app_check` build (13:29 on 2026-11-15, defaults as below): ChessReD test 297 of 306 boards exact (99.82% of squares), Fenit board B 95.67% and 43 of 100, Fenit A 98.09% and 230 of 286, second test set 97.41% and 640 of 1,619 (`runs/app_check/shape1_h2/shape1_*.txt`), packages in `runs/app_check/models_pieces_s_shape1/`; the pair before it, read with that build, in `runs/app_check/shape1_h2/now_*.txt` and `now30/`. The paragraph below is the pair before it.
+**What a new model has to beat since pull request #33 (2026-11-18): `pieces_s_shape1` with `corners_s_canon1` and the piece classifier `cls_s_crops1`** (`Models/PieceKinds`), through `app_check` built from `app/piece-kinds` or later: board B 96.05% and 53 of 100, ChessReD test 299 of 306, Fenit A 247 of 286, second test set 817 of 1,619 (`runs/app_check/kinds09/`, `kinds_h2/`), as 3:4 photos board B 53, ChessReD test 290; models folder `runs/app_check/models_shape1_kinds/`. A new piece model is judged with the classifier in place (and once without, `--piece-kinds off`).
+
+**What the pair before #33 had to beat, since pull request #32 (2026-11-16): `pieces_s_shape1` with `corners_s_canon1`**, through the same `app_check` build (13:29 on 2026-11-15, defaults as below): ChessReD test 297 of 306 boards exact (99.82% of squares), Fenit board B 95.67% and 43 of 100, Fenit A 98.09% and 230 of 286, second test set 97.41% and 640 of 1,619 (`runs/app_check/shape1_h2/shape1_*.txt`), packages in `runs/app_check/models_pieces_s_shape1/`; the pair before it, read with that build, in `runs/app_check/shape1_h2/now_*.txt` and `now30/`. The paragraph below is the pair before it.
 
 **What the pair before had to beat** (through `app_check` built from 00fd9b1
 or later, with the app's defaults: grid fit on, its window where the corner
@@ -1381,7 +1383,7 @@ the scores of matched boxes averaged). tone1, labelled corners, board B / Fenit 
 / ChessReD test boards exact: alone 20 of 98 / 239 / 299; `--tta` 24 / 229 / 296;
 `--tta-flip` 22 / 238 / 299. Not worth reading every photo twice on a phone.
 
-**A piece classifier as a second stage (2026-11-16): better on every development set, vetoed by one part of the second test set; not in the app.** The detector reads the
+**A piece classifier as a second stage: in the app since pull request #33 (2026-11-18, the owner's decision), better on every development set, worse on one part of the second test set (samryan).** The detector reads the
 photo at 640 px, where a piece is 20 to 50 px tall. `make_piece_crops.py` cuts
 every labelled piece of `merged_all4_shape1` out of the 1280-px copies (a
 square of 1.2 times the box's longer side, a second copy shifted and scaled by
@@ -1425,6 +1427,7 @@ run had the GPU slowed that run fourfold: classifier runs go through the queue.
   whether a large gain with one part worse is acceptable is a question for
   the owner (`.notes/training.md`, "Needs the owner").
 - **A second classifier, `cls_s_crops2` (2026-11-17), is no better.** `cls_s_crops1` continued 4 epochs (`--lr0 0.0003`) on `datasets/crops2`: 703,232 crops cut from `merged_all4_shape3` (render seeds 1-4, 6, 7, 9; 30% of the render photos), 98.3% top-1 on the val crops as the first. Replayed on the app's pieces with shape1, 0.9 rule, against `cls_s_crops1`: board B 50 against 54, Fenit A 247 against 246, ChessReD test 299 for both. More crops of the same kind add nothing; the second test set was not read for it.
+- **Shipped on the owner's word (2026-11-18: "yes, ship it").** Through the app with the models in `Models/` (`app_check` built from `app/piece-kinds`; `runs/app_check/kinds09/`, `kinds_h2/` against `pieces_s_shape1/`, `shape1_h2/`): board B 43 -> 53 (10 gained, 0 lost, p = 0.002), Fenit A 230 -> 247, ChessReD test 297 -> 299; as 3:4 photos board B 43 -> 53, ChessReD test 285 -> 290. Second test set (look 15, a confirmation for the pull request): **640 -> 817 of 1,619** (264 gained, 87 lost), Y-LIChess 61 -> 117, chess-cv games 412 -> 556, ChessQ 17 -> 18, chesscog real 23 -> 22, **samryan 127 -> 104** (35 gained, 58 lost). Not timed on a phone: up to 32 crops a photo through a 128-px YOLO11s-cls.
 - **Where it is:** Swift `Packages/ChessVision/Sources/ChessVision/PieceKinds.swift`
   and the recognizer's `kindModel:` / `pieceKinds:` on branch
   `app/piece-kinds` (tests `PieceKindsTests` against `swift_reference.py
@@ -1506,6 +1509,9 @@ that the count is known:
    development sets after look 13: 640 -> 798, samryan 127 -> 99. Vetoed.
    That look 13 led to a second try at all is the test set steering the
    work; the rule itself was not set on it.
+15. The classifier with the 0.9 rule through the app itself, for the pull
+   request that ships it on the owner's decision (2026-11-18): 640 -> 817,
+   samryan 127 -> 104. Nothing was chosen on it.
 
 What this shows is that board B, one board of 100 photos, no longer tells
 whether a model reads unseen boards better, and that there is nothing else
