@@ -18,6 +18,12 @@ import Vision
 ///   sum: a label's confidence times the observation's own confidence (the
 ///   sum) is the score as the model gave it (`classScores`).
 ///
+/// - **PieceKinds** (classify, optional): each piece the piece model found,
+///   cut out of the photo, 128×128 in; Vision surfaces a
+///   `VNClassificationObservation` for each of the twelve labels. Where the
+///   bundle has it, the kind of every piece is taken from it and the piece
+///   model together (`PieceKinds`); the side stays the piece model's.
+///
 /// After the models, two steps that need no learning
 /// (`docs/RECOGNITION.md`): the corners are replaced by the classical grid
 /// fit (`GridCorners`) where it accepts its own result, and which corner is
@@ -59,6 +65,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     let oddSides: Bool
     /// Internal for testing: the app's default must stay off.
     let queenForKing: Bool
+    /// The piece classifier, where there is one (`PieceKinds`).
+    let kindModel: VNCoreMLModel?
+    /// Internal for testing.
+    let pieceKinds: Bool
 
     /// What the app runs with where nothing else is asked for.
     public enum Default {
@@ -71,6 +81,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         public static let fitWindow = true
         public static let oddSides = true
         public static let queenForKing = false
+        public static let pieceKinds = true
     }
 
     /// - Parameters:
@@ -131,6 +142,16 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     ///     one board of Fenit board B and loses four of Fenit A
     ///     (`docs/RECOGNITION.md`, "A queen for a king"). Has no effect
     ///     with `oneKing` off.
+    ///   - kindModel: the piece classifier (`Models/PieceKinds.mlpackage`);
+    ///     nil reads the kinds from the piece model alone.
+    ///   - pieceKinds: take each piece's kind from the piece classifier and
+    ///     the piece model together (`PieceKinds`), where `kindModel` is
+    ///     given. On: through the app with `pieces_s_shape1` it reads more
+    ///     boards of every development set fully right (Fenit board B 43 ->
+    ///     53 of 100, Fenit A 230 -> 247, ChessReD test 297 -> 299) and of the
+    ///     second held-out test set (640 -> 817 of 1,619), with one part of
+    ///     that set worse (samryan, from straight above, 127 -> 104;
+    ///     `Training/README.md`, "A piece classifier").
     public init(
         cornerModel: MLModel,
         pieceModel: MLModel,
@@ -143,7 +164,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         a1Dark: Bool = Default.a1Dark,
         fitWindow: Bool = Default.fitWindow,
         oddSides: Bool = Default.oddSides,
-        queenForKing: Bool = Default.queenForKing
+        queenForKing: Bool = Default.queenForKing,
+        kindModel: MLModel? = nil,
+        pieceKinds: Bool = Default.pieceKinds
     ) throws {
         self.cornerModel = try VNCoreMLModel(for: cornerModel)
         self.pieceModel = try VNCoreMLModel(for: pieceModel)
@@ -157,6 +180,8 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         self.fitWindow = fitWindow
         self.oddSides = oddSides
         self.queenForKing = queenForKing
+        self.kindModel = try kindModel.map { try VNCoreMLModel(for: $0) }
+        self.pieceKinds = pieceKinds
         // Keypoint coordinates come out in input-pixel space, so the parser
         // must know the model's true input side (640 for the first-generation
         // corner model, 960 for later ones).
@@ -176,8 +201,9 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
     }
 
     /// Loads compiled models (`.mlmodelc`) named `BoardCorners` and `Pieces`
-    /// from a bundle, on the Neural Engine + CPU (never GPU — avoids
-    /// contention with camera/UI rendering).
+    /// from a bundle, and `PieceKinds` where the bundle has it, on the
+    /// Neural Engine + CPU (never GPU — avoids contention with camera/UI
+    /// rendering).
     public init(bundle: Bundle) throws {
         guard
             let cornersURL = bundle.url(forResource: "BoardCorners", withExtension: "mlmodelc"),
@@ -186,9 +212,13 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
 
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
+        let kindsURL = bundle.url(forResource: "PieceKinds", withExtension: "mlmodelc")
         try self.init(
             cornerModel: MLModel(contentsOf: cornersURL, configuration: config),
-            pieceModel: MLModel(contentsOf: piecesURL, configuration: config)
+            pieceModel: MLModel(contentsOf: piecesURL, configuration: config),
+            // Optional: a classifier that does not load leaves the piece
+            // model's kinds, not the app without a recognizer.
+            kindModel: kindsURL.flatMap { try? MLModel(contentsOf: $0, configuration: config) }
         )
     }
 
@@ -209,7 +239,7 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
         guard let located = corners(
             model: try modelCorners(in: square, letterbox: letterbox), in: image, whole: whole)
         else { throw RecognitionError.boardNotFound }
-        let detections = try detectPieces(in: square, letterbox: letterbox)
+        let detections = kinds(of: try detectPieces(in: square, letterbox: letterbox), in: image)
         guard let placed = place(
             detections, corners: located.corners, cornersFromModel: located.fromModel, in: image,
             whole: whole)
@@ -220,6 +250,20 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             corners: placed.corners,
             orientationGuess: Self.orientationGuess(corners: placed.corners)
         )
+    }
+
+    /// The pieces with their kinds from the piece classifier and the piece
+    /// model together, where there is a classifier and `pieceKinds` is on;
+    /// otherwise as the piece model gave them. `image`: the photo the boxes
+    /// are in pixels of. Internal for testing.
+    func kinds(of found: [PieceDetection], in image: CGImage) -> [PieceDetection] {
+        guard pieceKinds, let kindModel, !found.isEmpty else { return found }
+        // Where the classifier cannot read the pieces (a crop or Vision
+        // fails), the piece model's kinds stand: never no result for a
+        // photo that read before.
+        guard let probabilities = try? PieceKinds.classProbabilities(of: found, in: image, model: kindModel)
+        else { return found }
+        return PieceKinds.apply(found, classProbabilities: probabilities)
     }
 
     /// The corner model's corners where they are a board; nil for no board.
@@ -362,8 +406,10 @@ public struct CoreMLBoardRecognizer: BoardRecognizer {
             Self.piece(from: observation, letterbox: letterbox).map { (observation.scores, $0) }
         }
         let model = found.map(\.1)
+        // As `recognize`: the kinds, then the sides.
         let detections = Self.sides(
-            of: model, in: image, sidesFromColour: sidesFromColour, oddSides: oddSides)
+            of: kinds(of: model, in: image), in: image, sidesFromColour: sidesFromColour,
+            oddSides: oddSides)
         let colours = PieceSides.colours(of: model, in: image)
 
         // What `recognize` goes on to do, on the pieces shown.

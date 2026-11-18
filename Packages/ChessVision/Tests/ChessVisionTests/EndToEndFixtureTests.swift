@@ -3,6 +3,7 @@ import CoreML
 import ImageIO
 import Foundation
 import Testing
+import Vision
 
 @testable import ChessVision
 
@@ -56,7 +57,7 @@ import Testing
 
     /// Compiled and loaded once for all tests (a static is initialised once,
     /// even when tests run in parallel).
-    private static let models = Result { () throws -> (corners: MLModel, pieces: MLModel) in
+    private static let models = Result { () throws -> (corners: MLModel, pieces: MLModel, kinds: MLModel?) in
         // .mlpackage must be compiled before loading (Xcode normally does this
         // at build time; tests do it at runtime).
         let config = MLModelConfiguration()
@@ -69,7 +70,15 @@ import Testing
             contentsOf: MLModel.compileModel(at: packages.corners), configuration: config)
         let pieces = try MLModel(
             contentsOf: MLModel.compileModel(at: packages.pieces), configuration: config)
-        return (corners, pieces)
+        // The piece classifier, where the folder has one, as the app's bundle may.
+        let kindsPackage = packages.pieces.deletingLastPathComponent().appending(path: "PieceKinds.mlpackage")
+        let kinds = FileManager.default.fileExists(atPath: kindsPackage.path)
+            ? try MLModel(contentsOf: MLModel.compileModel(at: kindsPackage), configuration: config)
+            : nil
+        if kinds != nil {
+            print("with the piece classifier: \(kindsPackage.path)")
+        }
+        return (corners, pieces, kinds)
     }
 
     /// The recognizer as the app builds it (every default left alone), or
@@ -80,18 +89,65 @@ import Testing
         let models = try Self.models.get()
         switch (gridFit, sidesFromColour) {
         case (nil, nil):
-            return try CoreMLBoardRecognizer(cornerModel: models.corners, pieceModel: models.pieces)
+            return try CoreMLBoardRecognizer(
+                cornerModel: models.corners, pieceModel: models.pieces, kindModel: models.kinds)
         case let (gridFit?, nil):
             return try CoreMLBoardRecognizer(
-                cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit)
+                cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit,
+                kindModel: models.kinds)
         case let (nil, sides?):
             return try CoreMLBoardRecognizer(
-                cornerModel: models.corners, pieceModel: models.pieces, sidesFromColour: sides)
+                cornerModel: models.corners, pieceModel: models.pieces, sidesFromColour: sides,
+                kindModel: models.kinds)
         case let (gridFit?, sides?):
             return try CoreMLBoardRecognizer(
                 cornerModel: models.corners, pieceModel: models.pieces, gridFit: gridFit,
-                sidesFromColour: sides)
+                sidesFromColour: sides, kindModel: models.kinds)
         }
+    }
+
+    /// The piece classifier's kinds are on unless switched off, wherever the
+    /// recognizer is given the classifier (`PieceKinds`); the app's
+    /// recognizer is given it where the bundle has `PieceKinds`.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testPieceKindsAreOnByDefault() throws {
+        let models = try Self.models.get()
+        #expect(try makeRecognizer().pieceKinds == true)
+        #expect(try makeRecognizer().kindModel != nil || models.kinds == nil)
+        #expect(try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, kindModel: models.kinds,
+            pieceKinds: false).pieceKinds == false)
+    }
+
+    /// The piece classifier as packaged reads a crop into the twelve labels'
+    /// probabilities; switched off, or without it, the pieces are the piece
+    /// model's as they were; switched on, it keeps every piece's box and side.
+    @Test(.enabled(if: modelsPresent, "Models/*.mlpackage not present: run Training/export_coreml.py"))
+    func testPieceKindsReachWhatFollowsTheModel() throws {
+        let models = try Self.models.get()
+        guard let kinds = models.kinds else { return }  // no classifier in this models folder
+        let (image, drawn) = try OddSidesTests.drawn()
+        // Unsure pieces, so that none is left alone.
+        let found = drawn.map {
+            PieceDetection(piece: $0.piece, color: $0.color, confidence: 0.5, boundingBox: $0.boundingBox,
+                           kindScores: [$0.piece: 0.5])
+        }
+        let probabilities = try PieceKinds.classProbabilities(
+            of: found, in: image, model: try VNCoreMLModel(for: kinds))
+        #expect(probabilities.count == found.count)
+        for p in probabilities {
+            #expect(p.count == 12)
+            #expect(abs(p.values.reduce(0, +) - 1) < 0.01)
+        }
+        let off = try CoreMLBoardRecognizer(
+            cornerModel: models.corners, pieceModel: models.pieces, kindModel: kinds, pieceKinds: false)
+        #expect(off.kinds(of: found, in: image).map(PieceKindsTests.label) == found.map(PieceKindsTests.label))
+        let none = try CoreMLBoardRecognizer(cornerModel: models.corners, pieceModel: models.pieces)
+        #expect(none.kinds(of: found, in: image).map(PieceKindsTests.label) == found.map(PieceKindsTests.label))
+        let on = try makeRecognizer().kinds(of: found, in: image)
+        #expect(on.count == found.count)
+        #expect(on.map(\.color) == found.map(\.color))
+        #expect(on.map(\.boundingBox) == found.map(\.boundingBox))
     }
 
     /// One king a side is on unless switched off (`docs/RECOGNITION.md`, "What

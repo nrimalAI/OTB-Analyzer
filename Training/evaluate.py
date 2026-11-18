@@ -33,6 +33,7 @@ from chess_pipeline import (
     Detection, PIECE_CLASSES, FEN_LETTER,
     assign_squares, board_crop, colour_patch, fen_placement_to_board, homography, project,
     odd_sides, one_king_a_side, orient_by_pieces, sides_from_colour, window_by_model, WINDOW_NEAR,
+    CLASSIFIER_MARGIN, CLASSIFIER_SIDE, CLASSIFIER_SURE, classifier_scale, classifier_square, kinds_from_classifier,
 )
 from canonical_corners import a1_order
 from prepare_data import image_index, image_size, normalize_category, official_splits
@@ -201,22 +202,27 @@ def fuse_flip(a, b, min_iou=0.5):
     return out
 
 
-def classify_pieces(model, img, detections, sx, sy, args, size=None):
-    """Each box (in the scored photo's coordinates; img is the whole photo as
-    the piece model was given it before any --crop-board cut, so a box is
-    divided by sx, sy) cut out as make_piece_crops.py cuts the
-    training crops, read by the classifier; the class is then set by
-    --classifier-mode."""
+def classify_pieces(model, img, detections, sx, sy, args):
+    """Each box cut out of the photo for the piece classifier as the reference
+    does it (chess_pipeline.classifier_scale / classifier_square: the photo
+    drawn at most 1280 px on its long side, the edge pixels repeated where
+    the square runs off it) and read by it; the class is then set by
+    --classifier-mode. img is the whole photo the boxes' coordinates refer
+    to after dividing by sx, sy. Returns the detections and, for
+    kind-product (the reference's kinds_from_classifier), the kind scores
+    one king a side is to be given; None for the other modes."""
     import cv2
-    size = size or args.classifier_size
+    size = args.classifier_size
     H, W = img.shape[:2]
+    scale = classifier_scale(W, H)
+    if scale < 1:
+        img = cv2.resize(img, (round(W * scale), round(H * scale)), interpolation=cv2.INTER_AREA)
+        H, W = img.shape[:2]
     crops = []
     for d in detections:
         x1, y1, x2, y2 = d.bbox
-        x1, x2, y1, y2 = x1 / sx, x2 / sx, y1 / sy, y2 / sy
-        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        s = max(2, int(round(max(x2 - x1, y2 - y1) * args.classifier_margin)))
-        x0, y0 = int(round(cx - s / 2)), int(round(cy - s / 2))
+        x0, y0, s = classifier_square((x1 / sx, y1 / sy, x2 / sx, y2 / sy), scale,
+                                      margin=args.classifier_margin)
         pad = max(0, -x0, -y0, x0 + s - W, y0 + s - H)
         src = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_REPLICATE) if pad else img
         crop = src[y0 + pad:y0 + pad + s, x0 + pad:x0 + pad + s]
@@ -230,6 +236,9 @@ def classify_pieces(model, img, detections, sx, sy, args, size=None):
         flipped = probs_of([c[:, ::-1].copy() for c in crops])
         probs = [[(a + b) / 2 for a, b in zip(p, q)] for p, q in zip(probs, flipped)]
     names = [model.names[i] for i in range(len(model.names))]
+    if args.classifier_mode == "kind-product":
+        return kinds_from_classifier(detections, [dict(zip(names, p)) for p in probs],
+                                     sure=args.classifier_sure)
     out = []
     for d, p in zip(detections, probs):
         best = max(range(len(p)), key=p.__getitem__)
@@ -239,6 +248,13 @@ def classify_pieces(model, img, detections, sx, sy, args, size=None):
         elif args.classifier_mode == "confident":
             if p[best] >= args.classifier_min:
                 cls, conf = names[best], p[best]
+        elif args.classifier_mode == "kind":
+            side = d.cls.split("_", 1)[0]
+            kinds = {}
+            for name, v in zip(names, p):
+                kinds[name.split("_", 1)[1]] = kinds.get(name.split("_", 1)[1], 0.0) + v
+            kind = max(kinds, key=kinds.get)
+            cls, conf = side + "_" + kind, kinds[kind]
         else:
             # product: the detector's class gets its confidence, the others
             # what is left shared evenly; times the classifier's scores
@@ -250,7 +266,7 @@ def classify_pieces(model, img, detections, sx, sy, args, size=None):
             j = max(range(k), key=q.__getitem__)
             cls, conf = names[j], q[j] / max(sum(q), 1e-9)
         out.append(Detection(cls, float(conf), d.bbox))
-    return out
+    return out, None
 
 
 def one_per_spot(detections, max_iou):
@@ -430,13 +446,17 @@ def main():
     ap.add_argument("--classifier", metavar="PT",
                     help="a piece classifier (make_piece_crops.py + yolo classify) that reads every "
                          "box the piece model kept, cut out of the photo, and gives its kind and side")
-    ap.add_argument("--classifier-mode", default="replace", choices=["replace", "product", "confident"],
+    ap.add_argument("--classifier-mode", default="kind-product", choices=["kind-product", "kind", "replace", "product", "confident"],
                     help="replace: the classifier's class; product: the classifier's scores times the "
                          "detector's (detector's class kept only if the classifier gives it some score); "
-                         "confident: the classifier's class where its score is >= --classifier-min")
+                         "confident: the classifier's class where its score is >= --classifier-min; "
+                         "kind: the classifier's kind (its two sides' scores summed), the detector's side; "
+                         "kind-product: as kind, the classifier's kind scores times the detector's")
     ap.add_argument("--classifier-min", type=float, default=0.6)
-    ap.add_argument("--classifier-size", type=int, default=128)
-    ap.add_argument("--classifier-margin", type=float, default=1.2)
+    ap.add_argument("--classifier-size", type=int, default=CLASSIFIER_SIDE)
+    ap.add_argument("--classifier-sure", type=float, default=CLASSIFIER_SURE,
+                    help="kind-product: pieces the piece model gives at least this are left as they are")
+    ap.add_argument("--classifier-margin", type=float, default=CLASSIFIER_MARGIN)
     ap.add_argument("--classifier-flip", action="store_true", help="average the classifier over the crop and its mirror")
     ap.add_argument("--tta-flip", action="store_true",
                     help="also read the photo flipped left-right; matched boxes average their "
@@ -507,14 +527,17 @@ def main():
     ap.add_argument("--device", default=None,
                     help="where the models run, e.g. cpu, so as not to take GPU "
                          "memory from a training job (default: ultralytics picks)")
+    ap.add_argument("--per-photo", metavar="FILE",
+                    help="write one line a photo, '<photo>: <squares right>/64', the form "
+                         "compare_app_check.py reads, to compare two setups photo by photo")
     ap.add_argument("--dump-list", metavar="FILE",
                     help="run no model: write the chosen photos and their true "
                          "placements as JSON, the list app_check (the app's own "
                          "recognizer, see app_check/) takes")
     args = ap.parse_args()
-    if args.classifier and args.one_king:
-        ap.error("--classifier with --one-king: the king rule would re-decide kinds on the "
-                 "detector's scores, not the classifier's; not supported")
+    if args.classifier and args.one_king and args.classifier_mode != "kind-product":
+        ap.error("--classifier with --one-king needs --classifier-mode kind-product: only that "
+                 "mode gives the scores by kind the king rule works on")
     if args.classifier and args.gt_boxes and args.classifier_mode != "replace":
         ap.error("--classifier with --gt-boxes needs --classifier-mode replace: the other modes "
                  "fall back on the labelled class")
@@ -575,6 +598,7 @@ def main():
     dump = open(args.dump_pieces, "w") if args.dump_pieces else None
     odd_changed = odd_boards = 0
     classifier_changed = 0
+    per_photo = open(args.per_photo, "w") if args.per_photo else None
     classifier = None
     if args.classifier:
         from ultralytics import YOLO
@@ -633,6 +657,8 @@ def main():
                 grid_alone += 1
         if kpts is None:
             corner_failures += 1
+            if per_photo is not None:
+                per_photo.write(f"{Path(src).name}: 0/64  board not found\n")
             boards += 1
             total_squares += 64
             continue
@@ -684,11 +710,12 @@ def main():
         detections = [d for d in detections if d.confidence >= args.conf or args.gt_boxes]
         if args.one_piece_per_spot is not None and not args.gt_boxes:
             detections = one_per_spot(detections, args.one_piece_per_spot)
+        classifier_kinds = None
         if classifier is not None and detections:
             import cv2
             cimg = photo if as_array else cv2.imread(str(src))
             before = [d.cls for d in detections]
-            detections = classify_pieces(classifier, cimg, detections, sx, sy, args)
+            detections, classifier_kinds = classify_pieces(classifier, cimg, detections, sx, sy, args)
             classifier_changed += sum(d.cls != c for d, c in zip(detections, before))
         if args.sides_from_colour and not args.gt_boxes:
             before = [d.cls for d in detections]
@@ -701,7 +728,11 @@ def main():
             odd_boards += any(d.cls != c for d, c in zip(detections, before))
         if args.one_king and not args.gt_boxes:
             before = [d.cls for d in detections]
-            detections = one_king_a_side(detections, kind_scores_of(detections, every_box),
+            own_scores = kind_scores_of(detections, every_box)
+            detections = one_king_a_side(detections,
+                                         [c if c is not None else o for c, o in
+                                          zip(classifier_kinds, own_scores)]
+                                         if classifier_kinds is not None else own_scores,
                                          queen_for_king=args.queen_for_king)
             kings_changed += any(d.cls != c for d, c in zip(detections, before))
         turns = None
@@ -745,6 +776,8 @@ def main():
                     confusion[(want or "·", got or "·")] += 1
         boards += 1
         exact += board_ok
+        if per_photo is not None:
+            per_photo.write(f"{Path(src).name}: {64 - wrong_here}/64 \n")
         flipped = {(7 - f, 7 - r): v for (f, r), v in pred_letters.items()}
         exact_or_flipped += board_ok or all(
             gt.get((f, r)) == flipped.get((f, r)) for f in range(8) for r in range(8))
@@ -765,6 +798,8 @@ def main():
 
     if dump is not None:
         dump.close()
+    if per_photo is not None:
+        per_photo.close()
     if boards == 0:
         print("No images evaluated — check --split / paths.")
         return

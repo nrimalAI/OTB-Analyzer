@@ -33,6 +33,14 @@ the patch of a box, points split in two groups, detections with their colours
 drawn picture of brown and black pieces that a model calls all black (written
 next to the JSON as colour_pieces.png). Written to Fixtures/colour_cases.json.
 
+kinds-cases: what chess_pipeline.kinds_from_classifier makes of pieces and
+the piece classifier's probabilities for its twelve labels (the kind from
+both, the side the piece model's; ties, a classifier that is sure, unsure,
+or gives the piece model's kind nothing; a piece the piece model is sure of
+left alone), and the squares
+classifier_square cuts pieces out in, with classifier_scale for photos of
+several sizes. Written to Fixtures/kinds_cases.json and replayed by
+PieceKindsTests.
 king-cases: what chess_pipeline.one_king_a_side makes of detections and the
 scores the model gave each of them for every kind: boards with no, one, two
 and more kings, on one side or both, scores on the floor and just under it,
@@ -130,6 +138,7 @@ from chess_pipeline import (
     board_square, board_to_fen_placement, colour_patch, fen_placement_to_board, homography,
     odd_sides, one_king_a_side, orient_by_pieces, colour_sides, patch_hidden, project, pulled_board_point,
     sides_from_colour, two_groups, white_side_score, window_by_model, WINDOW_NEAR,
+    classifier_scale, classifier_square, kinds_from_classifier,
     CHROMA_WEIGHT, COLOUR_PATCH, SIDE_APART, SIDE_HIDDEN, SIDE_NEARER, SIDE_SPREAD_FLOOR,
 )
 
@@ -1114,6 +1123,53 @@ def king_cases(seed):
     print(f"{len(cases)} cases written to {path} ({path.stat().st_size // 1024} kB): {tally}")
 
 
+def kinds_cases(seed):
+    rng = random.Random(seed)
+    labels = [f"{side}_{kind}" for side in ("white", "black") for kind in KINDS]
+    kinds = []
+    for n in range(400):
+        side = rng.choice(["white", "black"])
+        own = rng.choice(KINDS)
+        confidence = rng.choice([0.25, 0.5, 0.8999, 0.9, 0.999, round(rng.uniform(0.25, 1.0), 4)])
+        style = n % 5
+        if style == 0:      # spread over everything
+            raw = [rng.random() for _ in labels]
+        elif style == 1:    # sure of one label
+            raw = [0.001] * 12
+            raw[rng.randrange(12)] = 1.0
+        elif style == 2:    # two kinds alike (a tie in the product is possible)
+            raw = [0.0] * 12
+            a, b = rng.sample(range(6), 2)
+            raw[a] = raw[b + 6] = 0.5
+        elif style == 3:    # nothing for the piece model's own kind
+            raw = [rng.random() for _ in labels]
+            raw[KINDS.index(own)] = raw[KINDS.index(own) + 6] = 0.0
+        else:               # nothing at all
+            raw = [0.0] * 12
+        total = sum(raw)
+        probs = {label: (v / total if total else 0.0) for label, v in zip(labels, raw)}
+        d = Detection(f"{side}_{own}", confidence, (10.0, 20.0, 60.0, 130.0))
+        (out,), (scores,) = kinds_from_classifier([d], [probs])
+        kinds.append(dict(cls=d.cls, confidence=confidence, probs=probs,
+                          out=out.cls, out_confidence=out.confidence, scores=scores))
+    # (scores None: the piece was sure enough to be left as it is)
+    squares = []
+    for n in range(300):
+        width, height = rng.choice([(1280, 960), (4032, 3024), (3024, 4032), (900, 1200), (1280, 1280), (640, 480)])
+        scale = classifier_scale(width, height)
+        x1 = rng.uniform(-30, width - 10)
+        y1 = rng.uniform(-30, height - 10)
+        w = rng.choice([rng.uniform(1, 400), 0.0, 0.4, 10.0, 41.25])
+        h = rng.choice([rng.uniform(1, 600), w, 0.2, 83.75])
+        x0, y0, side = classifier_square((x1, y1, x1 + w, y1 + h), scale)
+        squares.append(dict(size=[width, height], box=[x1, y1, x1 + w, y1 + h], scale=scale,
+                            square=[x0, y0, side]))
+    path = FIXTURES / "kinds_cases.json"
+    path.write_text(json.dumps(dict(kinds=kinds, squares=squares), separators=(",", ":")) + "\n")
+    changed = sum(c["out"] != c["cls"] for c in kinds)
+    print(f"{len(kinds)} kind cases ({changed} change the kind) and {len(squares)} squares written to {path}")
+
+
 def checker(spec):
     """The chequered picture of a dark-cases entry, as grey levels: 8x8 cells
     of `cell` pixels from `origin`, the cells whose column and row add up to
@@ -1664,7 +1720,7 @@ def compare_colours(swift_path, list_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "dark-cases",
+    ap.add_argument("what", choices=["orientation", "grid-cases", "colour-cases", "king-cases", "kinds-cases", "dark-cases",
                                      "window-cases", "odd-cases", "grid", "compare", "colours", "dark", "window",
                                      "pieces"])
     ap.add_argument("--list", help="grid: JSON object keyed by photo path")
@@ -1692,6 +1748,8 @@ def main():
         colour_cases(args.seed)
     elif args.what == "king-cases":
         king_cases(args.seed)
+    elif args.what == "kinds-cases":
+        kinds_cases(args.seed)
     elif args.what == "dark-cases":
         dark_cases()
     elif args.what == "window-cases":

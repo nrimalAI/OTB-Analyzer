@@ -23,6 +23,7 @@ The Swift port in ChessVision (Phase 2) must match this file's behavior;
 evaluate.py is the executable spec.
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -518,6 +519,76 @@ def one_king_a_side(detections, kind_scores, floor=KING_FLOOR, queen_for_king=Fa
                           for i, kind in enumerate(KINDS) if kind != "king"]
                 out[k] = Detection(side + "_" + max(others)[2], out[k].confidence, out[k].bbox)
     return out
+
+
+# The piece classifier (a third model, after the piece model): each piece
+# cut out of the photo drawn at most this many pixels on its long side, in a
+# square of MARGIN times the box's longer side around the box's centre (the
+# photo's edge pixels repeated where the square runs off it), at SIDE pixels.
+CLASSIFIER_PHOTO_SIDE = 1280
+CLASSIFIER_MARGIN = 1.2
+CLASSIFIER_SIDE = 128
+# A piece the piece model gives at least this score is left as it is: on the
+# development sets the classifier then gains as much and changes fewer pieces.
+CLASSIFIER_SURE = 0.9
+
+
+def classifier_scale(width, height, max_side=CLASSIFIER_PHOTO_SIDE):
+    """The factor the photo is drawn at for the classifier's crops."""
+    return min(1.0, max_side / max(width, height))
+
+
+def classifier_square(bbox, scale, margin=CLASSIFIER_MARGIN):
+    """(x0, y0, side) in pixels of the photo drawn at `scale`: the square a
+    piece is cut out in for the classifier. Halves round up, as in Swift."""
+    x1, y1, x2, y2 = (v * scale for v in bbox)
+    side = max(2, math.floor(max(x2 - x1, y2 - y1) * margin + 0.5))
+    x0 = math.floor((x1 + x2) / 2 - side / 2 + 0.5)
+    y0 = math.floor((y1 + y2) / 2 - side / 2 + 0.5)
+    return x0, y0, side
+
+
+def kinds_from_classifier(detections, class_probs, sure=CLASSIFIER_SURE):
+    """The detections with their kinds from the piece classifier and the
+    piece model together, and for each the scores by kind one king a side
+    is then given.
+
+    `class_probs[k]`: the classifier's probability for each of the twelve
+    classes of detection k ({"white_king": 0.01, ...}). A cut-out piece
+    shows its kind but not its side: on a set whose "white" pieces are brown
+    the classifier calls them black, and a side is told from the other
+    side's colour, which a crop does not have. So the side stays the piece
+    model's, and of the classifier only the kind is used: its two sides'
+    probabilities summed. That is multiplied by what the piece model said:
+    its confidence for its own kind and the rest shared evenly among the
+    other five. The kind with the largest product, normalised, is taken;
+    its share becomes the confidence, and all six shares the kind scores.
+    (Ties go to the kind first in KINDS.)
+
+    A piece the piece model gives `sure` or more is left as it is, and its
+    kind scores are None: the caller keeps the piece model's own."""
+    out, scores = [], []
+    for d, probs in zip(detections, class_probs):
+        side, own = d.cls.split("_", 1)
+        if d.confidence >= sure:
+            out.append(d)
+            scores.append(None)
+            continue
+        from_classifier = dict.fromkeys(KINDS, 0.0)
+        for label, p in probs.items():
+            from_classifier[label.split("_", 1)[1]] += float(p)
+        rest = (1.0 - d.confidence) / (len(KINDS) - 1)
+        q = {k: from_classifier[k] * (d.confidence if k == own else rest) for k in KINDS}
+        total = sum(q.values())
+        if total <= 0:
+            out.append(d)
+            scores.append({own: d.confidence})
+            continue
+        q = {k: v / total for k, v in q.items()}
+        kind = max(KINDS, key=lambda k: (q[k], -KINDS.index(k)))
+        out.append(Detection(side + "_" + kind, q[kind], d.bbox))
+        scores.append(q)
+    return out, scores
 
 
 def white_side_score(board):
