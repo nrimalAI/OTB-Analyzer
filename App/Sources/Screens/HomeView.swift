@@ -1,4 +1,5 @@
 import ChessBoardUI
+import ImageIO
 import SwiftUI
 
 /// Home: the positions you've analyzed, with one primary action — scan a
@@ -20,7 +21,9 @@ struct HomeView: View {
                         emptyState
                     } else {
                         ForEach(history.items) { item in
-                            SavedPositionRow(item: item) { model.open(item) }
+                            SavedPositionRow(item: item, photoURL: history.photoURL(for: item)) {
+                                model.open(item)
+                            }
                                 .contextMenu {
                                     Button(role: .destructive) {
                                         history.delete(item)
@@ -110,9 +113,11 @@ struct HomeView: View {
     }
 }
 
-/// One saved position: thumbnail board, when, the verdict, and the eval.
+/// One saved position: thumbnail board and the photo it was read from,
+/// when, the verdict, and the eval.
 private struct SavedPositionRow: View {
     let item: SavedPosition
+    let photoURL: URL?
     let open: () -> Void
 
     var body: some View {
@@ -125,6 +130,14 @@ private struct SavedPositionRow: View {
                 )
                 .frame(width: 72, height: 72)
                 .accessibilityHidden(true)
+
+                if let photoURL {
+                    PhotoThumbnail(url: photoURL)
+                        .frame(width: 54, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .padding(.leading, -6)
+                        .accessibilityHidden(true)
+                }
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(Self.dateLabel(for: item.date))
@@ -166,5 +179,40 @@ private struct SavedPositionRow: View {
             return "Yesterday"
         }
         return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+}
+
+/// A small copy of a saved photo, made off the main thread with ImageIO so
+/// that a long list does not decode full photos.
+private struct PhotoThumbnail: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Theme.hairline
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            }
+        }
+        .task(id: url) {
+            image = await Self.thumbnail(of: url, maxPixels: 240)
+        }
+    }
+
+    static func thumbnail(of url: URL, maxPixels: Int) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+            else { return nil }
+            return UIImage(cgImage: thumbnail)
+        }.value
     }
 }

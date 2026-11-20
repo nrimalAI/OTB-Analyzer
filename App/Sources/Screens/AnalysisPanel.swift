@@ -45,10 +45,11 @@ struct AnalysisPanel: View {
             }
             .frame(maxWidth: .infinity)
 
-            ShareLink(item: model.fen) {
+            ShareLink(item: exportText, subject: Text("Chess position")) {
                 Text("Share")
             }
             .frame(maxWidth: .infinity)
+            .accessibilityHint("Shares the position as text: the FEN, a diagram and the engine's lines")
 
             Button("Lichess \u{2197}") {
                 if let url = Self.lichessURL(fen: model.fen) { openURL(url) }
@@ -75,6 +76,20 @@ struct AnalysisPanel: View {
         .foregroundStyle(Theme.ink)
         .buttonStyle(TextButtonStyle())
         .frame(height: 44)
+    }
+
+    /// The position and the engine's lines as plain text (`PositionText`).
+    private var exportText: String {
+        let finished = session.lines.first
+        return PositionText.export(
+            pieces: model.pieces, fen: model.fen, sideToMove: model.sideToMove,
+            verdict: finished.map { EvalFormat.verdict($0.score) },
+            depth: finished == nil ? nil : session.reachedDepth,
+            lines: session.lines.map {
+                PositionText.Line(
+                    evaluation: EvalFormat.label($0.score),
+                    moves: PositionText.numbered($0.moves, sideToMove: model.sideToMove))
+            })
     }
 
     /// Lichess's analysis board for a FEN. Opens in the browser; the app
