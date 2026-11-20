@@ -27,7 +27,9 @@ final class AppModel: ObservableObject {
     let recognizer: BoardRecognizer =
         (try? CoreMLBoardRecognizer(bundle: .main)) ?? StubRecognizer()
     @Published var isRecognizing = false
-    @Published var recognitionFailed = false
+    /// Why the last photo gave no position; nil while there is nothing to
+    /// report.
+    @Published var scanFailure: ScanFailure?
 
     // Position on the board
     @Published var pieces: [Square: Piece] = [:]
@@ -66,9 +68,10 @@ final class AppModel: ObservableObject {
     func startFromPhoto(_ image: UIImage, minimumDuration: Duration = .zero) async {
         guard !isRecognizing else { return }
         guard let cgImage = image.normalizedUprightCGImage() else {
-            recognitionFailed = true
+            scanFailure = .unreadablePhoto
             return
         }
+        scanFailure = nil
         isRecognizing = true
         defer { isRecognizing = false }
         let started = ContinuousClock.now
@@ -80,7 +83,7 @@ final class AppModel: ObservableObject {
             load(result: result)
             path.append(.board)
         } catch {
-            if isStillScanning { recognitionFailed = true }
+            if isStillScanning { scanFailure = ScanFailure(error) }
         }
     }
 

@@ -9,11 +9,21 @@ final class ScreenshotTests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch(_ flow: String) -> XCUIApplication {
+    private func launch(_ flow: String, environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["AUTOFLOW"] = flow
+        app.launchEnvironment.merge(environment) { _, new in new }
         app.launch()
         return app
+    }
+
+    /// A ChessVision fixture photo, read from the checkout: the Simulator's
+    /// apps can read paths on the Mac.
+    private func fixturePhoto(_ name: String) -> String {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Packages/ChessVision/Tests/ChessVisionTests/Fixtures/\(name)")
+            .path
     }
 
     private func snap(_ name: String) {
@@ -73,6 +83,23 @@ final class ScreenshotTests: XCTestCase {
         // Let the engine report a line or two.
         _ = app.staticTexts["Analyzing\u{2026}"].waitForNonExistence(timeout: 20)
         snap("side-3-analysis")
+    }
+
+    /// A photo with no board: what to change, then back to framing.
+    func testNoBoard() {
+        let app = launch("scan", environment: ["SCAN_PHOTO": "blank"])
+        XCTAssertTrue(app.staticTexts["No board found"].waitForExistence(timeout: 30))
+        snap("scan-1-no-board")
+        tap(app.buttons["Retake"], "Retake")
+        XCTAssertTrue(app.buttons["Take photo"].waitForExistence(timeout: 5))
+        snap("scan-2-framing")
+    }
+
+    /// A real photo through the app's own recognizer, in the Simulator.
+    func testRealPhoto() {
+        let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+        snap("scan-3-real-photo")
     }
 
     func testHome() {

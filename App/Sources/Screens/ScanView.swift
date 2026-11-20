@@ -1,15 +1,19 @@
 import AVFoundation
+import CoreMotion
 import PhotosUI
 import SwiftUI
 
-/// Scan screen: a dark viewfinder with corner brackets to fill with the
-/// board, a shutter, and a way to pick an existing photo. After a photo is
-/// taken or chosen it stays on screen under a scanning grid while the board
-/// is read, then the app moves on to checking the position.
+/// Scan screen: a dark viewfinder with corner brackets and a faint grid to
+/// fill with the board, a hint that follows how the phone is held, a
+/// shutter, and a way to pick an existing photo. After a photo is taken or
+/// chosen it stays on screen under a scanning grid while the board is read,
+/// then the app moves on to checking the position, or says why it could not
+/// and what to change for the next photo.
 struct ScanView: View {
     @EnvironmentObject private var model: AppModel
 
     @StateObject private var camera = CameraController()
+    @StateObject private var tilt = TiltMonitor()
     @State private var pickedItem: PhotosPickerItem?
     /// The photo being read; nil while framing a shot.
     @State private var photo: UIImage?
@@ -21,7 +25,9 @@ struct ScanView: View {
 
     private static let hasCamera = AVCaptureDevice.default(for: .video) != nil
     private var hasCamera: Bool { Self.hasCamera }
-    private var isReading: Bool { photo != nil }
+    /// The last photo gave no position; its reason is on screen.
+    private var hasFailed: Bool { model.scanFailure != nil }
+    private var isReading: Bool { photo != nil && !hasFailed }
     /// Loading or reading a photo: no second shot or pick meanwhile.
     private var isBusy: Bool { isReading || isLoadingPick }
 
@@ -36,11 +42,25 @@ struct ScanView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             photo = nil
-            if hasCamera { camera.requestPermissionAndStart() }
+            model.scanFailure = nil
+            if hasCamera {
+                camera.requestPermissionAndStart()
+                tilt.start()
+            }
+            #if DEBUG
+            if let image = DebugPhoto.take() {
+                readTask = Task { await read(image) }
+            }
+            #endif
         }
         .onDisappear {
             readTask?.cancel()
             camera.stop()
+            tilt.stop()
+            model.scanFailure = nil
+        }
+        .onChange(of: model.scanFailure) { _, failure in
+            if let failure { AccessibilityNotification.Announcement(failure.title).post() }
         }
         .onChange(of: scenePhase) { _, phase in
             // iOS switches the torch off in the background.
@@ -57,21 +77,24 @@ struct ScanView: View {
                 guard let data = try? await item.loadTransferable(type: Data.self),
                       let image = UIImage(data: data)
                 else {
-                    if !Task.isCancelled { model.recognitionFailed = true }
+                    if !Task.isCancelled { model.scanFailure = .unreadablePhoto }
                     return
                 }
                 await read(image)
             }
         }
-        .alert("Couldn't read the board", isPresented: $model.recognitionFailed) {
-            Button("Set up by hand") {
-                model.path = []
-                model.startFromScratch(startingPosition: true)
-            }
-            Button("Try again", role: .cancel) { photo = nil }
-        } message: {
-            Text("Try a photo taken more directly over the board, or place the pieces by hand.")
-        }
+    }
+
+    /// Back to the live camera after a photo that gave no position.
+    private func retake() {
+        model.scanFailure = nil
+        photo = nil
+    }
+
+    private func setUpByHand() {
+        model.scanFailure = nil
+        model.path = []
+        model.startFromScratch(startingPosition: true)
     }
 
     /// Recognition takes a fraction of a second; hold the reading state
@@ -118,6 +141,7 @@ struct ScanView: View {
             }
             .buttonStyle(TextButtonStyle())
             .disabled(isBusy)
+            .accessibilityLabel("Choose a photo")
 
             Spacer()
             shutterButton
@@ -144,13 +168,13 @@ struct ScanView: View {
                 .frame(width: 76, height: 76)
         }
         .buttonStyle(TextButtonStyle())
-        .disabled(camera.permission != .authorized || camera.isCapturing || isBusy)
+        .disabled(camera.permission != .authorized || camera.isCapturing || isBusy || hasFailed)
         .accessibilityLabel("Take photo")
     }
 
     @ViewBuilder
     private var torchButton: some View {
-        if camera.hasTorch, !isBusy {
+        if camera.hasTorch, !isBusy, !hasFailed {
             Button {
                 camera.toggleTorch()
             } label: {
@@ -176,12 +200,20 @@ struct ScanView: View {
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
 
+                if hasFailed {
+                    Theme.darkroom.opacity(0.55)
+                }
+
                 ZStack {
                     if isReading {
                         ScanningGrid()
+                    } else if !hasFailed {
+                        FramingGrid()
                     }
-                    CornerBrackets(armLength: 30)
-                        .stroke(Theme.paper, lineWidth: 3)
+                    if !hasFailed {
+                        CornerBrackets(armLength: 30)
+                            .stroke(Theme.paper, lineWidth: 3)
+                    }
                 }
                 .frame(width: side, height: side)
                 .allowsHitTesting(false)
@@ -189,12 +221,25 @@ struct ScanView: View {
 
                 if showsTip {
                     Text(tip)
-                        .sans(14)
+                        .sans(14, weight: tilt.advice == .tiltDown && !isBusy ? .medium : .regular)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(.black.opacity(0.6), in: Capsule())
+                        .padding(.horizontal, 16)
                         .frame(maxHeight: .infinity, alignment: .bottom)
                         .padding(.bottom, 16)
+                        .animation(.easeOut(duration: 0.2), value: tip)
+                }
+
+                if let failure = model.scanFailure {
+                    FailureCard(
+                        failure: failure,
+                        retake: retake,
+                        setUpByHand: setUpByHand
+                    )
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 16)
                 }
             }
         }
@@ -223,14 +268,14 @@ struct ScanView: View {
     }
 
     private var showsTip: Bool {
-        isBusy || !hasCamera || camera.permission == .authorized
+        !hasFailed && (isBusy || !hasCamera || camera.permission == .authorized)
     }
 
     private var tip: String {
         if isReading { return "Reading the board\u{2026}" }
         if isLoadingPick { return "Loading the photo\u{2026}" }
         if !hasCamera { return "No camera here \u{2014} choose a photo" }
-        return "Fill the frame with the board"
+        return tilt.advice.message
     }
 
     private var permissionDeniedView: some View {
@@ -258,6 +303,133 @@ struct ScanView: View {
         .background(DarkStripes())
     }
 }
+
+/// Why the last photo gave no position and what to change, over the photo
+/// itself, with the way back to the camera first.
+private struct FailureCard: View {
+    let failure: ScanFailure
+    let retake: () -> Void
+    let setUpByHand: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(failure.title)
+                .serif(26)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(failure.advice, id: \.self) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\u{2022}")
+                        Text(line)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .sans(15)
+                    .foregroundStyle(Theme.paper.opacity(0.82))
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            HStack(spacing: 10) {
+                if failure.retakeHelps {
+                    Button(action: retake) {
+                        Text("Retake")
+                            .sans(16, weight: .semibold)
+                            .foregroundStyle(Theme.darkroom)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(Theme.paper, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(TextButtonStyle())
+                }
+                Button(action: setUpByHand) {
+                    Text("Set up by hand")
+                        .sans(16, weight: .medium)
+                        .foregroundStyle(Theme.paper)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(Theme.paper.opacity(0.6), lineWidth: Theme.ruleWidth))
+                }
+                .buttonStyle(TextButtonStyle())
+            }
+            .padding(.top, 4)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.darkroom.opacity(0.94), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Theme.paper.opacity(0.18), lineWidth: 1))
+        .padding(.horizontal, 16)
+    }
+}
+
+/// A faint 8×8 grid inside the brackets while framing: where the squares of
+/// the board should fall.
+private struct FramingGrid: View {
+    var body: some View {
+        GeometryReader { geo in
+            Path { path in
+                for i in 1..<8 {
+                    let x = geo.size.width * CGFloat(i) / 8
+                    let y = geo.size.height * CGFloat(i) / 8
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: geo.size.height))
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: y))
+                }
+            }
+            .stroke(Theme.paper.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
+        }
+    }
+}
+
+/// Follows which way the phone points while framing, for the "tilt down"
+/// hint (`FramingAdvice`). Core Motion's device motion needs no permission.
+private final class TiltMonitor: ObservableObject {
+    @Published private(set) var advice: FramingAdvice = .frame
+    private let manager = CMMotionManager()
+
+    func start() {
+        guard manager.isDeviceMotionAvailable, !manager.isDeviceMotionActive else { return }
+        manager.deviceMotionUpdateInterval = 0.2
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+            guard let self, let gravity = motion?.gravity else { return }
+            let next = FramingAdvice.next(
+                after: self.advice,
+                cameraAngle: FramingAdvice.cameraAngle(gravityX: gravity.x, y: gravity.y, z: gravity.z))
+            if next != self.advice { self.advice = next }
+        }
+    }
+
+    func stop() {
+        manager.stopDeviceMotionUpdates()
+        advice = .frame
+    }
+}
+
+#if DEBUG
+/// Screenshots and UI tests: `SIMCTL_CHILD_SCAN_PHOTO=<path>` reads that
+/// photo once, as if it had been picked; `blank` reads a photo with no board
+/// in it. Simulator apps can read paths on the Mac.
+private enum DebugPhoto {
+    private static var taken = false
+
+    static func take() -> UIImage? {
+        guard !taken, let value = ProcessInfo.processInfo.environment["SCAN_PHOTO"] else { return nil }
+        taken = true
+        if value == "blank" {
+            return UIGraphicsImageRenderer(size: CGSize(width: 900, height: 1200)).image { context in
+                UIColor(red: 0.55, green: 0.5, blue: 0.45, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 900, height: 1200))
+                UIColor(red: 0.35, green: 0.3, blue: 0.27, alpha: 1).setFill()
+                context.cgContext.fillEllipse(in: CGRect(x: 200, y: 350, width: 500, height: 420))
+            }
+        }
+        return UIImage(contentsOfFile: value)
+    }
+}
+#endif
 
 /// 8×8 grid with a line sweeping up and down while the board is read.
 private struct ScanningGrid: View {
