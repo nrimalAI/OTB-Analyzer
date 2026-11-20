@@ -24,6 +24,9 @@ import Testing
         model.turnQuarter()
         model.turnQuarter()
         model.turnQuarter()
+        // Turning moves the pieces only.
+        #expect(model.sideToMove == .white)
+        #expect(model.photoSide == .white)
         #expect(model.pieces == pieces)
         #expect(model.confidence == confidence)
     }
