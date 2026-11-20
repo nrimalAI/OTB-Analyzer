@@ -102,7 +102,8 @@ final class ScreenshotTests: XCTestCase {
         let app = launch("scan", environment: ["SCAN_PHOTO": "blank"])
         XCTAssertTrue(app.staticTexts["No board found"].waitForExistence(timeout: 30))
         snap("scan-1-no-board")
-        tap(app.buttons["Retake"], "Retake")
+        // "Retake" with a camera; the Simulator has none, so "Try again".
+        tap(app.buttons["Try again"], "Try again")
         XCTAssertTrue(app.buttons["Take photo"].waitForExistence(timeout: 5))
         snap("scan-2-framing")
     }
