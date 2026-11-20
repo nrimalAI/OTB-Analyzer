@@ -90,7 +90,7 @@ final class BoardGeometryTests: XCTestCase {
         XCTAssertEqual(BoardGeometry.quarterTurned(.h8), .h1)
         XCTAssertEqual(BoardGeometry.quarterTurned(.h1), .a1)
         // White's pawns on the second rank end up on the b-file.
-        XCTAssertEqual(BoardGeometry.quarterTurned(.e2), .b5)
+        XCTAssertEqual(BoardGeometry.quarterTurned(.e2), .b4)
         var seen = Set<Square>()
         for square in Square.allCases {
             let once = BoardGeometry.quarterTurned(square)
