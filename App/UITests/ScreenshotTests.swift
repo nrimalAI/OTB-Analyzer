@@ -114,6 +114,48 @@ final class ScreenshotTests: XCTestCase {
         snap("scan-3-real-photo")
     }
 
+    /// A real photo through to its analysis: the photo beside the heading,
+    /// a swipe along the line, and the text export in the share sheet.
+    func testAnalysisOfARealPhoto() {
+        let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+
+        tap(app.buttons["Photo"], "Photo")
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        snap("analysis-1-photo")
+        app.buttons["Done"].tap()
+
+        // After a scan nobody has said who is to move: the bottom key
+        // answers it and starts the analysis.
+        let white = app.buttons["White to move"]
+        XCTAssertTrue(white.waitForExistence(timeout: 5))
+        XCTAssertTrue(white.isEnabled, "the fixture should read as a legal position")
+        white.tap()
+        XCTAssertTrue(app.buttons["Next move"].waitForExistence(timeout: 30))
+        // Let the search run on a little, then step one move along the line by swiping.
+        sleep(4)
+        snap("analysis-2-lines")
+        // In Analysis the squares are not buttons; drag leftward across the
+        // middle of the board, further than the 40 points a step needs.
+        let middle = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH 'e4,'")).firstMatch
+        XCTAssertTrue(middle.exists, "no square e4 on the board")
+        let start = middle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -150, dy: 0)))
+        let stepped = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] 'move 1 of'")).firstMatch
+        XCTAssertTrue(stepped.waitForExistence(timeout: 3), "the swipe did not step the line")
+        snap("analysis-3-stepped")
+
+        tap(app.buttons["Share"], "Share")
+        // The system share sheet, with the text taken when Share was pressed.
+        // (Its rows are not always buttons: look for "Copy" in any element.)
+        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Copy'")).firstMatch
+        let opened = copy.waitForExistence(timeout: 10)
+        snap("analysis-4-share")
+        XCTAssertTrue(opened, "no share sheet")
+    }
+
     func testHome() {
         let app = launch("")
         XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))

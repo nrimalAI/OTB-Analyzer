@@ -83,9 +83,20 @@ final class AppModel: ObservableObject {
     /// Which side of the board the photo was taken from.
     @Published private(set) var photoSide: Piece.Color = .white
     @Published var depth = 18
+    /// The photo the position on the board was read from, shrunk for the
+    /// screen and for keeping with the saved position (`photoJPEG`); nil for
+    /// a position set up by hand or saved without one.
+    @Published private(set) var photo: UIImage?
+    private(set) var photoJPEG: Data?
 
     /// Positions the engine has analyzed, newest first.
-    let history = HistoryStore()
+    let history: HistoryStore
+
+    /// `history`: a store for tests; the app's own by default. (Made here,
+    /// on the main actor, not as a default argument, which is not.)
+    init(history: HistoryStore? = nil) {
+        self.history = history ?? HistoryStore()
+    }
 
     /// Detections below this are flagged for the user to double-check.
     static let lowConfidenceThreshold: Float = 0.85
@@ -109,11 +120,15 @@ final class AppModel: ObservableObject {
         defer { isRecognizing = false }
         let started = ContinuousClock.now
         do {
+            // The copy kept with the position is made while the board is read.
+            async let kept = Self.keptCopy(of: cgImage)
             let result = try await recognizer.recognize(cgImage)
+            let jpeg = await kept
             let remaining = minimumDuration - (ContinuousClock.now - started)
             if remaining > .zero { try? await Task.sleep(for: remaining) }
             guard isStillScanning else { return true }
             load(result: result)
+            setPhoto(jpeg)
             path.append(.board)
         } catch {
             if isStillScanning { scanFailure = ScanFailure(error) }
@@ -125,6 +140,32 @@ final class AppModel: ObservableObject {
     /// that finishes after that must not navigate or raise an alert.
     private var isStillScanning: Bool {
         !Task.isCancelled && path.last == .scan
+    }
+
+    /// The photo as kept: at most `keptPhotoSide` pixels on its long side,
+    /// as a JPEG. Off the main actor; nil if it cannot be made.
+    nonisolated static func keptCopy(of image: CGImage) async -> Data? {
+        let longSide = CGFloat(max(image.width, image.height))
+        guard longSide > 0 else { return nil }
+        let scale = min(1, keptPhotoSide / longSide)
+        let size = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let shrunk = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            UIImage(cgImage: image).draw(in: CGRect(origin: .zero, size: size))
+        }
+        return shrunk.jpegData(compressionQuality: 0.75)
+    }
+
+    /// Long side of a kept photo, in pixels: enough to tell the pieces
+    /// apart on the screen, about 200 KB a photo.
+    nonisolated static let keptPhotoSide: CGFloat = 1280
+
+    /// Sets the photo shown with the position (and kept with it when it is
+    /// analyzed) from its JPEG.
+    func setPhoto(_ jpeg: Data?) {
+        photoJPEG = jpeg
+        photo = jpeg.flatMap(UIImage.init(data:))
     }
 
     func startFromScratch(startingPosition: Bool) {
@@ -140,6 +181,7 @@ final class AppModel: ObservableObject {
     func open(_ saved: SavedPosition) {
         guard applyFEN(saved.fen) else { return }
         chooseSideToMove(saved.sideToMove)  // It was analyzed for that side.
+        setPhoto(history.photoURL(for: saved).flatMap { try? Data(contentsOf: $0) })
         orientation = .whiteBottom
         fromScan = false
         tab = .analysis
@@ -176,8 +218,10 @@ final class AppModel: ObservableObject {
         reconsiderSideToMove()
     }
 
-    /// Starting position, or an empty board.
+    /// Starting position, or an empty board. The photo goes with the board
+    /// it showed. (A typed FEN keeps it: that is usually a correction.)
     func resetBoard(toStartingPosition: Bool) {
+        setPhoto(nil)
         pieces = toStartingPosition
             ? FENBuilder.pieces(fromFEN: Position.standard.fen) ?? [:]
             : [:]

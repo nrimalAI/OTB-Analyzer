@@ -16,6 +16,7 @@ struct BoardWorkspaceView: View {
     @State private var toastTask: Task<Void, Never>?
     /// Asking who is to move before analysing a scan that nobody has said.
     @State private var askingSideToMove = false
+    @State private var showingPhoto = false
 
     private var isAnalysis: Bool { model.tab == .analysis }
 
@@ -54,8 +55,9 @@ struct BoardWorkspaceView: View {
         }
         .task {
             let history = history
+            let model = model
             session.onFinished = { best, depth, fen in
-                Self.save(best, depth: depth, fen: fen, to: history)
+                Self.save(best, depth: depth, fen: fen, photo: model.photoJPEG, to: history)
             }
             if isAnalysis { startAnalysis() }
         }
@@ -72,6 +74,11 @@ struct BoardWorkspaceView: View {
         }
         .onDisappear {
             session.stop()
+        }
+        .sheet(isPresented: $showingPhoto) {
+            if let photo = model.photo {
+                PhotoSheet(photo: photo)
+            }
         }
         .confirmationDialog("Who is to move?", isPresented: $askingSideToMove, titleVisibility: .visible) {
             Button("White to move") { analyze(with: .white) }
@@ -152,22 +159,48 @@ struct BoardWorkspaceView: View {
     // MARK: - Heading
 
     private var heading: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .serif(30)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(height: 35)
-                .accessibilityAddTraits(.isHeader)
-            Text(subtitle)
-                .sans(13, weight: .medium)
-                .foregroundStyle(subtitleIsWarning ? Theme.accent : Theme.muted)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(height: 20)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .serif(30)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(height: 35)
+                    .accessibilityAddTraits(.isHeader)
+                Text(subtitle)
+                    .sans(13, weight: .medium)
+                    .foregroundStyle(subtitleIsWarning ? Theme.accent : Theme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .frame(height: 20)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let photo = model.photo {
+                photoButton(photo)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 10)
+    }
+
+    /// The photo the position was read from, small, beside the heading: to
+    /// compare the board with it while checking, and to remember the game.
+    private func photoButton(_ photo: UIImage) -> some View {
+        Button {
+            showingPhoto = true
+        } label: {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 46, height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Theme.ink, lineWidth: Theme.ruleWidth))
+        }
+        .buttonStyle(TextButtonStyle())
+        .accessibilityLabel("Photo")
+        .accessibilityHint("Shows the photo this position was read from")
     }
 
     private var title: String {
@@ -236,6 +269,18 @@ struct BoardWorkspaceView: View {
             )
         }
         .fixedSize(horizontal: false, vertical: true)
+        // In Analysis a swipe across the board steps through the line:
+        // leftward for the next move, rightward for the one before.
+        .simultaneousGesture(stepSwipe, including: isAnalysis ? .all : .subviews)
+    }
+
+    private var stepSwipe: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { drag in
+                let dx = drag.translation.width
+                guard abs(dx) > 40, abs(dx) > 2 * abs(drag.translation.height) else { return }
+                if dx < 0 { session.stepForward() } else { session.stepBack() }
+            }
     }
 
     private var shownPieces: [Square: Piece] {
@@ -350,11 +395,13 @@ struct BoardWorkspaceView: View {
 
     /// Keeps finished analyses on the home screen. The untouched starting
     /// position isn't worth a row.
-    private static func save(_ best: AnalysisLine, depth: Int, fen: String, to history: HistoryStore) {
+    private static func save(
+        _ best: AnalysisLine, depth: Int, fen: String, photo: Data?, to history: HistoryStore
+    ) {
         guard let placement = fen.split(separator: " ").first,
               placement != Position.standard.fen.split(separator: " ").first
         else { return }
-        history.record(fen: fen, score: best.score, bestMove: best.moves.first, depth: depth)
+        history.record(fen: fen, score: best.score, bestMove: best.moves.first, depth: depth, photo: photo)
     }
 
     private func showToast(_ message: String) {
@@ -509,5 +556,97 @@ private extension PositionProblem.Fix {
         case .select(let square): return "Selects \(square.notation) and shows what it likely is"
         case .setSideToMove(let color): return "Makes it \(color.name) to move"
         }
+    }
+}
+
+/// The photo a position was read from, as large as the screen allows.
+private struct PhotoSheet: View {
+    let photo: UIImage
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Photo")
+                    .eyebrow()
+                Spacer()
+                Button("Done") { dismiss() }
+                    .sans(16, weight: .medium)
+                    .buttonStyle(TextButtonStyle())
+                    .frame(height: 44)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+
+            ZoomablePhoto(photo: photo)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+        }
+        .background(Theme.paper.ignoresSafeArea())
+        .foregroundStyle(Theme.ink)
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// The photo, to be compared piece by piece with the board: pinch or
+/// double-tap to zoom, drag to look around while zoomed.
+private struct ZoomablePhoto: View {
+    let photo: UIImage
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var settledOffset: CGSize = .zero
+
+    private static let maxScale: CGFloat = 5
+
+    var body: some View {
+        Image(uiImage: photo)
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(scale)
+            .offset(offset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .contentShape(Rectangle())
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        scale = min(max(settledScale * value.magnification, 1), Self.maxScale)
+                    }
+                    .onEnded { _ in
+                        settledScale = scale
+                        if scale == 1 { reset() }
+                    })
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        offset = CGSize(
+                            width: settledOffset.width + value.translation.width,
+                            height: settledOffset.height + value.translation.height)
+                    }
+                    .onEnded { _ in settledOffset = offset },
+                // Unzoomed, a drag is the sheet's, to close it.
+                including: scale > 1 ? .all : .subviews)
+            .onTapGesture(count: 2) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    if scale > 1 {
+                        reset()
+                    } else {
+                        scale = 2.5
+                        settledScale = 2.5
+                    }
+                }
+            }
+            .accessibilityLabel("Photo of the board")
+            .accessibilityHint("Pinch or double-tap to zoom")
+            .accessibilityAddTraits(.isImage)
+    }
+
+    private func reset() {
+        scale = 1
+        settledScale = 1
+        offset = .zero
+        settledOffset = .zero
     }
 }

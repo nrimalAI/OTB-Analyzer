@@ -10,6 +10,8 @@ struct AnalysisPanel: View {
     let showToast: (String) -> Void
 
     @Environment(\.openURL) private var openURL
+    /// The text being shared, while the share sheet is up.
+    @State private var shared: SharedText?
 
     private let depthOptions = [12, 18, 24]
 
@@ -35,6 +37,11 @@ struct AnalysisPanel: View {
             actions
                 .padding(.top, 4)
         }
+        .sheet(item: $shared) { shared in
+            ShareSheet(text: shared.text)
+                .presentationDetents([.medium, .large])
+                .ignoresSafeArea()
+        }
     }
 
     private var actions: some View {
@@ -45,10 +52,13 @@ struct AnalysisPanel: View {
             }
             .frame(maxWidth: .infinity)
 
-            ShareLink(item: model.fen) {
-                Text("Share")
+            // The text is taken when the key is pressed: it would otherwise
+            // change under the share sheet with every word from the engine.
+            Button("Share") {
+                shared = SharedText(text: exportText)
             }
             .frame(maxWidth: .infinity)
+            .accessibilityHint("Shares the position as text: the FEN, a diagram and the engine's lines")
 
             Button("Lichess \u{2197}") {
                 if let url = Self.lichessURL(fen: model.fen) { openURL(url) }
@@ -75,6 +85,23 @@ struct AnalysisPanel: View {
         .foregroundStyle(Theme.ink)
         .buttonStyle(TextButtonStyle())
         .frame(height: 44)
+    }
+
+    /// The position and the engine's lines as plain text (`PositionText`).
+    private var exportText: String {
+        let best = session.lines.first
+        let verdict = best.map { EvalFormat.verdict($0.score) }
+            ?? (session.isFinished ? "No legal moves" : nil)
+        return PositionText.export(
+            pieces: model.pieces, fen: model.fen, sideToMove: model.sideToMove,
+            verdict: verdict,
+            depth: best == nil ? nil : session.reachedDepth,
+            searching: !session.isFinished,
+            lines: session.lines.map {
+                PositionText.Line(
+                    evaluation: EvalFormat.label($0.score),
+                    moves: PositionText.numbered($0.moves, sideToMove: model.sideToMove))
+            })
     }
 
     /// Lichess's analysis board for a FEN. Opens in the browser; the app
@@ -163,4 +190,21 @@ private struct LineRow: View {
         }
         return index == 0 ? Theme.ink : Theme.muted
     }
+}
+
+/// A piece of text on its way to the share sheet.
+private struct SharedText: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+/// The system share sheet for one piece of text.
+private struct ShareSheet: UIViewControllerRepresentable {
+    let text: String
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [text], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
