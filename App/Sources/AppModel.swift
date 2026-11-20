@@ -32,7 +32,14 @@ final class AppModel: ObservableObject {
     // Position on the board
     @Published var pieces: [Square: Piece] = [:]
     @Published var confidence: [Square: Float] = [:]
-    @Published var sideToMove: Piece.Color = .white
+    /// Setting it, from the control or a typed FEN, answers the question
+    /// of who is to move.
+    @Published var sideToMove: Piece.Color = .white {
+        didSet { sideToMoveKnown = true }
+    }
+    /// False after a scan until someone says who is to move: a photo does
+    /// not show it. `sideToMove` is then White only as a placeholder.
+    @Published private(set) var sideToMoveKnown = true
     @Published var castling: CastlingRights = .none
     @Published var orientation: BoardDisplayOrientation = .whiteBottom
 
@@ -95,6 +102,7 @@ final class AppModel: ObservableObject {
     /// Reopens a saved position straight on its analysis.
     func open(_ saved: SavedPosition) {
         guard applyFEN(saved.fen) else { return }
+        sideToMoveKnown = true  // A saved position was analyzed for one side.
         orientation = .whiteBottom
         fromScan = false
         tab = .analysis
@@ -106,7 +114,14 @@ final class AppModel: ObservableObject {
     func load(result: RecognitionResult) {
         pieces = result.pieces.mapValues(\.piece)
         confidence = result.pieces.mapValues(\.confidence)
-        sideToMove = .white
+        // A photo does not show who is to move. Only a king in check says
+        // it; otherwise the person checking the board is asked.
+        if let forced = Self.forcedSideToMove(pieces) {
+            sideToMove = forced
+        } else {
+            sideToMove = .white
+            sideToMoveKnown = false
+        }
         castling = .inferred(from: pieces)
         orientation = result.orientationGuess == .whiteBottom ? .whiteBottom : .blackBottom
         photoSide = result.orientationGuess == .whiteBottom ? .white : .black
@@ -185,7 +200,10 @@ final class AppModel: ObservableObject {
 
         pieces = parsed
         confidence = [:]
-        sideToMove = fields.count > 1 && fields[1] == "b" ? .black : .white
+        // The FEN field shows the placeholder "w" while nobody has said who
+        // is to move; editing the placement keeps that question open.
+        let typedSide: Piece.Color = fields.count > 1 && fields[1] == "b" ? .black : .white
+        if sideToMoveKnown || typedSide != sideToMove { sideToMove = typedSide }
         // Typed rights can only take away from what the placement allows: a
         // right without its king and rook at home is not just meaningless,
         // Stockfish reads past the board looking for the rook.
@@ -248,6 +266,20 @@ final class AppModel: ObservableObject {
     }
 
     var canAnalyze: Bool { validationIssues.isEmpty }
+
+    /// The side that must be to move because its king is in check, where
+    /// exactly one king is; nil otherwise.
+    static func forcedSideToMove(_ pieces: [Square: Piece]) -> Piece.Color? {
+        let blackInCheck = PositionValidator.validate(pieces: pieces, sideToMove: .white)
+            .contains(.sideNotToMoveInCheck)
+        let whiteInCheck = PositionValidator.validate(pieces: pieces, sideToMove: .black)
+            .contains(.sideNotToMoveInCheck)
+        switch (whiteInCheck, blackInCheck) {
+        case (true, false): return .white
+        case (false, true): return .black
+        default: return nil
+        }
+    }
 
     var fen: String {
         FENBuilder.fen(pieces: pieces, sideToMove: sideToMove, castling: castling)

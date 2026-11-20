@@ -26,15 +26,21 @@ struct PositionPanel: View {
             }
 
             HStack(alignment: .top, spacing: 12) {
-                labeled("To move") {
-                    InkSegmentedControl(
+                labeled(
+                    model.sideToMoveKnown ? "To move" : "Who is to move?",
+                    isQuestion: !model.sideToMoveKnown
+                ) {
+                    // Neither side chosen until someone says: a photo does
+                    // not show who is to move.
+                    InkSegmentedControl<Piece.Color?>(
                         segments: [
-                            .init(value: Piece.Color.white, title: "White"),
-                            .init(value: Piece.Color.black, title: "Black"),
+                            .init(value: .white, title: "White"),
+                            .init(value: .black, title: "Black"),
                         ],
-                        selection: model.sideToMove,
-                        onSelect: {
-                            model.sideToMove = $0
+                        selection: model.sideToMoveKnown ? model.sideToMove : nil,
+                        onSelect: { side in
+                            guard let side else { return }
+                            model.sideToMove = side
                             fenDraft = nil
                         }
                     )
@@ -96,13 +102,16 @@ struct PositionPanel: View {
         }
     }
 
+    /// A control under its eyebrow label; a question (who is to move) has
+    /// its label in the accent colour.
     private func labeled<Content: View>(
-        _ label: String, @ViewBuilder content: () -> Content
+        _ label: String, isQuestion: Bool = false, @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .eyebrow()
+                .eyebrow(color: isQuestion ? Theme.accent : Theme.muted)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)

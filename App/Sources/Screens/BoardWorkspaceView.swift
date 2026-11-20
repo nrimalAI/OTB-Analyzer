@@ -14,6 +14,8 @@ struct BoardWorkspaceView: View {
     @State private var selectedSquare: Square?
     @State private var toast: String?
     @State private var toastTask: Task<Void, Never>?
+    /// Asking who is to move before analysing a scan that nobody has said.
+    @State private var askingSideToMove = false
 
     private var isAnalysis: Bool { model.tab == .analysis }
 
@@ -71,6 +73,18 @@ struct BoardWorkspaceView: View {
         .onDisappear {
             session.stop()
         }
+        .confirmationDialog("Who is to move?", isPresented: $askingSideToMove, titleVisibility: .visible) {
+            Button("White to move") { analyze(with: .white) }
+            Button("Black to move") { analyze(with: .black) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A photo doesn\u{2019}t show whose turn it is.")
+        }
+    }
+
+    private func analyze(with side: Piece.Color) {
+        model.sideToMove = side
+        show(.analysis)
     }
 
     // MARK: - Top bar
@@ -174,6 +188,7 @@ struct BoardWorkspaceView: View {
         let problems = model.problems
         if problems.count == 1 { return problems[0].title + "." }
         if problems.count > 1 { return "\(problems.count) problems to fix before analysis" }
+        if !model.sideToMoveKnown { return "Who is to move? Choose below." }
         let uncertain = model.uncertainSquares.count
         if uncertain > 0 {
             return "\(uncertain) \(uncertain == 1 ? "square" : "squares") to double-check"
@@ -184,6 +199,7 @@ struct BoardWorkspaceView: View {
     private var subtitleIsWarning: Bool {
         if isAnalysis { return !AnalysisEngine.evaluationNetworksArePresent }
         return !model.validationIssues.isEmpty || !model.uncertainSquares.isEmpty
+            || !model.sideToMoveKnown
     }
 
     // MARK: - Board
@@ -290,13 +306,17 @@ struct BoardWorkspaceView: View {
     private func show(_ tab: BoardTab) {
         if tab == .analysis {
             guard model.canAnalyze else { return }
+            guard model.sideToMoveKnown else {
+                askingSideToMove = true
+                return
+            }
             session.start(fen: model.fen, depth: model.depth)
         }
         model.tab = tab
     }
 
     private func startAnalysis() {
-        guard model.canAnalyze else {
+        guard model.canAnalyze, model.sideToMoveKnown else {
             model.tab = .position
             return
         }

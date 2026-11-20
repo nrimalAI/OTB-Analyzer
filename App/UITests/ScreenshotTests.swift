@@ -55,6 +55,26 @@ final class ScreenshotTests: XCTestCase {
         snap("corrections-5-quarter-turn")
     }
 
+    /// After a scan nobody has said who is to move: the panel asks, and
+    /// Analyze asks again before the engine starts.
+    func testSideToMove() {
+        let app = launch("scanned")
+        tap(app.buttons["Show"], "Show")
+        tap(app.buttons["Make it a white king"], "king suggestion")
+        tap(square("d4", in: app), "d4")
+        tap(app.buttons["Make it a white pawn"], "pawn suggestion")
+        snap("side-1-question")
+
+        tap(app.buttons["Analyze position"], "Analyze")
+        XCTAssertTrue(app.buttons["Black to move"].waitForExistence(timeout: 5))
+        snap("side-2-asked")
+
+        app.buttons["Black to move"].tap()
+        // Let the engine report a line or two.
+        _ = app.staticTexts["Analyzing\u{2026}"].waitForNonExistence(timeout: 20)
+        snap("side-3-analysis")
+    }
+
     func testHome() {
         let app = launch("")
         XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))
