@@ -68,7 +68,10 @@ enum CorrectionSuggestions {
                 if current.isEmpty {
                     score = 1
                 } else if score >= Self.plausible,
-                          current.color == candidate.color || current.kind == .king {
+                          current.color == candidate.color
+                            || (current.kind == .king && hasKing(current.color, in: others)) {
+                    // (The other side's king only where that side has another:
+                    // its only king is not taken from it.)
                     score += 2
                 }
             }
