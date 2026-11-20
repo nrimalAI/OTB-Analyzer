@@ -65,11 +65,17 @@ final class ScreenshotTests: XCTestCase {
         tap(app.buttons["Make it a white pawn"], "pawn suggestion")
         snap("side-1-question")
 
-        tap(app.buttons["Analyze position"], "Analyze")
-        XCTAssertTrue(app.buttons["Black to move"].waitForExistence(timeout: 5))
+        // The Analysis tab asks in a dialog; its keys sit beside the bottom ones.
+        tap(app.buttons["Analysis"], "Analysis tab")
+        let blackKeys = app.buttons.matching(NSPredicate(format: "label == 'Black to move'"))
+        let deadline = Date().addingTimeInterval(5)
+        while blackKeys.count < 2, Date() < deadline { usleep(200_000) }
+        XCTAssertEqual(blackKeys.count, 2, "no dialog")
         snap("side-2-asked")
+        tap(app.buttons["Cancel"], "Cancel")
 
-        app.buttons["Black to move"].tap()
+        // The keys at the bottom answer and analyse in one tap.
+        tap(app.buttons["Black to move"], "Black to move")
         // Let the engine report a line or two.
         _ = app.staticTexts["Analyzing\u{2026}"].waitForNonExistence(timeout: 20)
         snap("side-3-analysis")
