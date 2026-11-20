@@ -17,6 +17,7 @@ struct BoardWorkspaceView: View {
     /// Asking who is to move before analysing a scan that nobody has said.
     @State private var askingSideToMove = false
     @State private var showingPhoto = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var isAnalysis: Bool { model.tab == .analysis }
 
@@ -87,6 +88,8 @@ struct BoardWorkspaceView: View {
         } message: {
             Text("A photo doesn\u{2019}t show whose turn it is.")
         }
+        // Last, so that the toast and the photo sheet are held to it too.
+        .dynamicTypeSize(...TypeLimit.board)
     }
 
     private func analyze(with side: Piece.Color) {
@@ -161,18 +164,23 @@ struct BoardWorkspaceView: View {
     private var heading: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
+                // At least the design's heights, so that the board does not
+                // jump as the words change; taller with larger text.
                 Text(title)
                     .serif(30)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .frame(height: 35)
+                    .frame(minHeight: 35)
                     .accessibilityAddTraits(.isHeader)
+                // One line that shrinks at the standard sizes, as designed;
+                // two kept lines above them, so that the board stays put
+                // while the engine's words change length.
                 Text(subtitle)
                     .sans(13, weight: .medium)
                     .foregroundStyle(subtitleIsWarning ? Theme.accent : Theme.muted)
-                    .lineLimit(1)
+                    .lineLimit(typeSize > .large ? 2 : 1, reservesSpace: true)
                     .minimumScaleFactor(0.75)
-                    .frame(height: 20)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -263,6 +271,7 @@ struct BoardWorkspaceView: View {
                 flagged: isAnalysis ? [] : model.uncertainSquares.union(model.problemSquares),
                 highlighted: lastMoveSquares,
                 arrows: nextMoveArrows,
+                squareHint: "Selects the square",
                 onTap: isAnalysis ? nil : { square in
                     selectedSquare = selectedSquare == square ? nil : square
                 }
@@ -333,8 +342,13 @@ struct BoardWorkspaceView: View {
                                 .eyebrow(color: Theme.accent)
                                 .accessibilityAddTraits(.isHeader)
                             HStack(spacing: 8) {
-                                Button("White to move") { analyze(with: .white) }
-                                Button("Black to move") { analyze(with: .black) }
+                                // One line each, so that the pair stays level.
+                                Button { analyze(with: .white) } label: {
+                                    Text("White to move").lineLimit(1).minimumScaleFactor(0.7)
+                                }
+                                Button { analyze(with: .black) } label: {
+                                    Text("Black to move").lineLimit(1).minimumScaleFactor(0.7)
+                                }
                             }
                         }
                     }
@@ -451,7 +465,7 @@ private struct LineStepper: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: session.stepToStart) {
+            Button(action: { step(session.stepToStart) }) {
                 Text("\u{00AB}").sans(20, weight: .medium)
             }
             .buttonStyle(OutlineButtonStyle(cornerRadius: 10))
@@ -459,7 +473,7 @@ private struct LineStepper: View {
             .disabled(ply == 0)
             .accessibilityLabel("Back to start")
 
-            Button(action: session.stepBack) {
+            Button(action: { step(session.stepBack) }) {
                 Text("\u{2039}").sans(22, weight: .medium)
             }
             .buttonStyle(OutlineButtonStyle(cornerRadius: 10))
@@ -478,7 +492,7 @@ private struct LineStepper: View {
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
 
-            Button(action: session.stepForward) {
+            Button(action: { step(session.stepForward) }) {
                 Text("\u{203A}")
                     .sans(22, weight: .medium)
                     .foregroundStyle(Theme.paper)
@@ -489,6 +503,17 @@ private struct LineStepper: View {
             .disabled(ply >= count)
             .accessibilityLabel("Next move")
         }
+    }
+
+    /// Steps, and tells VoiceOver where along the line that left the
+    /// board: focus stays on the key, so nothing else would say it.
+    private func step(_ action: () -> Void) {
+        action()
+        let played = ply == 0
+            ? "Start of the line"
+            : "After " + EvalFormat.moveNumber(at: ply - 1, sideToMove: sideToMove, always: true)
+                .replacingOccurrences(of: "\u{00A0}", with: " ") + line.moves[ply - 1]
+        AccessibilityNotification.Announcement(played).post()
     }
 
     private var nextLabel: String {
@@ -573,7 +598,7 @@ private struct PhotoSheet: View {
                 Button("Done") { dismiss() }
                     .sans(16, weight: .medium)
                     .buttonStyle(TextButtonStyle())
-                    .frame(height: 44)
+                    .frame(minHeight: 44)
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)

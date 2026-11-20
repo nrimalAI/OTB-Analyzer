@@ -31,6 +31,11 @@ struct HomeView: View {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
+                                // The context menu is hard to reach with VoiceOver.
+                                .accessibilityAction(named: "Delete") {
+                                    history.delete(item)
+                                    AccessibilityNotification.Announcement("Position deleted").post()
+                                }
                             Rule()
                         }
                     }
@@ -46,7 +51,9 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showAbout) {
             AboutView()
+                .dynamicTypeSize(...TypeLimit.text)
         }
+        .dynamicTypeSize(...TypeLimit.text)
     }
 
     private var header: some View {
@@ -70,6 +77,9 @@ struct HomeView: View {
             Text("Positions")
                 .serif(44)
                 .tracking(-0.44)
+                // One word: smaller rather than broken at the largest sizes.
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .accessibilityAddTraits(.isHeader)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -102,8 +112,9 @@ struct HomeView: View {
                 Text("Set up a position by hand")
                     .sans(15, weight: .medium)
                     .underline()
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 46)
+                    .frame(minHeight: 46)
             }
             .buttonStyle(TextButtonStyle())
         }
@@ -120,48 +131,77 @@ private struct SavedPositionRow: View {
     let photoURL: URL?
     let open: () -> Void
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 14) {
-                BoardView(
-                    pieces: item.pieces,
-                    showsCoordinates: false,
-                    borderWidth: 1
-                )
-                .frame(width: 72, height: 72)
-                .accessibilityHidden(true)
-
-                if let photoURL {
-                    PhotoThumbnail(url: photoURL)
-                        .frame(width: 54, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .padding(.leading, -6)
-                        .accessibilityHidden(true)
+            Group {
+                // At the accessibility sizes the words go under the pictures,
+                // where they have the whole width.
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 14) {
+                            pictures
+                            Spacer(minLength: 0)
+                            evaluation
+                        }
+                        words
+                    }
+                } else {
+                    HStack(spacing: 14) {
+                        pictures
+                        words
+                        evaluation
+                    }
                 }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(Self.dateLabel(for: item.date))
-                        .eyebrow(tracking: 0.66)
-                    Text(EvalFormat.verdict(item.score))
-                        .serif(21)
-                        .lineLimit(2)
-                        .padding(.top, 3)
-                        .padding(.bottom, 2)
-                    Text(subtitle)
-                        .sans(13)
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(EvalFormat.label(item.score))
-                    .mono(15, weight: .medium)
             }
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(TextButtonStyle())
         .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var pictures: some View {
+        HStack(spacing: 8) {
+            BoardView(
+                pieces: item.pieces,
+                showsCoordinates: false,
+                borderWidth: 1
+            )
+            .frame(width: 72, height: 72)
+            .accessibilityHidden(true)
+
+            if let photoURL {
+                PhotoThumbnail(url: photoURL)
+                    .frame(width: 54, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var words: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(Self.dateLabel(for: item.date))
+                .eyebrow(tracking: 0.66)
+            Text(EvalFormat.verdict(item.score))
+                .serif(21)
+                .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                .padding(.top, 3)
+                .padding(.bottom, 2)
+            Text(subtitle)
+                .sans(13)
+                .foregroundStyle(Theme.muted)
+                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var evaluation: some View {
+        Text(EvalFormat.label(item.score))
+            .mono(15, weight: .medium)
     }
 
     private var subtitle: String {

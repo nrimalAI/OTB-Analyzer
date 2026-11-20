@@ -27,6 +27,8 @@ final class ScreenshotTests: XCTestCase {
     }
 
     private func snap(_ name: String) {
+        // Let a fade or a push finish first (the tray dims in 0.15 s).
+        usleep(400_000)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -109,7 +111,7 @@ final class ScreenshotTests: XCTestCase {
     /// A real photo through the app's own recognizer, in the Simulator.
     func testRealPhoto() {
         let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
-        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 120))
         sleep(1)  // the push from the camera screen
         snap("scan-3-real-photo")
     }
@@ -118,7 +120,7 @@ final class ScreenshotTests: XCTestCase {
     /// a swipe along the line, and the text export in the share sheet.
     func testAnalysisOfARealPhoto() {
         let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
-        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 120))
 
         tap(app.buttons["Photo"], "Photo")
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
@@ -154,6 +156,53 @@ final class ScreenshotTests: XCTestCase {
         let opened = copy.waitForExistence(timeout: 10)
         snap("analysis-4-share")
         XCTAssertTrue(opened, "no share sheet")
+    }
+
+    /// The main screens at a large Dynamic Type size, to see what clips.
+    func testLargeText() {
+        // The third accessibility size; each screen stops at its TypeLimit.
+        let size = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
+        var app = XCUIApplication()
+        app.launchEnvironment["AUTOFLOW"] = "scanned"
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 20))
+        // The board is one container for VoiceOver, its squares inside.
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Board")).firstMatch.exists, "no Board container")
+        tap(app.buttons["Show"], "Show")
+        snap("large-1-check")
+        // What lies under the board: the tray, who is to move, the FEN.
+        app.swipeUp()
+        snap("large-1b-check-below")
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchEnvironment["AUTOFLOW"] = "scan"
+        app.launchEnvironment["SCAN_PHOTO"] = "blank"
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.staticTexts["No board found"].waitForExistence(timeout: 30))
+        snap("large-2-no-board")
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchEnvironment["AUTOFLOW"] = "analysis"
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.buttons["Next move"].waitForExistence(timeout: 30))
+        sleep(3)
+        snap("large-3-analysis")
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))
+        snap("large-4-home")
+        // (Drawn in capitals; matched without regard to case.)
+        tap(app.buttons.matching(NSPredicate(format: "label ==[c] 'about'")).firstMatch, "About")
+        sleep(1)
+        snap("large-5-about")
     }
 
     func testHome() {

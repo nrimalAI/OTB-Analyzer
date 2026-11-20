@@ -39,6 +39,7 @@ struct ScanView: View {
         }
         .background(Theme.darkroom.ignoresSafeArea())
         .foregroundStyle(Theme.paper)
+        .dynamicTypeSize(...TypeLimit.camera)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             photo = nil
@@ -146,6 +147,8 @@ struct ScanView: View {
             PhotosPicker(selection: $pickedItem, matching: .images) {
                 Text("Photos")
                     .sans(15, weight: .medium)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .frame(width: 76, height: 44, alignment: .leading)
             }
             .buttonStyle(TextButtonStyle())
@@ -189,6 +192,8 @@ struct ScanView: View {
             } label: {
                 Text(camera.isTorchOn ? "Light on" : "Light")
                     .sans(15, weight: .medium)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .frame(width: 76, height: 44, alignment: .trailing)
             }
             .buttonStyle(TextButtonStyle())

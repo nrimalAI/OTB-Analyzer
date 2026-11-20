@@ -11,8 +11,12 @@ struct PrimaryButtonStyle: ButtonStyle {
         configuration.label
             .sans(17, weight: .semibold)
             .foregroundStyle(Theme.paper)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
-            .frame(height: height)
+            // At least the design's height; taller where large text needs it.
+            .frame(minHeight: height)
             .background(Theme.ink, in: RoundedRectangle(cornerRadius: 10))
             .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.35)
             .contentShape(Rectangle())
