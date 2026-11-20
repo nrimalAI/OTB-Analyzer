@@ -45,7 +45,7 @@ struct ScanView: View {
             model.scanFailure = nil
             if hasCamera {
                 camera.requestPermissionAndStart()
-                tilt.start()
+                if camera.permission == .authorized { tilt.start() }
             }
             #if DEBUG
             if let image = DebugPhoto.take() {
@@ -65,9 +65,16 @@ struct ScanView: View {
         .onChange(of: scenePhase) { _, phase in
             // iOS switches the torch off in the background.
             if phase == .active { camera.refreshTorchState() }
+            if phase == .active, camera.permission == .authorized { tilt.start() } else { tilt.stop() }
+        }
+        .onChange(of: camera.permission) { _, permission in
+            if permission == .authorized { tilt.start() }
         }
         .onChange(of: pickedItem) { _, item in
             guard let item else { return }
+            // A new photo replaces the last one's failure at once.
+            model.scanFailure = nil
+            photo = nil
             isLoadingPick = true
             readTask = Task {
                 defer {
@@ -109,7 +116,9 @@ struct ScanView: View {
 
     private func read(_ image: UIImage) async {
         photo = image
-        await model.startFromPhoto(image, minimumDuration: Self.readingHold)
+        // A cancelled read still running: nothing started, so do not sit on
+        // "Reading the board".
+        if !(await model.startFromPhoto(image, minimumDuration: Self.readingHold)) { photo = nil }
     }
 
     // MARK: - Bars
@@ -208,7 +217,7 @@ struct ScanView: View {
                     if isReading {
                         ScanningGrid()
                     } else if !hasFailed {
-                        FramingGrid()
+                        FramingGuide()
                     }
                     if !hasFailed {
                         CornerBrackets(armLength: 30)
@@ -235,6 +244,7 @@ struct ScanView: View {
                 if let failure = model.scanFailure {
                     FailureCard(
                         failure: failure,
+                        retakeLabel: hasCamera && camera.permission == .authorized ? "Retake" : "Try again",
                         retake: retake,
                         setUpByHand: setUpByHand
                     )
@@ -308,14 +318,20 @@ struct ScanView: View {
 /// itself, with the way back to the camera first.
 private struct FailureCard: View {
     let failure: ScanFailure
+    /// "Retake" with a camera, "Try again" where only a photo can be chosen.
+    let retakeLabel: String
     let retake: () -> Void
     let setUpByHand: () -> Void
+
+    /// VoiceOver moves to the card when it appears, not only hears its title.
+    @AccessibilityFocusState private var titleFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(failure.title)
                 .serif(26)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($titleFocused)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(failure.advice, id: \.self) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -328,29 +344,11 @@ private struct FailureCard: View {
                     .accessibilityElement(children: .combine)
                 }
             }
-            HStack(spacing: 10) {
-                if failure.retakeHelps {
-                    Button(action: retake) {
-                        Text("Retake")
-                            .sans(16, weight: .semibold)
-                            .foregroundStyle(Theme.darkroom)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(Theme.paper, in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(TextButtonStyle())
-                }
-                Button(action: setUpByHand) {
-                    Text("Set up by hand")
-                        .sans(16, weight: .medium)
-                        .foregroundStyle(Theme.paper)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(Theme.paper.opacity(0.6), lineWidth: Theme.ruleWidth))
-                }
-                .buttonStyle(TextButtonStyle())
+            // Side by side, or one above the other where large text does
+            // not leave room.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { buttons }
+                VStack(spacing: 10) { buttons }
             }
             .padding(.top, 4)
         }
@@ -361,25 +359,52 @@ private struct FailureCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(Theme.paper.opacity(0.18), lineWidth: 1))
         .padding(.horizontal, 16)
+        .onAppear { titleFocused = true }
+    }
+
+    @ViewBuilder
+    private var buttons: some View {
+        if failure.retakeHelps {
+            Button(action: retake) {
+                Text(retakeLabel)
+                    .sans(16, weight: .semibold)
+                    .foregroundStyle(Theme.darkroom)
+                    .fixedSize()
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Theme.paper, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(TextButtonStyle())
+        }
+        Button(action: setUpByHand) {
+            Text("Set up by hand")
+                .sans(16, weight: .medium)
+                .foregroundStyle(Theme.paper)
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Theme.paper.opacity(0.6), lineWidth: Theme.ruleWidth))
+        }
+        .buttonStyle(TextButtonStyle())
     }
 }
 
-/// A faint 8×8 grid inside the brackets while framing: where the squares of
-/// the board should fall.
-private struct FramingGrid: View {
+/// A faint board in perspective inside the brackets while framing: the
+/// board as it looks from a player's seat, the view the models read best
+/// (`PerspectiveGrid`), not a square seen from straight above.
+private struct FramingGuide: View {
     var body: some View {
         GeometryReader { geo in
+            let grid = PerspectiveGrid(in: CGRect(origin: .zero, size: geo.size))
             Path { path in
-                for i in 1..<8 {
-                    let x = geo.size.width * CGFloat(i) / 8
-                    let y = geo.size.height * CGFloat(i) / 8
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: geo.size.height))
-                    path.move(to: CGPoint(x: 0, y: y))
-                    path.addLine(to: CGPoint(x: geo.size.width, y: y))
+                for line in grid.lines {
+                    path.move(to: line.from)
+                    path.addLine(to: line.to)
                 }
             }
-            .stroke(Theme.paper.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
+            .stroke(Theme.paper.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
         }
     }
 }

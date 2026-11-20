@@ -105,6 +105,7 @@ final class ScreenshotTests: XCTestCase {
     func testRealPhoto() {
         let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
         XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+        sleep(1)  // the push from the camera screen
         snap("scan-3-real-photo")
     }
 

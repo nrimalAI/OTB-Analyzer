@@ -100,11 +100,14 @@ final class AppModel: ObservableObject {
     /// Reads the board in a photo and moves on to checking the position.
     /// `minimumDuration` keeps the "reading" state on screen long enough to
     /// register when recognition itself is near-instant.
-    func startFromPhoto(_ image: UIImage, minimumDuration: Duration = .zero) async {
-        guard !isRecognizing else { return }
+    /// Returns false when it could not start because another read is still
+    /// running (one that was cancelled and has not finished yet).
+    @discardableResult
+    func startFromPhoto(_ image: UIImage, minimumDuration: Duration = .zero) async -> Bool {
+        guard !isRecognizing else { return false }
         guard let cgImage = image.normalizedUprightCGImage() else {
             scanFailure = .unreadablePhoto
-            return
+            return true
         }
         scanFailure = nil
         isRecognizing = true
@@ -117,13 +120,14 @@ final class AppModel: ObservableObject {
             let jpeg = await kept
             let remaining = minimumDuration - (ContinuousClock.now - started)
             if remaining > .zero { try? await Task.sleep(for: remaining) }
-            guard isStillScanning else { return }
+            guard isStillScanning else { return true }
             load(result: result)
             setPhoto(jpeg)
             path.append(.board)
         } catch {
             if isStillScanning { scanFailure = ScanFailure(error) }
         }
+        return true
     }
 
     /// False once the user has cancelled or left the scan screen; a read
