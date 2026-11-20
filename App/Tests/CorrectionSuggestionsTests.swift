@@ -25,6 +25,15 @@ import Testing
         #expect(CorrectionSuggestions.alternatives(for: .d1, in: pieces).first == .piece(.king, .white))
     }
 
+    @Test func theOtherSidesQueenIsNotAskedToBeTheMissingKing() throws {
+        // White has no king; Black's queen is not White's king read wrong.
+        let pieces = try board("4k3/8/8/8/3q4/8/8/3Q4")
+        #expect(CorrectionSuggestions.alternatives(for: .d4, in: pieces).first != .piece(.king, .white))
+        // Black's second king is: that is a side misread.
+        let kings = try board("4k3/8/8/8/3k4/8/8/3Q4")
+        #expect(CorrectionSuggestions.alternatives(for: .d4, in: kings).first == .piece(.king, .white))
+    }
+
     @Test func aQueenIsOfferedTheKingAndOtherTallPieces() throws {
         let pieces = try board("4k3/8/8/8/3Q4/8/8/4K3")
         let choices = CorrectionSuggestions.alternatives(for: .d4, in: pieces)

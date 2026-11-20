@@ -27,10 +27,22 @@ import Testing
         #expect(problem.fixLabel == "Show")
     }
 
-    @Test func aMissingKingWithoutAQueenHasNoFix() throws {
-        let found = try problems("4k3/8/8/8/8/8/8/2R5")
+    @Test func aMissingKingWithNothingLikeAKingHasNoFix() throws {
+        let found = try problems("4k3/8/8/8/8/8/8/2N5")
         #expect(found.first?.fix == nil)
         #expect(found.first?.fixLabel == nil)
+    }
+
+    @Test func aMissingKingPointsAtARookToo() throws {
+        let found = try problems("4k3/8/8/8/8/8/8/2R5")
+        #expect(found.first?.fix == .select(.c1))
+    }
+
+    @Test func bothKingsReadAsWhite() throws {
+        // Black's king on e8 read as White's: two white kings, no black one.
+        let found = try problems("4K3/8/8/8/8/8/8/4K3", confidence: [.e8: 0.6])
+        #expect(found.map(\.title) == ["Black has no king", "White has 2 kings"])
+        #expect(found.allSatisfy { $0.fix == .select(.e8) })
     }
 
     @Test func twoKingsAreCounted() throws {
@@ -61,6 +73,22 @@ import Testing
         #expect(problem.title == "Black is in check")
         #expect(problem.fix == .setSideToMove(.black))
         #expect(problem.fixLabel == "Black to move")
+    }
+
+    @Test func aCheckFromAnUnsurePieceShowsThatPiece() throws {
+        // The "rook" on e1 is unsure: it may be misread, so it is shown
+        // rather than the side to move switched.
+        let found = try problems("4k3/8/8/8/8/8/8/4RK2", toMove: .white, confidence: [.e1: 0.5])
+        let problem = try #require(found.first)
+        #expect(problem.title == "Black is in check")
+        #expect(problem.fix == .select(.e1))
+        #expect(PositionProblems.checkers(
+            givingCheckAs: .white, in: try #require(FENBuilder.pieces(fromPlacement: "4k3/8/8/8/8/8/8/4RK2"))) == [.e1])
+    }
+
+    @Test func pawnsOnTheBackRankComeInSquareOrder() throws {
+        let found = try problems("1P2k1P1/8/8/8/8/8/8/1p2K1p1")
+        #expect(found.map(\.title) == ["Pawn on b1", "Pawn on g1", "Pawn on b8", "Pawn on g8"])
     }
 
     @Test func bothKingsInCheckHaveNoSideToOffer() throws {
