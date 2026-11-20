@@ -101,7 +101,9 @@ final class AppModel: ObservableObject {
         path = [.board]
     }
 
-    private func load(result: RecognitionResult) {
+    /// Takes a recognizer's reading as the position to check. Internal for
+    /// tests and the demo scan.
+    func load(result: RecognitionResult) {
         pieces = result.pieces.mapValues(\.piece)
         confidence = result.pieces.mapValues(\.confidence)
         sideToMove = .white
@@ -151,6 +153,23 @@ final class AppModel: ObservableObject {
         pieces = turned
         confidence = Dictionary(
             uniqueKeysWithValues: confidence.map { (BoardGeometry.rotated($0.key), $0.value) })
+        castling = .inferred(from: pieces)
+    }
+
+    /// Turns the position a quarter clockwise (seen from White's side), for
+    /// a photo whose board was read a quarter turn off: the pieces then
+    /// stand in files where they should stand in ranks. Four turns are none.
+    func turnQuarter() {
+        var turned: [Square: Piece] = [:]
+        for (square, piece) in pieces {
+            let target = BoardGeometry.quarterTurned(square)
+            var moved = piece
+            moved.square = target
+            turned[target] = moved
+        }
+        pieces = turned
+        confidence = Dictionary(
+            uniqueKeysWithValues: confidence.map { (BoardGeometry.quarterTurned($0.key), $0.value) })
         castling = .inferred(from: pieces)
     }
 
@@ -208,6 +227,24 @@ final class AppModel: ObservableObject {
     /// Squares the recognizer wasn't sure about and the user hasn't confirmed.
     var uncertainSquares: Set<Square> {
         Set(confidence.filter { $0.value < Self.lowConfidenceThreshold }.keys)
+    }
+
+    /// The validation issues in words, each with the step most likely to
+    /// fix it.
+    var problems: [PositionProblem] {
+        PositionProblems.explain(
+            validationIssues, pieces: pieces, sideToMove: sideToMove, confidence: confidence)
+    }
+
+    /// Squares worth a second look: unsure readings and squares a problem
+    /// points at.
+    func isDoubtful(_ square: Square) -> Bool {
+        uncertainSquares.contains(square) || problemSquares.contains(square)
+    }
+
+    /// Likely replacements for what stands on `square`, the likeliest first.
+    func suggestions(for square: Square) -> [PieceChoice] {
+        CorrectionSuggestions.alternatives(for: square, in: pieces)
     }
 
     var canAnalyze: Bool { validationIssues.isEmpty }

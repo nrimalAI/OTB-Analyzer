@@ -31,6 +31,10 @@ targets:
       - package: ChessAnalysis
       - package: ChessBoardUI
       - package: ChessKit
+    scheme:
+      testTargets:
+        - ChessAnalyzerTests
+        - ChessAnalyzerUITests
     info:
       path: App/Info.plist
       properties:
@@ -57,5 +61,39 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 6F2F8RV4WM
+
+  # The app's own logic (App/Sources/Model, AppModel), with Swift Testing,
+  # hosted in the app.
+  ChessAnalyzerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: App/Tests
+    dependencies:
+      - target: ChessAnalyzer
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 6F2F8RV4WM
+
+  # Walks the screens and attaches screenshots for CI to export
+  # (.github/workflows/app.yml); a person looks at them.
+  ChessAnalyzerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/UITests
+    dependencies:
+      - target: ChessAnalyzer
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 6F2F8RV4WM
