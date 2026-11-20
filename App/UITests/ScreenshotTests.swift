@@ -149,8 +149,11 @@ final class ScreenshotTests: XCTestCase {
 
         tap(app.buttons["Share"], "Share")
         // The system share sheet, with the text taken when Share was pressed.
-        XCTAssertTrue(app.buttons["Copy"].waitForExistence(timeout: 10), "no share sheet")
+        // (Its rows are not always buttons: look for "Copy" in any element.)
+        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Copy'")).firstMatch
+        let opened = copy.waitForExistence(timeout: 10)
         snap("analysis-4-share")
+        XCTAssertTrue(opened, "no share sheet")
     }
 
     func testHome() {
