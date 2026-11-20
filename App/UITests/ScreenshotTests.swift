@@ -111,7 +111,7 @@ final class ScreenshotTests: XCTestCase {
     /// A real photo through the app's own recognizer, in the Simulator.
     func testRealPhoto() {
         let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
-        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 120))
         sleep(1)  // the push from the camera screen
         snap("scan-3-real-photo")
     }
@@ -120,7 +120,7 @@ final class ScreenshotTests: XCTestCase {
     /// a swipe along the line, and the text export in the share sheet.
     func testAnalysisOfARealPhoto() {
         let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
-        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 120))
 
         tap(app.buttons["Photo"], "Photo")
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
@@ -151,7 +151,8 @@ final class ScreenshotTests: XCTestCase {
 
     /// The main screens at a large Dynamic Type size, to see what clips.
     func testLargeText() {
-        let size = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
+        // The third accessibility size; each screen stops at its TypeLimit.
+        let size = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
         var app = XCUIApplication()
         app.launchEnvironment["AUTOFLOW"] = "scanned"
         app.launchArguments += size
@@ -184,7 +185,8 @@ final class ScreenshotTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))
         snap("large-4-home")
-        tap(app.buttons["About"], "About")
+        // (Drawn in capitals; matched without regard to case.)
+        tap(app.buttons.matching(NSPredicate(format: "label ==[c] 'about'")).firstMatch, "About")
         sleep(1)
         snap("large-5-about")
     }

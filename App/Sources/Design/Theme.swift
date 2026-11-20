@@ -161,6 +161,18 @@ extension View {
     }
 }
 
+/// How far each kind of screen follows Dynamic Type.
+enum TypeLimit {
+    /// Lists and pages of text (home, About, sheets): into the
+    /// accessibility sizes, with layouts that reflow.
+    static let text = DynamicTypeSize.accessibility3
+    /// The camera screen: a few labels around the viewfinder.
+    static let camera = DynamicTypeSize.accessibility1
+    /// The board's screens: the board, the tray and rows of controls share
+    /// the width, so they stop at the largest of the standard sizes.
+    static let board = DynamicTypeSize.xxxLarge
+}
+
 extension Theme {
     /// Hands the app's typefaces to the board package, which otherwise
     /// draws its few labels in system fonts.

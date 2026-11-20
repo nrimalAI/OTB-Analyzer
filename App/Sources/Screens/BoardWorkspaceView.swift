@@ -44,6 +44,7 @@ struct BoardWorkspaceView: View {
         }
         .background(Theme.paper.ignoresSafeArea())
         .foregroundStyle(Theme.ink)
+        .dynamicTypeSize(...TypeLimit.board)
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottom) {
             if let toast {
@@ -161,18 +162,21 @@ struct BoardWorkspaceView: View {
     private var heading: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
+                // At least the design's heights, so that the board does not
+                // jump as the words change; taller with larger text.
                 Text(title)
                     .serif(30)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .frame(height: 35)
+                    .frame(minHeight: 35)
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
                     .sans(13, weight: .medium)
                     .foregroundStyle(subtitleIsWarning ? Theme.accent : Theme.muted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .frame(height: 20)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 20, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

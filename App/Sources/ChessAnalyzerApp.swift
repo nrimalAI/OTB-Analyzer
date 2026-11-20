@@ -27,9 +27,9 @@ struct ChessAnalyzerApp: App {
             // The app is paper-and-ink everywhere except the scan screen,
             // which is dark like a camera; this also sets the status bar.
             .preferredColorScheme(model.path.last == .scan ? .dark : .light)
-            // Layouts are dense (board + tray + controls); follow Dynamic
-            // Type up to a point rather than letting rows collide.
-            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+            // How far Dynamic Type goes is set per screen (`TypeLimit`):
+            // the lists and sheets of text follow it into the accessibility
+            // sizes; the board's screens, dense with controls, stop earlier.
             .task {
                 if EngineSelfTest.isRequested {
                     await EngineSelfTest.run()
