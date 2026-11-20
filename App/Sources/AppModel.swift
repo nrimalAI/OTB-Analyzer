@@ -92,8 +92,10 @@ final class AppModel: ObservableObject {
     /// Positions the engine has analyzed, newest first.
     let history: HistoryStore
 
-    init(history: HistoryStore = HistoryStore()) {
-        self.history = history
+    /// `history`: a store for tests; the app's own by default. (Made here,
+    /// on the main actor, not as a default argument, which is not.)
+    init(history: HistoryStore? = nil) {
+        self.history = history ?? HistoryStore()
     }
 
     /// Detections below this are flagged for the user to double-check.
