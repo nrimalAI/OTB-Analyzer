@@ -72,7 +72,11 @@ final class ScreenshotTests: XCTestCase {
         while blackKeys.count < 2, Date() < deadline { usleep(200_000) }
         XCTAssertEqual(blackKeys.count, 2, "no dialog")
         snap("side-2-asked")
-        tap(app.buttons["Cancel"], "Cancel")
+        // Dismiss it by tapping outside (newer iOS shows it with no Cancel key).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        let closed = Date().addingTimeInterval(5)
+        while blackKeys.count > 1, Date() < closed { usleep(200_000) }
+        XCTAssertEqual(blackKeys.count, 1, "the dialog did not close")
 
         // The keys at the bottom answer and analyse in one tap.
         tap(app.buttons["Black to move"], "Black to move")
