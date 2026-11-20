@@ -40,7 +40,8 @@ struct PieceChoice: Hashable {
 /// pawn read as black), a king read as a queen, a queen read as a rook or a
 /// bishop, a pawn read as a taller piece and the other way round, and a pawn
 /// seen where there is none. Then the rules of chess move a choice up or
-/// out: a side without a king gets its king first, and nothing is offered
+/// out: a side without a king gets its king first where a king could have
+/// been misread (a queen, a rook, the other king), and nothing is offered
 /// that would make the position impossible by itself (a second king, a pawn
 /// on the first or last rank, a ninth pawn, a seventeenth piece).
 enum CorrectionSuggestions {
@@ -58,14 +59,26 @@ enum CorrectionSuggestions {
         for (order, candidate) in candidates.enumerated() where candidate != current {
             guard isPossible(candidate, on: square, besides: others) else { continue }
             var score = likelihood(of: candidate, readAs: current)
-            if let kind = candidate.kind, kind == .king, !hasKing(candidate.color, in: others) {
-                score += 2  // A side without a king: its king is the likeliest fix.
+            if candidate.kind == .king, !hasKing(candidate.color, in: others) {
+                // A side without a king: its king is the likeliest fix where
+                // a king could have been misread (a queen, the other king, a
+                // rook), and the one thing to offer on an empty square, where
+                // it may have been missed. A pawn or a knight is not asked to
+                // be the king.
+                if current.isEmpty {
+                    score = 1
+                } else if score >= Self.plausible {
+                    score += 2
+                }
             }
             if score > 0 { scored.append((candidate, score, order)) }
         }
         scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.order < $1.order }
         return scored.prefix(limit).map(\.choice)
     }
+
+    /// The least likelihood at which a misreading is taken as plausible.
+    static let plausible = 0.1
 
     /// Every choice in a fixed order: white pieces, black pieces, empty.
     /// Breaks ties, so that the same board always gives the same list.
