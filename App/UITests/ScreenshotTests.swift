@@ -127,13 +127,12 @@ final class ScreenshotTests: XCTestCase {
         snap("analysis-1-photo")
         app.buttons["Done"].tap()
 
-        let analyze = app.buttons["Analyze position"]
-        XCTAssertTrue(analyze.waitForExistence(timeout: 5))
-        XCTAssertTrue(analyze.isEnabled, "the fixture should read as a legal position")
-        analyze.tap()
-        if app.buttons["White to move"].waitForExistence(timeout: 3) {
-            app.buttons["White to move"].tap()
-        }
+        // After a scan nobody has said who is to move: the bottom key
+        // answers it and starts the analysis.
+        let white = app.buttons["White to move"]
+        XCTAssertTrue(white.waitForExistence(timeout: 5))
+        XCTAssertTrue(white.isEnabled, "the fixture should read as a legal position")
+        white.tap()
         XCTAssertTrue(app.buttons["Next move"].waitForExistence(timeout: 30))
         // Let the search run on a little, then step one move along the line by swiping.
         sleep(4)
