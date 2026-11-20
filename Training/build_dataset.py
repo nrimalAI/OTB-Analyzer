@@ -73,7 +73,8 @@ SPLITS = ("train", "val", "test")
 # Labels in third-party exports that are not pieces and can be dropped without
 # leaving an unlabelled piece in the image.
 NON_PIECE = {"board", "chessboard", "chess_board", "corner", "corners", "empty",
-             "square", "hand", "empty_spot", "empty_square", "_"}  # "-" (Roboflow's placeholder) normalizes to "_"
+             "square", "hand", "empty_spot", "empty_square", "_",  # "-" (Roboflow's placeholder) normalizes to "_"
+             "l_corner", "square_corner", "star_corner", "triangle_corner"}  # board markers
 
 
 @dataclass
