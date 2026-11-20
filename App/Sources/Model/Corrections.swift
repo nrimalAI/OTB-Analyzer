@@ -61,13 +61,14 @@ enum CorrectionSuggestions {
             var score = likelihood(of: candidate, readAs: current)
             if candidate.kind == .king, !hasKing(candidate.color, in: others) {
                 // A side without a king: its king is the likeliest fix where
-                // a king could have been misread (a queen, the other king, a
-                // rook), and the one thing to offer on an empty square, where
-                // it may have been missed. A pawn or a knight is not asked to
-                // be the king.
+                // that king could have been misread (its own queen or rook,
+                // or the other side's king), and the one thing to offer on an
+                // empty square, where it may have been missed. A pawn, a
+                // knight or the other side's queen is not asked to be it.
                 if current.isEmpty {
                     score = 1
-                } else if score >= Self.plausible {
+                } else if score >= Self.plausible,
+                          current.color == candidate.color || current.kind == .king {
                     score += 2
                 }
             }

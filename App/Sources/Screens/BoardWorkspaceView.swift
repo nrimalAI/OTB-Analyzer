@@ -235,22 +235,14 @@ struct BoardWorkspaceView: View {
         if !isAnalysis {
             VStack(spacing: 0) {
                 Rule()
-                // Why Analyze is off, right above it, each with its fix.
+                // Why Analyze is off, right above it: the first problem with
+                // its fix, and how many there are. One row, so that the tray
+                // stays in view on a small phone.
                 let problems = model.problems
-                if !problems.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(problems.prefix(Self.problemsShown)) { problem in
-                            ProblemRow(problem: problem, apply: apply)
-                        }
-                        if problems.count > Self.problemsShown {
-                            Text("and \(problems.count - Self.problemsShown) more")
-                                .mono(11)
-                                .foregroundStyle(Theme.muted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
+                if let first = problems.first {
+                    ProblemRow(problem: first, count: problems.count, apply: apply)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6)
                 }
                 Button("Analyze position") {
                     show(.analysis)
@@ -273,13 +265,12 @@ struct BoardWorkspaceView: View {
 
     // MARK: - Actions
 
-    /// Problems listed above the Analyze button; the rest are counted.
-    private static let problemsShown = 2
-
     private func apply(_ fix: PositionProblem.Fix) {
         switch fix {
         case .select(let square):
             selectedSquare = square
+            let piece = model.pieces[square].map(PieceGlyph.name(for:)) ?? "empty"
+            AccessibilityNotification.Announcement("\(square.notation) selected, \(piece)").post()
         case .setSideToMove(let color):
             model.sideToMove = color
         }
@@ -409,20 +400,33 @@ private struct LineStepper: View {
 /// causes it, and a key for the likeliest fix.
 private struct ProblemRow: View {
     let problem: PositionProblem
+    /// How many problems there are in all, this one first.
+    let count: Int
     let apply: (PositionProblem.Fix) -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(problem.title)
-                    .sans(14, weight: .medium)
-                    .foregroundStyle(Theme.accent)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(problem.title)
+                        .sans(14, weight: .medium)
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    if count > 1 {
+                        Text("1 of \(count)")
+                            .mono(11)
+                            .foregroundStyle(Theme.muted)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
                 Text(problem.detail)
                     .sans(12)
                     .foregroundStyle(Theme.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
 
