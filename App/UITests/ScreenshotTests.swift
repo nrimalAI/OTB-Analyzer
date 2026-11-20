@@ -135,15 +135,21 @@ final class ScreenshotTests: XCTestCase {
         // Let the search run on a little, then step one move along the line by swiping.
         sleep(4)
         snap("analysis-2-lines")
-        // In Analysis the squares are not buttons; swipe from the middle of the board.
+        // In Analysis the squares are not buttons; drag leftward across the
+        // middle of the board, further than the 40 points a step needs.
         let middle = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH 'e4,'")).firstMatch
         XCTAssertTrue(middle.exists, "no square e4 on the board")
-        middle.swipeLeft()
+        let start = middle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -150, dy: 0)))
+        let stepped = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] 'move 1 of'")).firstMatch
+        XCTAssertTrue(stepped.waitForExistence(timeout: 3), "the swipe did not step the line")
         snap("analysis-3-stepped")
 
         tap(app.buttons["Share"], "Share")
-        sleep(2)
+        // The system share sheet, with the text taken when Share was pressed.
+        XCTAssertTrue(app.buttons["Copy"].waitForExistence(timeout: 10), "no share sheet")
         snap("analysis-4-share")
     }
 
