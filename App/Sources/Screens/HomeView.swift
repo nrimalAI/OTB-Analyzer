@@ -31,6 +31,8 @@ struct HomeView: View {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
+                                // The context menu is hard to reach with VoiceOver.
+                                .accessibilityAction(named: "Delete") { history.delete(item) }
                             Rule()
                         }
                     }

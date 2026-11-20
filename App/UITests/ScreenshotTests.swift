@@ -137,6 +137,46 @@ final class ScreenshotTests: XCTestCase {
         snap("analysis-4-share")
     }
 
+    /// The main screens at a large Dynamic Type size, to see what clips.
+    func testLargeText() {
+        let size = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
+        var app = XCUIApplication()
+        app.launchEnvironment["AUTOFLOW"] = "scanned"
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 20))
+        tap(app.buttons["Show"], "Show")
+        snap("large-1-check")
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchEnvironment["AUTOFLOW"] = "scan"
+        app.launchEnvironment["SCAN_PHOTO"] = "blank"
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.staticTexts["No board found"].waitForExistence(timeout: 30))
+        snap("large-2-no-board")
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchEnvironment["AUTOFLOW"] = "analysis"
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.buttons["Next move"].waitForExistence(timeout: 30))
+        sleep(3)
+        snap("large-3-analysis")
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments += size
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))
+        snap("large-4-home")
+        tap(app.buttons["About"], "About")
+        sleep(1)
+        snap("large-5-about")
+    }
+
     func testHome() {
         let app = launch("")
         XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))

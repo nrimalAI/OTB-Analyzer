@@ -124,3 +124,22 @@ final class BoardGeometryTests: XCTestCase {
         XCTAssertNil(BoardGeometry.arrow(from: p, to: p, cell: 100))
     }
 }
+
+final class BoardAccessibilityTests: XCTestCase {
+
+    func testSquareLabels() {
+        let pawn = Piece(.pawn, color: .white, square: .e4)
+        XCTAssertEqual(BoardView.accessibilityLabel(square: .e4, piece: pawn, isFlagged: false), "e4, white pawn")
+        XCTAssertEqual(
+            BoardView.accessibilityLabel(square: .g1, piece: Piece(.queen, color: .white, square: .g1), isFlagged: true),
+            "g1, white queen, double-check")
+        XCTAssertEqual(
+            BoardView.accessibilityLabel(square: .e2, piece: nil, isFlagged: false, isHighlighted: true),
+            "e2, empty, last move")
+    }
+
+    func testArrowsAreSpoken() {
+        XCTAssertEqual(BoardView.arrowsDescription([]), "")
+        XCTAssertEqual(BoardView.arrowsDescription([BoardArrow(from: .g1, to: .f3)]), "Arrow from g1 to f3")
+    }
+}

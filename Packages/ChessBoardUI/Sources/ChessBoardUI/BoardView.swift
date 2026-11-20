@@ -28,6 +28,7 @@ public struct BoardView: View {
     let arrows: [BoardArrow]
     let showsCoordinates: Bool
     let borderWidth: CGFloat
+    let squareHint: String?
     let onTap: ((Square) -> Void)?
 
     public init(
@@ -39,6 +40,7 @@ public struct BoardView: View {
         arrows: [BoardArrow] = [],
         showsCoordinates: Bool = true,
         borderWidth: CGFloat = 1.5,
+        squareHint: String? = nil,
         onTap: ((Square) -> Void)? = nil
     ) {
         self.pieces = pieces
@@ -49,6 +51,7 @@ public struct BoardView: View {
         self.arrows = arrows
         self.showsCoordinates = showsCoordinates
         self.borderWidth = borderWidth
+        self.squareHint = squareHint
         self.onTap = onTap
     }
 
@@ -86,6 +89,17 @@ public struct BoardView: View {
             .frame(width: boardSize, height: boardSize)
         }
         .aspectRatio(1, contentMode: .fit)
+        // VoiceOver: "Board", then the squares one by one; the arrows, which
+        // are drawn and not spoken, as the board's value.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Board")
+        .accessibilityValue(Self.arrowsDescription(arrows))
+    }
+
+    /// "Arrow from g1 to f3", for VoiceOver; empty without arrows.
+    static func arrowsDescription(_ arrows: [BoardArrow]) -> String {
+        arrows.map { "Arrow from \($0.from.notation) to \($0.to.notation)" }
+            .joined(separator: ", ")
     }
 
     // MARK: - Squares
@@ -117,14 +131,21 @@ public struct BoardView: View {
             .contentShape(Rectangle())
             .onTapGesture { onTap?(square) }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityLabel(square: square, piece: piece, isFlagged: isFlagged))
+            .accessibilityLabel(Self.accessibilityLabel(
+                square: square, piece: piece, isFlagged: isFlagged,
+                isHighlighted: highlighted.contains(square)))
             .accessibilityAddTraits(accessibilityTraits(for: square))
+            .accessibilityHint(onTap == nil ? "" : squareHint ?? "")
         }
     }
 
-    private func accessibilityLabel(square: Square, piece: Piece?, isFlagged: Bool) -> String {
+    /// "e4, white pawn", "g1, white queen, double-check", "e4, empty, last move".
+    static func accessibilityLabel(
+        square: Square, piece: Piece?, isFlagged: Bool, isHighlighted: Bool = false
+    ) -> String {
         var label = "\(square.notation), \(piece.map(PieceGlyph.name(for:)) ?? "empty")"
         if isFlagged { label += ", double-check" }
+        if isHighlighted { label += ", last move" }
         return label
     }
 

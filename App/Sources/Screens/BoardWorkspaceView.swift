@@ -262,6 +262,7 @@ struct BoardWorkspaceView: View {
                 flagged: isAnalysis ? [] : model.uncertainSquares.union(model.problemSquares),
                 highlighted: lastMoveSquares,
                 arrows: nextMoveArrows,
+                squareHint: "Shows its likely pieces and the tray below",
                 onTap: isAnalysis ? nil : { square in
                     selectedSquare = selectedSquare == square ? nil : square
                 }
