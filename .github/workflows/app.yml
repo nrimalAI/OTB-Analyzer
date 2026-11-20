@@ -152,7 +152,12 @@ jobs:
           for test in json.load(open(os.path.join(raw, "manifest.json"))):
               for a in test.get("attachments", []):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  # Screenshots only: a failing test also attaches debug
+                  # text whose name the artifact upload refuses (quotes).
+                  if not name.lower().endswith((".png", ".jpg", ".jpeg")):
+                      continue
                   name = re.sub(r"_\d+_[0-9A-F-]{36}", "", name)
+                  name = re.sub(r'[":<>|*?\r\n\\]', "_", name)
                   shutil.copy(os.path.join(raw, a["exportedFileName"]), os.path.join(out, name))
           EOF
           done
