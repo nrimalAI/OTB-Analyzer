@@ -16,15 +16,16 @@ enum PositionText {
 
     /// The whole export. `verdict` ("White is slightly better") and `lines`
     /// are left out when there is no analysis yet.
+    /// `searching`: the engine is still at it, so the depth is not final.
     static func export(
         pieces: [Square: Piece], fen: String, sideToMove: Piece.Color,
-        verdict: String? = nil, depth: Int? = nil, lines: [Line] = []
+        verdict: String? = nil, depth: Int? = nil, searching: Bool = false, lines: [Line] = []
     ) -> String {
         var out = ["\(sideToMove.name) to move", "FEN: \(fen)", "", diagram(pieces)]
         if let verdict {
             out.append("")
             var heading = "Stockfish"
-            if let depth { heading += ", depth \(depth)" }
+            if let depth { heading += ", depth \(depth)" + (searching ? " (still searching)" : "") }
             out.append("\(heading): \(verdict)")
             out += lines.map { "\($0.evaluation)  \($0.moves)" }
         }

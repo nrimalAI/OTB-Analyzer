@@ -90,7 +90,11 @@ final class AppModel: ObservableObject {
     private(set) var photoJPEG: Data?
 
     /// Positions the engine has analyzed, newest first.
-    let history = HistoryStore()
+    let history: HistoryStore
+
+    init(history: HistoryStore = HistoryStore()) {
+        self.history = history
+    }
 
     /// Detections below this are flagged for the user to double-check.
     static let lowConfidenceThreshold: Float = 0.85
@@ -163,7 +167,6 @@ final class AppModel: ObservableObject {
     }
 
     func startFromScratch(startingPosition: Bool) {
-        setPhoto(nil)
         resetBoard(toStartingPosition: startingPosition)
         chooseSideToMove(.white)
         orientation = .whiteBottom
@@ -213,8 +216,10 @@ final class AppModel: ObservableObject {
         reconsiderSideToMove()
     }
 
-    /// Starting position, or an empty board.
+    /// Starting position, or an empty board. The photo goes with the board
+    /// it showed. (A typed FEN keeps it: that is usually a correction.)
     func resetBoard(toStartingPosition: Bool) {
+        setPhoto(nil)
         pieces = toStartingPosition
             ? FENBuilder.pieces(fromFEN: Position.standard.fen) ?? [:]
             : [:]

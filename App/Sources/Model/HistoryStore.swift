@@ -37,8 +37,8 @@ struct SavedPosition: Codable, Identifiable, Equatable {
 }
 
 /// The list of analyzed positions, kept as a small JSON file on the device,
-/// with the photo of each scanned one as a JPEG beside it. Nothing here
-/// leaves the phone.
+/// with the photo of each scanned one as a JPEG beside it. The app sends
+/// none of it anywhere, and the photos are left out of device backups.
 @MainActor
 final class HistoryStore: ObservableObject {
 
@@ -47,12 +47,12 @@ final class HistoryStore: ObservableObject {
     private let fileURL: URL
     /// Where the photos are: "photos" next to the list.
     let photoDirectory: URL
-    private static let limit = 100
+    static let limit = 100
 
     init(fileURL: URL = HistoryStore.defaultFileURL) {
         self.fileURL = fileURL
         self.photoDirectory = fileURL.deletingLastPathComponent().appending(path: "photos")
-        load()
+        if load() { sweepPhotos() }
     }
 
     /// The photo file of a saved position, if it has one.
@@ -65,8 +65,9 @@ final class HistoryStore: ObservableObject {
     }
 
     /// Adds (or refreshes and moves to the top) the entry for `fen`. A
-    /// `photo` (JPEG) replaces the entry's photo; without one it keeps the
-    /// photo it had.
+    /// `photo` (JPEG) replaces the entry's photo, unless it is the very
+    /// photo the entry has (a saved position reopened and analysed again);
+    /// without one the entry keeps the photo it had.
     func record(
         fen: String, score: Score, bestMove: String?, depth: Int, photo: Data? = nil,
         date: Date = .now
@@ -78,23 +79,34 @@ final class HistoryStore: ObservableObject {
         }
         let previous = items.first { $0.fen == fen }
         entry.photoFile = previous?.photoFile
-        if let photo, let name = writePhoto(photo) {
-            if let old = previous { deletePhoto(of: old) }
+        var replaced: SavedPosition?
+        if let photo, !hasPhoto(photo, previous), let name = writePhoto(photo) {
+            replaced = previous
             entry.photoFile = name
         }
         items.removeAll { $0.fen == fen }
         items.insert(entry, at: 0)
+        var dropped: [SavedPosition] = []
         if items.count > Self.limit {
-            items.suffix(from: Self.limit).forEach(deletePhoto)
+            dropped = Array(items.suffix(from: Self.limit))
             items.removeLast(items.count - Self.limit)
         }
-        save()
+        // Old files go only once the list that no longer names them is saved.
+        if save() {
+            if let replaced { deletePhoto(of: replaced) }
+            dropped.forEach(deletePhoto)
+        }
     }
 
     func delete(_ item: SavedPosition) {
-        deletePhoto(of: item)
         items.removeAll { $0.id == item.id }
-        save()
+        if save() { deletePhoto(of: item) }
+    }
+
+    /// Whether `item` already has exactly this photo.
+    private func hasPhoto(_ photo: Data, _ item: SavedPosition?) -> Bool {
+        guard let url = item.flatMap(photoURL(for:)) else { return false }
+        return (try? Data(contentsOf: url)) == photo
     }
 
     /// Writes a photo under a new name; nil if it could not be written.
@@ -102,6 +114,10 @@ final class HistoryStore: ObservableObject {
         let name = UUID().uuidString + ".jpg"
         do {
             try FileManager.default.createDirectory(at: photoDirectory, withIntermediateDirectories: true)
+            var folder = photoDirectory
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? folder.setResourceValues(values)
             try data.write(to: photoDirectory.appending(path: name), options: .atomic)
             return name
         } catch {
@@ -114,20 +130,35 @@ final class HistoryStore: ObservableObject {
         try? FileManager.default.removeItem(at: url)
     }
 
-    private func load() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        items = (try? decoder.decode([SavedPosition].self, from: data)) ?? []
+    /// Removes photos no saved position names (left by a crash between
+    /// writing a photo and saving the list). Only after the list was read
+    /// without error, so that a list that failed to read keeps its photos.
+    private func sweepPhotos() {
+        let named = Set(items.compactMap(\.photoFile))
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: photoDirectory.path)) ?? []
+        for file in files where !named.contains(file) {
+            try? FileManager.default.removeItem(at: photoDirectory.appending(path: file))
+        }
     }
 
-    private func save() {
+    /// False when there is a list that could not be read.
+    private func load() -> Bool {
+        guard let data = try? Data(contentsOf: fileURL) else { return true }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let decoded = try? decoder.decode([SavedPosition].self, from: data) else { return false }
+        items = decoded
+        return true
+    }
+
+    @discardableResult
+    private func save() -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted]
-        guard let data = try? encoder.encode(items) else { return }
+        guard let data = try? encoder.encode(items) else { return false }
         try? FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: fileURL, options: .atomic)
+        return (try? data.write(to: fileURL, options: .atomic)) != nil
     }
 }

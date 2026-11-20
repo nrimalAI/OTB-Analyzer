@@ -200,9 +200,19 @@ private struct PhotoThumbnail: View {
             }
         }
         .task(id: url) {
-            image = await Self.thumbnail(of: url, maxPixels: 240)
+            if let cached = Self.cache.object(forKey: url as NSURL) {
+                image = cached
+                return
+            }
+            guard let made = await Self.thumbnail(of: url, maxPixels: 240), !Task.isCancelled else { return }
+            Self.cache.setObject(made, forKey: url as NSURL)
+            image = made
         }
     }
+
+    /// Thumbnails already made, so that rows scrolled back into view do not
+    /// decode their photo again. (A file is never rewritten under one name.)
+    private static let cache = NSCache<NSURL, UIImage>()
 
     static func thumbnail(of url: URL, maxPixels: Int) async -> UIImage? {
         await Task.detached(priority: .utility) {

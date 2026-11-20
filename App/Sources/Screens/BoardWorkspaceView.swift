@@ -579,16 +579,75 @@ private struct PhotoSheet: View {
             .padding(.horizontal, 20)
             .padding(.top, 8)
 
-            Image(uiImage: photo)
-                .resizable()
-                .scaledToFit()
+            ZoomablePhoto(photo: photo)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
-                .accessibilityLabel("Photo of the board")
         }
         .background(Theme.paper.ignoresSafeArea())
         .foregroundStyle(Theme.ink)
         .presentationDragIndicator(.visible)
+    }
+}
+
+/// The photo, to be compared piece by piece with the board: pinch or
+/// double-tap to zoom, drag to look around while zoomed.
+private struct ZoomablePhoto: View {
+    let photo: UIImage
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var settledOffset: CGSize = .zero
+
+    private static let maxScale: CGFloat = 5
+
+    var body: some View {
+        Image(uiImage: photo)
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(scale)
+            .offset(offset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .contentShape(Rectangle())
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        scale = min(max(settledScale * value.magnification, 1), Self.maxScale)
+                    }
+                    .onEnded { _ in
+                        settledScale = scale
+                        if scale == 1 { reset() }
+                    })
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        offset = CGSize(
+                            width: settledOffset.width + value.translation.width,
+                            height: settledOffset.height + value.translation.height)
+                    }
+                    .onEnded { _ in settledOffset = offset },
+                // Unzoomed, a drag is the sheet's, to close it.
+                including: scale > 1 ? .all : .subviews)
+            .onTapGesture(count: 2) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    if scale > 1 {
+                        reset()
+                    } else {
+                        scale = 2.5
+                        settledScale = 2.5
+                    }
+                }
+            }
+            .accessibilityLabel("Photo of the board")
+            .accessibilityHint("Pinch or double-tap to zoom")
+            .accessibilityAddTraits(.isImage)
+    }
+
+    private func reset() {
+        scale = 1
+        settledScale = 1
+        offset = .zero
+        settledOffset = .zero
     }
 }
