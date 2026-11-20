@@ -42,10 +42,12 @@ import UIKit
     @Test func aNewPhotoReplacesTheOldFile() throws {
         let store = HistoryStore(fileURL: file)
         store.record(fen: fen, score: .centipawns(120), bestMove: nil, depth: 12, photo: photo)
-        let old = try #require(store.photoURL(for: try #require(store.items.first)))
+        let oldItem = try #require(store.items.first)
+        let old = try #require(store.photoURL(for: oldItem))
         store.record(fen: fen, score: .centipawns(120), bestMove: nil, depth: 18, photo: Data([1, 2, 3]))
         #expect(!FileManager.default.fileExists(atPath: old.path))
-        let new = try #require(store.photoURL(for: try #require(store.items.first)))
+        let newItem = try #require(store.items.first)
+        let new = try #require(store.photoURL(for: newItem))
         #expect(try Data(contentsOf: new) == Data([1, 2, 3]))
     }
 
@@ -77,7 +79,8 @@ import UIKit
     @Test func positionsDroppedFromAFullListTakeTheirPhotosWithThem() throws {
         let store = HistoryStore(fileURL: file)
         store.record(fen: "8/8/8/8/8/8/8/K6k w - - 0 1", score: .centipawns(0), bestMove: nil, depth: 1, photo: photo)
-        let oldest = try #require(store.photoURL(for: try #require(store.items.first)))
+        let oldestItem = try #require(store.items.first)
+        let oldest = try #require(store.photoURL(for: oldestItem))
         for i in 0..<HistoryStore.limit {
             store.record(fen: "8/8/8/8/8/8/8/K6k w - - 0 \(i + 2)", score: .centipawns(0), bestMove: nil, depth: 1)
         }
@@ -88,7 +91,8 @@ import UIKit
     @Test func photosNoPositionNamesAreSweptOnLoad() throws {
         let store = HistoryStore(fileURL: file)
         store.record(fen: fen, score: .centipawns(0), bestMove: nil, depth: 1, photo: photo)
-        let kept = try #require(store.photoURL(for: try #require(store.items.first)))
+        let keptItem = try #require(store.items.first)
+        let kept = try #require(store.photoURL(for: keptItem))
         let stray = store.photoDirectory.appending(path: "stray.jpg")
         try photo.write(to: stray)
         _ = HistoryStore(fileURL: file)
