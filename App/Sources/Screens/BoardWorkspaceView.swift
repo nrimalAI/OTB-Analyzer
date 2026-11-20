@@ -83,7 +83,7 @@ struct BoardWorkspaceView: View {
     }
 
     private func analyze(with side: Piece.Color) {
-        model.sideToMove = side
+        model.chooseSideToMove(side)
         show(.analysis)
     }
 
@@ -199,14 +199,15 @@ struct BoardWorkspaceView: View {
         let problems = model.problems
         if problems.count == 1 { return problems[0].title + "." }
         if problems.count > 1 { return "\(problems.count) problems to fix before analysis" }
-        if !model.sideToMoveKnown { return "Who is to move? Choose below." }
         let uncertain = model.uncertainSquares.count
         if uncertain >= Self.manyDoubtful, returnsToScan {
             return "\(uncertain) squares to double-check \u{2014} a retake may be quicker"
         }
         if uncertain > 0 {
             return "\(uncertain) \(uncertain == 1 ? "square" : "squares") to double-check"
+                + (model.sideToMoveKnown ? "" : " \u{00B7} who is to move?")
         }
+        if !model.sideToMoveKnown { return "Who is to move? Choose below." }
         return model.fromScan ? "Position looks legal." : "Tap a square, then pick a piece."
     }
 
@@ -274,8 +275,24 @@ struct BoardWorkspaceView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
                 }
-                Button("Analyze position") {
-                    show(.analysis)
+                Group {
+                    if model.sideToMoveKnown {
+                        Button("Analyze position") {
+                            show(.analysis)
+                        }
+                    } else {
+                        // Nobody has said who is to move: the two keys ask
+                        // and analyse in one tap.
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Who is to move?")
+                                .eyebrow(color: Theme.accent)
+                                .accessibilityAddTraits(.isHeader)
+                            HStack(spacing: 8) {
+                                Button("White to move") { analyze(with: .white) }
+                                Button("Black to move") { analyze(with: .black) }
+                            }
+                        }
+                    }
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(!model.canAnalyze)
@@ -305,7 +322,7 @@ struct BoardWorkspaceView: View {
             let piece = model.pieces[square].map(PieceGlyph.name(for:)) ?? "empty"
             AccessibilityNotification.Announcement("\(square.notation) selected, \(piece)").post()
         case .setSideToMove(let color):
-            model.sideToMove = color
+            model.chooseSideToMove(color)
         }
     }
 

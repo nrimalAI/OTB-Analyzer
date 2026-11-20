@@ -40,10 +40,12 @@ struct PositionPanel: View {
                         selection: model.sideToMoveKnown ? model.sideToMove : nil,
                         onSelect: { side in
                             guard let side else { return }
-                            model.sideToMove = side
+                            model.chooseSideToMove(side)
                             fenDraft = nil
                         }
                     )
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(model.sideToMoveKnown ? "To move" : "Who is to move? Not chosen yet")
                 }
                 // Beside the photo side and its turn key, "White" and "Black"
                 // need less room than "White's side": a fixed width, so that
@@ -111,7 +113,7 @@ struct PositionPanel: View {
             Text(label)
                 .eyebrow(color: isQuestion ? Theme.accent : Theme.muted)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.6)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
