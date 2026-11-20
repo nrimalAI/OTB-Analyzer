@@ -73,7 +73,7 @@ SPLITS = ("train", "val", "test")
 # Labels in third-party exports that are not pieces and can be dropped without
 # leaving an unlabelled piece in the image.
 NON_PIECE = {"board", "chessboard", "chess_board", "corner", "corners", "empty",
-             "square", "hand"}
+             "square", "hand", "empty_spot", "empty_square", "_"}  # "-" (Roboflow's placeholder) normalizes to "_"
 
 
 @dataclass
@@ -1047,7 +1047,15 @@ def download(url, dest, size=None):
                  f"{human(free)} free.")
     print(f"downloading {dest.name}" + (f" ({human(size)})" if size else ""))
     command = ["curl", "-L", "--fail", "-C", "-", "-o", str(dest), url]
-    if subprocess.run(command).returncode:
+    code = subprocess.run(command).returncode
+    # A transfer cut off on a slow line (curl 18 partial file, 28 timeout,
+    # 56 receive error, 92 HTTP/2 stream error) is resumed where it stopped.
+    for _ in range(8):
+        if code not in (18, 28, 56, 92):
+            break
+        time.sleep(5)
+        code = subprocess.run(command).returncode
+    if code:
         # A resume the server refuses (e.g. the local file is already longer
         # than the remote one) can never succeed: start this file over once.
         dest.unlink(missing_ok=True)
@@ -1261,9 +1269,30 @@ def fetch_roboflow(cfg, root):
                 continue
             dest.mkdir(parents=True, exist_ok=True)
             archive = dest / "export.zip"
-            archive.unlink(missing_ok=True)  # size unknown: a leftover may be partial
-            download(export["export"]["link"], archive)
-            subprocess.run(["unzip", "-q", "-o", str(archive), "-d", str(dest)], check=True)
+            # A leftover is a download cut off earlier: resume it (the export
+            # of a version is the same file whatever link it comes by). The
+            # size is unknown, so a bad zip is thrown away and fetched anew
+            # next time.
+            command = ["curl", "-L", "--fail", "-sS", "-C", "-", "-o", str(archive),
+                       export["export"]["link"]]
+            print(f"downloading {project['id']} v{version}"
+                  + (f" (resuming at {human(archive.stat().st_size)})" if archive.exists() else ""))
+            code = subprocess.run(command).returncode
+            for _ in range(8):
+                if code not in (18, 28, 56, 92):
+                    break
+                time.sleep(5)
+                code = subprocess.run(command).returncode
+            if code in (22, 33):
+                # the server would not resume (or the leftover is too long):
+                # start this one over once
+                archive.unlink(missing_ok=True)
+                code = subprocess.run(command).returncode
+            if code:
+                raise RuntimeError(f"curl exit {code}; the partial file is kept for next time")
+            if subprocess.run(["unzip", "-q", "-o", str(archive), "-d", str(dest)]).returncode:
+                archive.unlink()
+                raise RuntimeError("the export is not a whole zip; deleted, fetch again")
             archive.unlink()
             print(f"roboflow: fetched {project['id']} v{version}")
         except Exception as e:  # one bad project should not stop the rest

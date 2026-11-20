@@ -111,11 +111,100 @@ sources:
         # The uploader says Public Domain, but the photos look collected from
         # the web and from videos: not for a model that ships.
         license: unknown (web photos)
+      # Added 2026-11-19 from a Universe search (481 chess projects, 119 with
+      # colour+type classes); contact sheets of each looked at. Digital boards,
+      # single pieces off a board, mosaics and copies of Joseph Nelson's set left out.
+      - id: chess-piece-detection-lydqy/chess-piece-detection-5ipnt    # many wooden boards, some outdoors; noise/tint augmented
+        max_images: 800
+      - id: noah-fbbgs/chess-piece-detector-zsj1p    # walnut/maple board with border, top-down, few pieces
+        max_images: 400
+      - id: chess-ai-0uukd/chess-piece-detection-cpgnx    # varied real boards and rooms (Public Domain)
+        max_images: 800
+      - id: chess-ynmuj/chess-piece-detect    # green vinyl on a marble table, low side views
+        max_images: 500
+      - id: chess-piece-detection-2/chess-piece-detection-bnqsq    # brown board from an overhead camera, people beside
+        max_images: 300
+      - id: chess-ronmv/chess-gmfhu    # mixed boards, some augmented
+        max_images: 400
+      - id: univercity/chess-pieces-if3ri    # green/cream roll-up mat, top-down (one of a dozen projects of this mat)
+        max_images: 400
+      - id: chessasd/chess-4mnqp    # grey printed board with coordinates
+        max_images: 300
+      - id: pannon-egyetem-v8dym/chess-piece-detection-v2    # dark board, straight above
+        max_images: 300
+      - id: luca-hmacw/chess-lropa    # pale board on terracotta tiles, low views
+        max_images: 400
+      - id: tj-gabor-chess/chess-pieces-paoho    # green mat, side views, players
+        max_images: 400
+      - id: knightvision/chess-piece-detector-uozxb    # grey/white board, several sets (MIT)
+        max_images: 400
+      - id: lavitras-workspace/chess-piece-detection-uusk8    # brown printed board on a wooden table
+        max_images: 400
+      - id: test-8racj/chess-piece-detection-nmwbc    # teal board, wooden pieces
+        max_images: 377
+      - id: iit-mandi-sxwhy/chess-piece-detection-qskmb    # green mat, top-down, grey floor
+        max_images: 346
+      - id: yolo-2jm8x/piece_detection    # green/white mat on a cream cloth
+        max_images: 304
+      - id: josh-allen-wu-s-workspace/chess-piece-detection-0yom0    # marbled board, straight above
+        max_images: 287
+      - id: cng-nguyn-vn-reqkz/chess-pieces-detection-jcfqn    # black/white vinyl, few pieces
+        max_images: 276
+      - id: ee175a/chess-pieces-22cbf    # brown/white board, straight above
+        max_images: 271
+      - id: srabon-d/chess-pieces-wgwgp    # black/white vinyl on a cloth
+        max_images: 269
+      - id: mdx-yh6qm/chess-piece-mpt0r    # black/white board, plastic pieces
+        max_images: 256
+      - id: chesscake/chess-piece-detection-cusvx    # blue/black board
+        max_images: 200
+      - id: chess-pieces-z8rdj/chess-piece-detection-ovpsv    # glass board on a white desk
+        max_images: 200
+      - id: chess-u4khy/chess-s5r5r    # grey board on a wooden table
+        max_images: 195
+      - id: garage-projects/chess-swbcz    # black/white with a purple border, 3D-printed pieces
+        max_images: 172
+      - id: hrxstik/chess-pieces-e8ssz    # yellow/black boards on a wooden floor
+        max_images: 158
+      - id: robotics-project-02zwj/chess-piece-normal    # light wooden board, low views
+        max_images: 139
+      - id: rihab-rde11/chess-pieces-9qkbg    # grey magnetic board, straight above
+        max_images: 138
+      - id: chess-lpnmj/chess-piece-detection-7alyg    # green mat, several tables
+        max_images: 100
+      - id: chess-aoa82/chess-pieces-tvklx    # wooden board, very low views
+        max_images: 99
+      - id: greatcarl97-gmail-com/brown-chessboard    # brown cork-like board
+        max_images: 85
+      - id: aaronag/chess-piece-detection-geuxo    # dark wooden board, close views
+        max_images: 81
     # Tried and dropped: mahdi-ruposh/chesspiece-object-detection (no published
     # version); luksuz/chess_pieces-nf8av, jjgg/chess_detection-cief9,
     # cutegander/chess-pieces-b8cbo (empty projects); senku/chess-piece-vrw2r
     # (every version is flipped and rotated copies); logan-44qjh/chess-pieces-8slll
     # (pieces on the board without a box in 2 of 6 photos looked at).
+
+  # Development set (2026-11-19): ten Roboflow boards kept out of training, to
+  # choose models on. Boxes only; make_rf_dev.py derives the corners and the
+  # position of each photo it can pin down (derive_corners' checks) and writes
+  # datasets/roboflow_dev/positions.json. test_only keeps it out of every merge.
+  roboflow_dev:
+    kind: roboflow
+    test_only: true
+    optional: true
+    dir: datasets/roboflow_dev
+    max_per_project: 400
+    projects:
+      - id: yolo-ksmn0/chess-detection-my-chessboard-cf8lk    # walnut board, wooden Staunton pieces, games
+      - id: sjsu-sr-prj/chess-piece-recognition-auf7h    # walnut/white board with inlay (Public Domain)
+      - id: randal/chess-1iaud    # folding board on a green table
+      - id: chessrobot3294/chess-vt6uf    # brown leather folding board
+      - id: jacky-lin/chess-pieces-fntoa    # wooden box board, red table
+      - id: chess-piece-detection-ijhzh/chess-piece-classification-hahrk    # brown/white vinyl on an orange table
+      - id: acasa/chess-pieces-man94    # dark wooden board, side views
+      - id: momo-ajlva/the-chessboard-final-hopefully    # wooden folding board with a border
+      - id: test-kympg/full-chess-pieces    # brown/white vinyl on a wooden table
+      - id: chessvision-nuglh/chess-pieces-exoyp    # two boards: mahogany and black/white vinyl
 
   # Synthetic boards with exact corner labels, made by synth_boards.py (random
   # board colours, borders, floors and cameras; piece cut-outs from chesscog
