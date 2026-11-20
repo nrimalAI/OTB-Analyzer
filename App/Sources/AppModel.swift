@@ -34,14 +34,44 @@ final class AppModel: ObservableObject {
     // Position on the board
     @Published var pieces: [Square: Piece] = [:]
     @Published var confidence: [Square: Float] = [:]
-    /// Setting it, from the control or a typed FEN, answers the question
-    /// of who is to move.
-    @Published var sideToMove: Piece.Color = .white {
-        didSet { sideToMoveKnown = true }
+    /// Who is to move; set with `chooseSideToMove`. After a scan it is White
+    /// only as a placeholder until someone says (`sideToMoveKnown`): a photo
+    /// does not show whose turn it is.
+    @Published private(set) var sideToMove: Piece.Color = .white
+    @Published private(set) var sideToMoveSource: SideToMoveSource = .chosen
+
+    /// Where `sideToMove` came from.
+    enum SideToMoveSource: Equatable {
+        /// Nobody has said, and nothing on the board says.
+        case unknown
+        /// Exactly one king is in check, so that side must be to move. An
+        /// edit that changes the check changes it, or opens the question.
+        case check
+        /// Someone said: the control, the Analyze keys, a fix, a typed FEN,
+        /// a position set up by hand or saved.
+        case chosen
     }
-    /// False after a scan until someone says who is to move: a photo does
-    /// not show it. `sideToMove` is then White only as a placeholder.
-    @Published private(set) var sideToMoveKnown = true
+
+    var sideToMoveKnown: Bool { sideToMoveSource != .unknown }
+
+    func chooseSideToMove(_ side: Piece.Color) {
+        sideToMove = side
+        sideToMoveSource = .chosen
+    }
+
+    /// While nobody has said who is to move, the board decides what it can:
+    /// the side whose king is in check is to move; otherwise the question
+    /// is open. Run after every change to the pieces.
+    private func reconsiderSideToMove() {
+        guard sideToMoveSource != .chosen else { return }
+        if let forced = Self.forcedSideToMove(pieces) {
+            sideToMove = forced
+            sideToMoveSource = .check
+        } else {
+            sideToMove = .white
+            sideToMoveSource = .unknown
+        }
+    }
     @Published var castling: CastlingRights = .none
     @Published var orientation: BoardDisplayOrientation = .whiteBottom
 
@@ -131,7 +161,7 @@ final class AppModel: ObservableObject {
     func startFromScratch(startingPosition: Bool) {
         setPhoto(nil)
         resetBoard(toStartingPosition: startingPosition)
-        sideToMove = .white
+        chooseSideToMove(.white)
         orientation = .whiteBottom
         fromScan = false
         tab = .position
@@ -141,7 +171,7 @@ final class AppModel: ObservableObject {
     /// Reopens a saved position straight on its analysis.
     func open(_ saved: SavedPosition) {
         guard applyFEN(saved.fen) else { return }
-        sideToMoveKnown = true  // A saved position was analyzed for one side.
+        chooseSideToMove(saved.sideToMove)  // It was analyzed for that side.
         setPhoto(history.photoURL(for: saved).flatMap { try? Data(contentsOf: $0) })
         orientation = .whiteBottom
         fromScan = false
@@ -156,12 +186,8 @@ final class AppModel: ObservableObject {
         confidence = result.pieces.mapValues(\.confidence)
         // A photo does not show who is to move. Only a king in check says
         // it; otherwise the person checking the board is asked.
-        if let forced = Self.forcedSideToMove(pieces) {
-            sideToMove = forced
-        } else {
-            sideToMove = .white
-            sideToMoveKnown = false
-        }
+        sideToMoveSource = .unknown
+        reconsiderSideToMove()
         castling = .inferred(from: pieces)
         orientation = result.orientationGuess == .whiteBottom ? .whiteBottom : .blackBottom
         photoSide = result.orientationGuess == .whiteBottom ? .white : .black
@@ -180,6 +206,7 @@ final class AppModel: ObservableObject {
         }
         confidence[square] = nil  // user-confirmed; no longer "uncertain"
         castling = .inferred(from: pieces)
+        reconsiderSideToMove()
     }
 
     /// Starting position, or an empty board.
@@ -189,6 +216,7 @@ final class AppModel: ObservableObject {
             : [:]
         confidence = [:]
         castling = .inferred(from: pieces)
+        reconsiderSideToMove()
     }
 
     /// Corrects which side the photo was taken from. The recognizer can't
@@ -209,6 +237,7 @@ final class AppModel: ObservableObject {
         confidence = Dictionary(
             uniqueKeysWithValues: confidence.map { (BoardGeometry.rotated($0.key), $0.value) })
         castling = .inferred(from: pieces)
+        reconsiderSideToMove()
     }
 
     /// Turns the position a quarter clockwise (seen from White's side), for
@@ -226,6 +255,7 @@ final class AppModel: ObservableObject {
         confidence = Dictionary(
             uniqueKeysWithValues: confidence.map { (BoardGeometry.quarterTurned($0.key), $0.value) })
         castling = .inferred(from: pieces)
+        reconsiderSideToMove()
     }
 
     /// Loads a typed or saved FEN. Only the placement must be well formed;
@@ -240,10 +270,15 @@ final class AppModel: ObservableObject {
 
         pieces = parsed
         confidence = [:]
-        // The FEN field shows the placeholder "w" while nobody has said who
-        // is to move; editing the placement keeps that question open.
+        // The FEN field shows the placeholder (or the side a check implies)
+        // while nobody has said who is to move; editing only the placement
+        // leaves that as it was, and typing the other side answers it.
         let typedSide: Piece.Color = fields.count > 1 && fields[1] == "b" ? .black : .white
-        if sideToMoveKnown || typedSide != sideToMove { sideToMove = typedSide }
+        if sideToMoveSource == .chosen || typedSide != sideToMove {
+            chooseSideToMove(typedSide)
+        } else {
+            reconsiderSideToMove()
+        }
         // Typed rights can only take away from what the placement allows: a
         // right without its king and rook at home is not just meaningless,
         // Stockfish reads past the board looking for the rook.

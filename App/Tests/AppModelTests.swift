@@ -66,7 +66,7 @@ import Testing
         let model = AppModel()
         model.load(result: DemoScan.result)
         #expect(!model.sideToMoveKnown)
-        model.sideToMove = .black
+        model.chooseSideToMove(.black)
         #expect(model.sideToMoveKnown)
         #expect(model.fen.split(separator: " ")[1] == "b")
     }
@@ -74,7 +74,7 @@ import Testing
     @Test func choosingWhiteAnswersTooEvenThoughItIsThePlaceholder() {
         let model = AppModel()
         model.load(result: DemoScan.result)
-        model.sideToMove = .white
+        model.chooseSideToMove(.white)
         #expect(model.sideToMoveKnown)
     }
 
@@ -85,6 +85,53 @@ import Testing
         #expect(model.sideToMoveKnown)
         #expect(model.sideToMove == .black)
         #expect(model.canAnalyze)
+    }
+
+    @Test func aSideInferredFromACheckIsAskedAgainWhenTheCheckGoes() {
+        // The "rook" on e1 checks Black's king: Black must be to move...
+        let model = AppModel()
+        model.load(result: result("4k3/8/8/8/8/8/8/4RK2"))
+        #expect(model.sideToMoveSource == .check)
+        // ...until it turns out to be a pawn: then nobody has said.
+        model.set(Piece(.pawn, color: .white, square: .e2), at: .e1)
+        model.set(nil, at: .e1)
+        #expect(model.sideToMoveSource == .unknown)
+        #expect(!model.sideToMoveKnown)
+        // And a check that appears while unknown answers it.
+        model.set(Piece(.rook, color: .white, square: .e1), at: .e1)
+        #expect(model.sideToMoveSource == .check)
+        #expect(model.sideToMove == .black)
+    }
+
+    @Test func turningTheBoardReconsidersAnInferredSide() {
+        // The pawn on d7 checks Black's king on e8. Turned a quarter, the
+        // pawn on g5 points elsewhere: no check, and the question is open.
+        let model = AppModel()
+        model.load(result: result("4k3/3P4/8/8/8/8/8/6K1"))
+        #expect(model.sideToMoveSource == .check)
+        #expect(model.sideToMove == .black)
+        model.turnQuarter()
+        #expect(model.sideToMoveSource == .unknown)
+    }
+
+    @Test func aChosenSideIsNotTakenBackByEdits() {
+        let model = AppModel()
+        model.load(result: DemoScan.result)
+        model.chooseSideToMove(.black)
+        model.set(nil, at: .f6)
+        model.turnQuarter()
+        model.setPhotoSide(.black)
+        #expect(model.sideToMoveSource == .chosen)
+        #expect(model.sideToMove == .black)
+    }
+
+    @Test func aNewScanAsksAgain() {
+        let model = AppModel()
+        model.load(result: DemoScan.result)
+        model.chooseSideToMove(.black)
+        model.load(result: DemoScan.result)
+        #expect(!model.sideToMoveKnown)
+        #expect(model.sideToMove == .white)
     }
 
     @Test func forcedSideToMove() throws {
