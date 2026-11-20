@@ -74,6 +74,9 @@ struct HomeView: View {
             Text("Positions")
                 .serif(44)
                 .tracking(-0.44)
+                // One word: smaller rather than broken at the largest sizes.
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .accessibilityAddTraits(.isHeader)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -106,8 +109,9 @@ struct HomeView: View {
                 Text("Set up a position by hand")
                     .sans(15, weight: .medium)
                     .underline()
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 46)
+                    .frame(minHeight: 46)
             }
             .buttonStyle(TextButtonStyle())
         }
