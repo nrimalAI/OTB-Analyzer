@@ -36,6 +36,13 @@ xcodegen generate
 open ChessAnalyzer.xcodeproj
 ```
 
+App tests: `xcodebuild test -scheme ChessAnalyzer` with an iPhone Simulator as the
+destination runs `App/Tests` (the app's logic, Swift Testing, hosted in the app) and
+`App/UITests` (walks the screens and attaches a screenshot of each step). CI runs both
+on every pull request (`.github/workflows/app.yml`, Xcode 26) and uploads the
+screenshots as the artifact `screenshots`. Debug builds open a demo misread board with
+`SIMCTL_CHILD_AUTOFLOW=scanned`.
+
 Package tests: `swift test` inside each `Packages/*` directory. ChessVision's use
 Swift Testing (Xcode 16 or later); `./Scripts/swift-test.sh` runs them, also on a Mac
 with only the Command Line Tools. How recognition works after the two models, and how
