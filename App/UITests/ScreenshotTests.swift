@@ -102,6 +102,41 @@ final class ScreenshotTests: XCTestCase {
         snap("scan-3-real-photo")
     }
 
+    /// A real photo through to its analysis: the photo beside the heading,
+    /// a swipe along the line, the text export, and the saved position on
+    /// the home screen with its photo.
+    func testAnalysisOfARealPhoto() {
+        let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
+        XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
+
+        tap(app.buttons["Photo"], "Photo")
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        snap("analysis-1-photo")
+        app.buttons["Done"].tap()
+
+        let analyze = app.buttons["Analyze position"]
+        XCTAssertTrue(analyze.waitForExistence(timeout: 5))
+        XCTAssertTrue(analyze.isEnabled, "the fixture should read as a legal position")
+        analyze.tap()
+        if app.buttons["White to move"].waitForExistence(timeout: 3) {
+            app.buttons["White to move"].tap()
+        }
+        XCTAssertTrue(app.buttons["Next move"].waitForExistence(timeout: 30))
+        // Let the search run on a little, then step one move along the line by swiping.
+        sleep(4)
+        snap("analysis-2-lines")
+        // In Analysis the squares are not buttons; swipe from the middle of the board.
+        let middle = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH 'e4,'")).firstMatch
+        XCTAssertTrue(middle.exists, "no square e4 on the board")
+        middle.swipeLeft()
+        snap("analysis-3-stepped")
+
+        tap(app.buttons["Share"], "Share")
+        sleep(2)
+        snap("analysis-4-share")
+    }
+
     func testHome() {
         let app = launch("")
         XCTAssertTrue(app.staticTexts["Positions"].waitForExistence(timeout: 20))
