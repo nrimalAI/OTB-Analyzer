@@ -44,6 +44,11 @@ import Testing
         #expect(lines[1] == "FEN: " + fen)
         #expect(lines.contains("Stockfish, depth 18: White is winning"))
         #expect(lines.last == "+5.2  1… Kd7 2. Kd2")
+        // Mid-search the depth says so.
+        let early = PositionText.export(
+            pieces: pieces, fen: fen, sideToMove: .black, verdict: "White is winning", depth: 7,
+            searching: true)
+        #expect(early.contains("Stockfish, depth 7 (still searching): White is winning"))
         // Without analysis: the position only.
         let bare = PositionText.export(pieces: pieces, fen: fen, sideToMove: .black)
         #expect(!bare.contains("Stockfish"))

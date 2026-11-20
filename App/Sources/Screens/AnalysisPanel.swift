@@ -80,11 +80,14 @@ struct AnalysisPanel: View {
 
     /// The position and the engine's lines as plain text (`PositionText`).
     private var exportText: String {
-        let finished = session.lines.first
+        let best = session.lines.first
+        let verdict = best.map { EvalFormat.verdict($0.score) }
+            ?? (session.isFinished ? "No legal moves" : nil)
         return PositionText.export(
             pieces: model.pieces, fen: model.fen, sideToMove: model.sideToMove,
-            verdict: finished.map { EvalFormat.verdict($0.score) },
-            depth: finished == nil ? nil : session.reachedDepth,
+            verdict: verdict,
+            depth: best == nil ? nil : session.reachedDepth,
+            searching: !session.isFinished,
             lines: session.lines.map {
                 PositionText.Line(
                     evaluation: EvalFormat.label($0.score),

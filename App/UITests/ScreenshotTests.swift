@@ -114,8 +114,7 @@ final class ScreenshotTests: XCTestCase {
     }
 
     /// A real photo through to its analysis: the photo beside the heading,
-    /// a swipe along the line, the text export, and the saved position on
-    /// the home screen with its photo.
+    /// a swipe along the line, and the text export in the share sheet.
     func testAnalysisOfARealPhoto() {
         let app = launch("scan", environment: ["SCAN_PHOTO": fixturePhoto("test_000102.jpg")])
         XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 60))
