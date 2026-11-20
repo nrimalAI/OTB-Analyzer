@@ -92,9 +92,20 @@ struct BoardWorkspaceView: View {
     private var topBar: some View {
         HStack(spacing: 6) {
             Button(action: goBack) {
-                Text("\u{2039}")
-                    .sans(26, weight: .medium)
-                    .frame(width: 44, height: 44)
+                HStack(spacing: 4) {
+                    Text("\u{2039}")
+                        .sans(26, weight: .medium)
+                    // Retaking is the quickest fix for a poor reading, so
+                    // the way back to the camera says so.
+                    if returnsToScan {
+                        Text("Retake")
+                            .sans(15, weight: .medium)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                .padding(.horizontal, returnsToScan ? 6 : 0)
+                .frame(minWidth: 44, minHeight: 44)
             }
             .buttonStyle(TextButtonStyle())
             .accessibilityLabel(backLabel)
@@ -189,6 +200,9 @@ struct BoardWorkspaceView: View {
         if problems.count == 1 { return problems[0].title + "." }
         if problems.count > 1 { return "\(problems.count) problems to fix before analysis" }
         let uncertain = model.uncertainSquares.count
+        if uncertain >= Self.manyDoubtful, returnsToScan {
+            return "\(uncertain) squares to double-check \u{2014} a retake may be quicker"
+        }
         if uncertain > 0 {
             return "\(uncertain) \(uncertain == 1 ? "square" : "squares") to double-check"
                 + (model.sideToMoveKnown ? "" : " \u{00B7} who is to move?")
@@ -297,6 +311,9 @@ struct BoardWorkspaceView: View {
     }
 
     // MARK: - Actions
+
+    /// From this many unsure squares on, the heading suggests a retake.
+    private static let manyDoubtful = 8
 
     private func apply(_ fix: PositionProblem.Fix) {
         switch fix {

@@ -27,7 +27,9 @@ final class AppModel: ObservableObject {
     let recognizer: BoardRecognizer =
         (try? CoreMLBoardRecognizer(bundle: .main)) ?? StubRecognizer()
     @Published var isRecognizing = false
-    @Published var recognitionFailed = false
+    /// Why the last photo gave no position; nil while there is nothing to
+    /// report.
+    @Published var scanFailure: ScanFailure?
 
     // Position on the board
     @Published var pieces: [Square: Piece] = [:]
@@ -93,12 +95,16 @@ final class AppModel: ObservableObject {
     /// Reads the board in a photo and moves on to checking the position.
     /// `minimumDuration` keeps the "reading" state on screen long enough to
     /// register when recognition itself is near-instant.
-    func startFromPhoto(_ image: UIImage, minimumDuration: Duration = .zero) async {
-        guard !isRecognizing else { return }
+    /// Returns false when it could not start because another read is still
+    /// running (one that was cancelled and has not finished yet).
+    @discardableResult
+    func startFromPhoto(_ image: UIImage, minimumDuration: Duration = .zero) async -> Bool {
+        guard !isRecognizing else { return false }
         guard let cgImage = image.normalizedUprightCGImage() else {
-            recognitionFailed = true
-            return
+            scanFailure = .unreadablePhoto
+            return true
         }
+        scanFailure = nil
         isRecognizing = true
         defer { isRecognizing = false }
         let started = ContinuousClock.now
@@ -106,12 +112,13 @@ final class AppModel: ObservableObject {
             let result = try await recognizer.recognize(cgImage)
             let remaining = minimumDuration - (ContinuousClock.now - started)
             if remaining > .zero { try? await Task.sleep(for: remaining) }
-            guard isStillScanning else { return }
+            guard isStillScanning else { return true }
             load(result: result)
             path.append(.board)
         } catch {
-            if isStillScanning { recognitionFailed = true }
+            if isStillScanning { scanFailure = ScanFailure(error) }
         }
+        return true
     }
 
     /// False once the user has cancelled or left the scan screen; a read
