@@ -25,6 +25,12 @@ import Testing
         #expect(CorrectionSuggestions.alternatives(for: .d1, in: pieces).first == .piece(.king, .white))
     }
 
+    @Test func aSidesOnlyKingIsNotGivenToTheOtherSide() throws {
+        // White has no king, Black has only the one on e8: it stays Black's.
+        let pieces = try board("4k3/8/8/8/8/8/8/2N5")
+        #expect(CorrectionSuggestions.alternatives(for: .e8, in: pieces).first != .piece(.king, .white))
+    }
+
     @Test func theOtherSidesQueenIsNotAskedToBeTheMissingKing() throws {
         // White has no king; Black's queen is not White's king read wrong.
         let pieces = try board("4k3/8/8/8/3q4/8/8/3Q4")

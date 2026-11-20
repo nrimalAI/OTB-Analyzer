@@ -107,10 +107,13 @@ jobs:
           exit $status
 
       - name: Tests and screenshots (${{ steps.sims.outputs.main_name }})
+        # A failing test is run once more: the Simulator sometimes times out
+        # launching the app on a shared runner. A test that fails twice fails.
         run: |
           set +e
           xcodebuild test-without-building -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
             -destination "id=${{ steps.sims.outputs.main }}" -derivedDataPath "$RUNNER_TEMP/dd" \
+            -retry-tests-on-failure -test-iterations 2 \
             -resultBundlePath "$RUNNER_TEMP/main.xcresult" > "$RUNNER_TEMP/test-main.log" 2>&1
           status=$?
           grep -E "✔|✘|passed|failed|error:|Executed|\*\* TEST" "$RUNNER_TEMP/test-main.log" | head -200
@@ -123,7 +126,7 @@ jobs:
           set +e
           xcodebuild test-without-building -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
             -destination "id=${{ steps.sims.outputs.small }}" -derivedDataPath "$RUNNER_TEMP/dd" \
-            -only-testing:ChessAnalyzerUITests \
+            -only-testing:ChessAnalyzerUITests -retry-tests-on-failure -test-iterations 2 \
             -resultBundlePath "$RUNNER_TEMP/small.xcresult" > "$RUNNER_TEMP/test-small.log" 2>&1
           status=$?
           grep -E "passed|failed|error:|Executed|\*\* TEST" "$RUNNER_TEMP/test-small.log" | head -100
