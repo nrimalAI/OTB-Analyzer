@@ -14,6 +14,8 @@ struct BoardWorkspaceView: View {
     @State private var selectedSquare: Square?
     @State private var toast: String?
     @State private var toastTask: Task<Void, Never>?
+    /// Asking who is to move before analysing a scan that nobody has said.
+    @State private var askingSideToMove = false
 
     private var isAnalysis: Bool { model.tab == .analysis }
 
@@ -71,6 +73,18 @@ struct BoardWorkspaceView: View {
         .onDisappear {
             session.stop()
         }
+        .confirmationDialog("Who is to move?", isPresented: $askingSideToMove, titleVisibility: .visible) {
+            Button("White to move") { analyze(with: .white) }
+            Button("Black to move") { analyze(with: .black) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A photo doesn\u{2019}t show whose turn it is.")
+        }
+    }
+
+    private func analyze(with side: Piece.Color) {
+        model.chooseSideToMove(side)
+        show(.analysis)
     }
 
     // MARK: - Top bar
@@ -177,13 +191,16 @@ struct BoardWorkspaceView: View {
         let uncertain = model.uncertainSquares.count
         if uncertain > 0 {
             return "\(uncertain) \(uncertain == 1 ? "square" : "squares") to double-check"
+                + (model.sideToMoveKnown ? "" : " \u{00B7} who is to move?")
         }
+        if !model.sideToMoveKnown { return "Who is to move? Choose below." }
         return model.fromScan ? "Position looks legal." : "Tap a square, then pick a piece."
     }
 
     private var subtitleIsWarning: Bool {
         if isAnalysis { return !AnalysisEngine.evaluationNetworksArePresent }
         return !model.validationIssues.isEmpty || !model.uncertainSquares.isEmpty
+            || !model.sideToMoveKnown
     }
 
     // MARK: - Board
@@ -244,8 +261,24 @@ struct BoardWorkspaceView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
                 }
-                Button("Analyze position") {
-                    show(.analysis)
+                Group {
+                    if model.sideToMoveKnown {
+                        Button("Analyze position") {
+                            show(.analysis)
+                        }
+                    } else {
+                        // Nobody has said who is to move: the two keys ask
+                        // and analyse in one tap.
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Who is to move?")
+                                .eyebrow(color: Theme.accent)
+                                .accessibilityAddTraits(.isHeader)
+                            HStack(spacing: 8) {
+                                Button("White to move") { analyze(with: .white) }
+                                Button("Black to move") { analyze(with: .black) }
+                            }
+                        }
+                    }
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(!model.canAnalyze)
@@ -272,7 +305,7 @@ struct BoardWorkspaceView: View {
             let piece = model.pieces[square].map(PieceGlyph.name(for:)) ?? "empty"
             AccessibilityNotification.Announcement("\(square.notation) selected, \(piece)").post()
         case .setSideToMove(let color):
-            model.sideToMove = color
+            model.chooseSideToMove(color)
         }
     }
 
@@ -281,13 +314,17 @@ struct BoardWorkspaceView: View {
     private func show(_ tab: BoardTab) {
         if tab == .analysis {
             guard model.canAnalyze else { return }
+            guard model.sideToMoveKnown else {
+                askingSideToMove = true
+                return
+            }
             session.start(fen: model.fen, depth: model.depth)
         }
         model.tab = tab
     }
 
     private func startAnalysis() {
-        guard model.canAnalyze else {
+        guard model.canAnalyze, model.sideToMoveKnown else {
             model.tab = .position
             return
         }

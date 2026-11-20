@@ -152,12 +152,12 @@ extension View {
     }
 
     /// Small uppercase mono label above a control or section.
-    func eyebrow(tracking: CGFloat = 0.9) -> some View {
+    func eyebrow(tracking: CGFloat = 0.9, color: Color = Theme.muted) -> some View {
         self
             .mono(11, weight: .medium)
             .textCase(.uppercase)
             .tracking(tracking)
-            .foregroundStyle(Theme.muted)
+            .foregroundStyle(color)
     }
 }
 
