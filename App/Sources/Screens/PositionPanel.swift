@@ -46,8 +46,9 @@ struct PositionPanel: View {
                     )
                 }
                 // Beside the photo side and its turn key, "White" and "Black"
-                // need less room than "White's side".
-                .frame(maxWidth: model.fromScan ? 120 : .infinity)
+                // need less room than "White's side": a fixed width, so that
+                // the wider column cannot squeeze it.
+                .frame(width: model.fromScan ? 120 : nil)
 
                 if model.fromScan {
                     labeled("Photo taken from") {
@@ -63,7 +64,6 @@ struct PositionPanel: View {
                             quarterTurnButton
                         }
                     }
-                    .layoutPriority(1)
                 } else {
                     labeled("Board") {
                         HStack(spacing: 8) {
@@ -138,7 +138,7 @@ struct PositionPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
 
-            if let square = selectedSquare {
+            if let square = selectedSquare, showsSuggestions {
                 ForEach(suggestions, id: \.self) { choice in
                     SuggestionKey(choice: choice, square: square) {
                         model.set(choice.piece(on: square), at: square)
@@ -158,6 +158,13 @@ struct PositionPanel: View {
         selectedSquare.map(model.isDoubtful) ?? false
     }
 
+    /// Suggestions are for squares worth a second look, or for any square
+    /// while the position cannot be analyzed (a king read as a queen is not
+    /// always marked); a square read right gets none, to keep the row quiet.
+    private var showsSuggestions: Bool {
+        !suggestions.isEmpty && (selectedIsDoubtful || !model.problems.isEmpty)
+    }
+
     /// "Tap a square to change it", or e.g. "c1 · white queen".
     private var squareLabel: String {
         guard let square = selectedSquare else { return "Tap a square to change it" }
@@ -166,7 +173,7 @@ struct PositionPanel: View {
 
     /// "54% sure · likely", "Likely instead", or nothing.
     private var squareDetail: String? {
-        guard let square = selectedSquare, !suggestions.isEmpty else { return nil }
+        guard let square = selectedSquare, showsSuggestions else { return nil }
         if let confidence = model.confidence[square], model.uncertainSquares.contains(square) {
             return "\(Int((confidence * 100).rounded()))% sure \u{00B7} likely"
         }
@@ -236,7 +243,10 @@ private struct SuggestionKey: View {
                 } else {
                     Text("Empty")
                         .sans(13, weight: .medium)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 4)
                         .frame(width: 58, height: 44)
                 }
             }
@@ -251,7 +261,7 @@ private struct SuggestionKey: View {
     }
 
     private var accessibilityLabel: String {
-        guard let piece = choice.piece(on: square) else { return "Empty \(square.notation)" }
+        guard let piece = choice.piece(on: square) else { return "Make \(square.notation) empty" }
         return "Make it a \(PieceGlyph.name(for: piece))"
     }
 }

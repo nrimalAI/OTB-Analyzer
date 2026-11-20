@@ -16,7 +16,8 @@ on:
 
 concurrency:
   group: app-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push to a pull request replaces its run; runs on main all finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -36,7 +37,7 @@ jobs:
         # image has beside its default.
         run: |
           ls -d /Applications/Xcode*.app
-          xcode=$(ls -d /Applications/Xcode_*.app | grep -vi beta | grep -E "Xcode_(2[6-9]|[3-9][0-9])" | sort -V | tail -1)
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -vi beta | grep -E "Xcode_(2[6-9]|[3-9][0-9])" | sort -V | tail -1 || true)
           [ -n "$xcode" ] || { echo "No Xcode 26 or later on this runner"; exit 1; }
           sudo xcode-select -s "$xcode"
           xcodebuild -version
@@ -94,6 +95,7 @@ jobs:
           done
 
       - name: Build for testing
+        id: build
         run: |
           set +e
           xcodebuild build-for-testing -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
@@ -115,7 +117,8 @@ jobs:
           exit $status
 
       - name: Screenshots (${{ steps.sims.outputs.small_name }})
-        if: always()
+        # Also when a test failed on the first phone, not when nothing built.
+        if: always() && steps.build.outcome == 'success'
         run: |
           set +e
           xcodebuild test-without-building -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
