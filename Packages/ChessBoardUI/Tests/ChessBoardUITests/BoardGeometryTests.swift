@@ -138,8 +138,11 @@ final class BoardAccessibilityTests: XCTestCase {
             "e2, empty, last move")
     }
 
-    func testArrowsAreSpoken() {
-        XCTAssertEqual(BoardView.arrowsDescription([]), "")
-        XCTAssertEqual(BoardView.arrowsDescription([BoardArrow(from: .g1, to: .f3)]), "Arrow from g1 to f3")
+    func testArrowsAreSpokenOnTheirSquare() {
+        XCTAssertEqual(
+            BoardView.accessibilityLabel(
+                square: .e2, piece: Piece(.pawn, color: .white, square: .e2), isFlagged: false,
+                arrowTo: .e4),
+            "e2, white pawn, arrow to e4")
     }
 }

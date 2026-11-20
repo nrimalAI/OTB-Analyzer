@@ -158,8 +158,13 @@ final class ScreenshotTests: XCTestCase {
         app.launchArguments += size
         app.launch()
         XCTAssertTrue(app.staticTexts["Check the position"].waitForExistence(timeout: 20))
+        // The board is one container for VoiceOver, its squares inside.
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Board")).firstMatch.exists, "no Board container")
         tap(app.buttons["Show"], "Show")
         snap("large-1-check")
+        // What lies under the board: the tray, who is to move, the FEN.
+        app.swipeUp()
+        snap("large-1b-check-below")
 
         app.terminate()
         app = XCUIApplication()

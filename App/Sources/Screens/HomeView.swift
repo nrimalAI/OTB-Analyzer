@@ -32,7 +32,10 @@ struct HomeView: View {
                                     }
                                 }
                                 // The context menu is hard to reach with VoiceOver.
-                                .accessibilityAction(named: "Delete") { history.delete(item) }
+                                .accessibilityAction(named: "Delete") {
+                                    history.delete(item)
+                                    AccessibilityNotification.Announcement("Position deleted").post()
+                                }
                             Rule()
                         }
                     }
