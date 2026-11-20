@@ -32,7 +32,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Xcode
-        run: xcodebuild -version
+        # chesskit-engine needs Swift tools 6.2: Xcode 26 or later, which the
+        # image has beside its default.
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -vi beta | grep -E "Xcode_(2[6-9]|[3-9][0-9])" | sort -V | tail -1)
+          [ -n "$xcode" ] || { echo "No Xcode 26 or later on this runner"; exit 1; }
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
 
       - name: Stockfish networks (cache)
         uses: actions/cache@v4
