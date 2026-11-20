@@ -1,4 +1,5 @@
 import ChessVision
+import CoreGraphics
 import Foundation
 
 /// Why a photo gave no position, in words for the person holding the phone,
@@ -32,7 +33,7 @@ enum ScanFailure: Equatable {
         case .noBoard:
             return [
                 "Get all four corners of the board inside the frame.",
-                "Hold the phone over the board, not off to the side.",
+                "From your seat, raise the phone and angle it down at the board.",
                 "Keep glare from lamps and windows off the squares.",
             ]
         case .unreadablePhoto:
@@ -51,7 +52,8 @@ enum FramingAdvice: Equatable {
     /// Nothing to say beyond "fill the frame".
     case frame
     /// The camera looks too far toward the horizon: a board on a table is
-    /// then seen nearly edge-on, and its squares cannot be told apart.
+    /// then seen from low down, where tall pieces hide the ones behind them
+    /// (`Training/README.md`, views 12 to 32 degrees above the board).
     case tiltDown
 
     /// The camera's angle from straight down, in degrees, for the direction
@@ -65,11 +67,13 @@ enum FramingAdvice: Equatable {
         return acos(cosine) * 180 / .pi
     }
 
-    /// Past this angle from straight down the hint asks to tilt the phone
-    /// down; it goes away again below `clearAngle`, so that it does not
-    /// flicker at the edge.
-    static let tiltAngle = 70.0
-    static let clearAngle = 62.0
+    /// Past this angle from straight down (about 32 degrees above the table)
+    /// the hint asks to tilt the phone down; it goes away again below
+    /// `clearAngle`, so that it does not flicker at the edge. A photo from a
+    /// player's seat, 40 to 60 degrees above the table, is left alone; so is
+    /// one from straight above, though the models read that one less well.
+    static let tiltAngle = 58.0
+    static let clearAngle = 50.0
 
     /// The hint for a camera angle, given the hint on show now.
     static func next(after current: FramingAdvice, cameraAngle angle: Double?) -> FramingAdvice {
@@ -82,8 +86,47 @@ enum FramingAdvice: Equatable {
 
     var message: String {
         switch self {
-        case .frame: return "Fit the whole board inside the corners"
-        case .tiltDown: return "Tilt the phone down over the board"
+        case .frame: return "From your seat, the whole board inside the corners"
+        case .tiltDown: return "Raise the phone and angle it down at the board"
         }
+    }
+}
+
+/// The lines of a chessboard seen in perspective from a player's seat, to
+/// draw as the framing guide: the near edge across the whole rectangle, the
+/// far edge `farWidth` of it, the ranks closer together toward the far edge
+/// as a camera sees them (a projective map of the board, not even spacing).
+struct PerspectiveGrid {
+    struct Line: Equatable {
+        let from: CGPoint
+        let to: CGPoint
+    }
+
+    /// Nine lines across (the ranks' edges, far to near) then nine along
+    /// (the files' edges, left to right).
+    let lines: [Line]
+
+    init(in rect: CGRect, farWidth: CGFloat = 0.62, height: CGFloat = 0.78) {
+        let near = rect.width
+        let far = rect.width * farWidth
+        let h = rect.height * height
+        let top = rect.midY - h / 2
+        let midX = rect.midX
+        /// Screen height of a point `v` of the way from the far edge to the
+        /// near one: v = 0 at the top, 1 at the bottom.
+        func y(_ v: CGFloat) -> CGFloat { top + h * far * v / (near - (near - far) * v) }
+        func width(atY y: CGFloat) -> CGFloat { far + (near - far) * (y - top) / h }
+
+        var lines: [Line] = []
+        for i in 0...8 {
+            let yi = y(CGFloat(i) / 8)
+            let half = width(atY: yi) / 2
+            lines.append(Line(from: CGPoint(x: midX - half, y: yi), to: CGPoint(x: midX + half, y: yi)))
+        }
+        for i in 0...8 {
+            let t = CGFloat(i) / 8 - 0.5
+            lines.append(Line(from: CGPoint(x: midX + t * far, y: top), to: CGPoint(x: midX + t * near, y: top + h)))
+        }
+        self.lines = lines
     }
 }
