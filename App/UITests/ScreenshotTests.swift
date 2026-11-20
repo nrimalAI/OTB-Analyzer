@@ -27,6 +27,8 @@ final class ScreenshotTests: XCTestCase {
     }
 
     private func snap(_ name: String) {
+        // Let a fade or a push finish first (the tray dims in 0.15 s).
+        usleep(400_000)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
