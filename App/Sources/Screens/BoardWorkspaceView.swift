@@ -171,9 +171,9 @@ struct BoardWorkspaceView: View {
     }
 
     private var positionStatus: String {
-        if let issue = model.validationIssues.first {
-            return issue.message.hasSuffix(".") ? issue.message : issue.message + "."
-        }
+        let problems = model.problems
+        if problems.count == 1 { return problems[0].title + "." }
+        if problems.count > 1 { return "\(problems.count) problems to fix before analysis" }
         let uncertain = model.uncertainSquares.count
         if uncertain > 0 {
             return "\(uncertain) \(uncertain == 1 ? "square" : "squares") to double-check"
@@ -235,13 +235,30 @@ struct BoardWorkspaceView: View {
         if !isAnalysis {
             VStack(spacing: 0) {
                 Rule()
+                // Why Analyze is off, right above it, each with its fix.
+                let problems = model.problems
+                if !problems.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(problems.prefix(Self.problemsShown)) { problem in
+                            ProblemRow(problem: problem, apply: apply)
+                        }
+                        if problems.count > Self.problemsShown {
+                            Text("and \(problems.count - Self.problemsShown) more")
+                                .mono(11)
+                                .foregroundStyle(Theme.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                }
                 Button("Analyze position") {
                     show(.analysis)
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(!model.canAnalyze)
                 .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .padding(.top, problems.isEmpty ? 10 : 6)
                 .padding(.bottom, 8)
             }
         } else if let line = session.selectedLine, line.playableCount > 0 {
@@ -255,6 +272,18 @@ struct BoardWorkspaceView: View {
     }
 
     // MARK: - Actions
+
+    /// Problems listed above the Analyze button; the rest are counted.
+    private static let problemsShown = 2
+
+    private func apply(_ fix: PositionProblem.Fix) {
+        switch fix {
+        case .select(let square):
+            selectedSquare = square
+        case .setSideToMove(let color):
+            model.sideToMove = color
+        }
+    }
 
     /// Switches tab. Going to Analysis starts the search (clearing the
     /// previous position's results) in the same update as the tab change.
@@ -373,5 +402,54 @@ private struct LineStepper: View {
     private var nextLabel: String {
         guard ply < count, line.moves.indices.contains(ply) else { return "End of line" }
         return "Next " + EvalFormat.moveNumber(at: ply, sideToMove: sideToMove, always: true) + line.moves[ply]
+    }
+}
+
+/// One reason the position can't be analyzed: what is wrong, what usually
+/// causes it, and a key for the likeliest fix.
+private struct ProblemRow: View {
+    let problem: PositionProblem
+    let apply: (PositionProblem.Fix) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(problem.title)
+                    .sans(14, weight: .medium)
+                    .foregroundStyle(Theme.accent)
+                Text(problem.detail)
+                    .sans(12)
+                    .foregroundStyle(Theme.muted)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+
+            if let fix = problem.fix, let label = problem.fixLabel {
+                Button {
+                    apply(fix)
+                } label: {
+                    Text(label)
+                        .sans(13, weight: .medium)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                }
+                .buttonStyle(OutlineButtonStyle())
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(height: 36)
+                .accessibilityHint(fix.accessibilityHint)
+            }
+        }
+        .frame(minHeight: 44)
+    }
+}
+
+private extension PositionProblem.Fix {
+    var accessibilityHint: String {
+        switch self {
+        case .select(let square): return "Selects \(square.notation) and shows what it likely is"
+        case .setSideToMove(let color): return "Makes it \(color.name) to move"
+        }
     }
 }

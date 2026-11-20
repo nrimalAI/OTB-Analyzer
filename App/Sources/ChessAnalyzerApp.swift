@@ -38,10 +38,14 @@ struct ChessAnalyzerApp: App {
                     await RecognitionSelfTest.run(imagePath: path, recognizer: model.recognizer)
                 }
                 // Dev-only deep link for screenshots/automation:
-                // SIMCTL_CHILD_AUTOFLOW=scan|review|analysis
+                // SIMCTL_CHILD_AUTOFLOW=scan|review|analysis|scanned
                 switch ProcessInfo.processInfo.environment["AUTOFLOW"] {
                 case "scan":
                     model.path = [.scan]
+                #if DEBUG
+                case "scanned":
+                    model.showDemoScan()
+                #endif
                 case "review":
                     model.startFromScratch(startingPosition: true)
                 case "analysis":

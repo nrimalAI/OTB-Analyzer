@@ -83,6 +83,29 @@ final class BoardGeometryTests: XCTestCase {
         }
     }
 
+    func testQuarterTurn() {
+        // Clockwise seen from White's side: the corners go round a1 → a8 → h8 → h1.
+        XCTAssertEqual(BoardGeometry.quarterTurned(.a1), .a8)
+        XCTAssertEqual(BoardGeometry.quarterTurned(.a8), .h8)
+        XCTAssertEqual(BoardGeometry.quarterTurned(.h8), .h1)
+        XCTAssertEqual(BoardGeometry.quarterTurned(.h1), .a1)
+        // White's pawns on the second rank end up on the b-file.
+        XCTAssertEqual(BoardGeometry.quarterTurned(.e2), .b5)
+        var seen = Set<Square>()
+        for square in Square.allCases {
+            let once = BoardGeometry.quarterTurned(square)
+            seen.insert(once)
+            // Two quarters are the half turn; four are none.
+            XCTAssertEqual(BoardGeometry.quarterTurned(once), BoardGeometry.rotated(square))
+            XCTAssertEqual(
+                BoardGeometry.quarterTurned(BoardGeometry.quarterTurned(BoardGeometry.rotated(square))),
+                square)
+            // A quarter turn changes the colour of every square (a1 dark, a8 light).
+            XCTAssertEqual(BoardGeometry.isLight(once), !BoardGeometry.isLight(square))
+        }
+        XCTAssertEqual(seen.count, 64)
+    }
+
     func testArrowGeometry() throws {
         // b1 → b3 on an 800pt board (cell 100): straight up the b-file.
         let from = BoardGeometry.center(of: .b1, boardSize: 800, orientation: .whiteBottom)

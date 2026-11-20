@@ -1,0 +1,164 @@
+# Builds the iPhone app, runs its tests in the Simulator, and takes
+# screenshots of the screens the UI tests walk through (App/UITests), on a
+# GitHub-hosted Mac. The repo is public, so this costs nothing. It exists
+# because the Mac mini cannot run Xcode while its licence is unaccepted.
+#
+# The screenshots are uploaded as the artifact "screenshots": one folder per
+# simulator (a 6.1-inch iPhone and the smallest one available). To look at
+# them: gh run download <run id> -n screenshots -D <folder>
+name: app
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: xcodebuild -version
+
+      - name: Stockfish networks (cache)
+        uses: actions/cache@v4
+        with:
+          path: App/Resources/NNUE/*.nnue
+          key: nnue-${{ hashFiles('Scripts/download-nnue.sh') }}
+
+      - name: Stockfish networks
+        # Without them the app builds but the engine reports itself missing.
+        run: ./Scripts/download-nnue.sh
+
+      - name: Generate the project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Pick simulators
+        id: sims
+        run: |
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
+          python3 - "$RUNNER_TEMP/devices.json" >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, re, sys
+          runtimes = json.load(open(sys.argv[1]))["devices"]
+          def version(key):
+              m = re.search(r"iOS-(\d+)-(\d+)", key)
+              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+          ios = sorted((k for k in runtimes if "iOS" in k), key=version)
+          phones = [d for d in runtimes[ios[-1]] if d["name"].startswith("iPhone")]
+          def pick(names):
+              for name in names:
+                  for d in phones:
+                      if d["name"] == name:
+                          return d
+              return phones[0]
+          main = pick(["iPhone 16", "iPhone 17", "iPhone 15", "iPhone 16 Pro", "iPhone 17 Pro"])
+          small = pick(["iPhone SE (3rd generation)", "iPhone 16e", "iPhone 13 mini", "iPhone 12 mini"])
+          print(f"main={main['udid']}")
+          print(f"main_name={main['name']}")
+          print(f"small={small['udid']}")
+          print(f"small_name={small['name']}")
+          EOF
+          cat "$GITHUB_OUTPUT"
+
+      - name: Boot simulators
+        run: |
+          for id in ${{ steps.sims.outputs.main }} ${{ steps.sims.outputs.small }}; do
+            xcrun simctl boot "$id" || true
+            xcrun simctl bootstatus "$id" -b
+            # A fixed clock and full bars, so screenshots compare.
+            xcrun simctl status_bar "$id" override --time 9:41 --batteryState charged --batteryLevel 100 \
+              --cellularBars 4 --wifiBars 3 || true
+          done
+
+      - name: Build for testing
+        run: |
+          set +e
+          xcodebuild build-for-testing -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
+            -destination "id=${{ steps.sims.outputs.main }}" -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:|warning: .*/App/|\*\* BUILD" "$RUNNER_TEMP/build.log" | sort -u | head -100
+          if [ $status -ne 0 ]; then tail -80 "$RUNNER_TEMP/build.log"; fi
+          exit $status
+
+      - name: Tests and screenshots (${{ steps.sims.outputs.main_name }})
+        run: |
+          set +e
+          xcodebuild test-without-building -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
+            -destination "id=${{ steps.sims.outputs.main }}" -derivedDataPath "$RUNNER_TEMP/dd" \
+            -resultBundlePath "$RUNNER_TEMP/main.xcresult" > "$RUNNER_TEMP/test-main.log" 2>&1
+          status=$?
+          grep -E "✔|✘|passed|failed|error:|Executed|\*\* TEST" "$RUNNER_TEMP/test-main.log" | head -200
+          exit $status
+
+      - name: Screenshots (${{ steps.sims.outputs.small_name }})
+        if: always()
+        run: |
+          set +e
+          xcodebuild test-without-building -project ChessAnalyzer.xcodeproj -scheme ChessAnalyzer \
+            -destination "id=${{ steps.sims.outputs.small }}" -derivedDataPath "$RUNNER_TEMP/dd" \
+            -only-testing:ChessAnalyzerUITests \
+            -resultBundlePath "$RUNNER_TEMP/small.xcresult" > "$RUNNER_TEMP/test-small.log" 2>&1
+          status=$?
+          grep -E "passed|failed|error:|Executed|\*\* TEST" "$RUNNER_TEMP/test-small.log" | head -100
+          exit $status
+
+      - name: ChessBoardUI tests
+        if: always()
+        working-directory: Packages/ChessBoardUI
+        run: swift test 2>&1 | tail -30
+
+      - name: Export screenshots
+        if: always()
+        run: |
+          for run in main small; do
+            bundle="$RUNNER_TEMP/$run.xcresult"
+            [ -d "$bundle" ] || continue
+            raw="$RUNNER_TEMP/raw-$run"
+            xcrun xcresulttool export attachments --path "$bundle" --output-path "$raw" || continue
+            python3 - "$raw" "screenshots/$run" <<'EOF'
+          import json, os, re, shutil, sys
+          raw, out = sys.argv[1], sys.argv[2]
+          os.makedirs(out, exist_ok=True)
+          for test in json.load(open(os.path.join(raw, "manifest.json"))):
+              for a in test.get("attachments", []):
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  name = re.sub(r"_\d+_[0-9A-F-]{36}", "", name)
+                  shutil.copy(os.path.join(raw, a["exportedFileName"]), os.path.join(out, name))
+          EOF
+          done
+          ls -R screenshots || true
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots
+          if-no-files-found: warn
+
+      - name: Upload logs and results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            ${{ runner.temp }}/*.log
+            ${{ runner.temp }}/*.xcresult
+          if-no-files-found: ignore

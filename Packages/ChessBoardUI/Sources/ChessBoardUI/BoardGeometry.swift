@@ -68,6 +68,16 @@ extension BoardGeometry {
     public static func rotated(_ square: Square) -> Square {
         Square(rawValue: 63 - square.rawValue) ?? square
     }
+
+    /// Where a square lands when the board is turned a quarter clockwise,
+    /// seen from above with White at the bottom (a1 → a8 → h8 → h1 → a1):
+    /// for a photo whose board was read a quarter turn off. Four turns are
+    /// no turn.
+    public static func quarterTurned(_ square: Square) -> Square {
+        let file = square.file.number
+        let rank = square.rank.value
+        return Self.square(file: rank, rank: 9 - file) ?? square
+    }
 }
 
 // MARK: - Arrows
