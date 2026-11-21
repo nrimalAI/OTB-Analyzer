@@ -134,16 +134,12 @@ sources:
         max_images: 300
       - id: luca-hmacw/chess-lropa    # pale board on terracotta tiles, low views
         max_images: 400
-      - id: tj-gabor-chess/chess-pieces-paoho    # green mat, side views, players
-        max_images: 400
       - id: knightvision/chess-piece-detector-uozxb    # grey/white board, several sets (MIT)
         max_images: 400
       - id: lavitras-workspace/chess-piece-detection-uusk8    # brown printed board on a wooden table
         max_images: 400
       - id: test-8racj/chess-piece-detection-nmwbc    # teal board, wooden pieces
         max_images: 377
-      - id: iit-mandi-sxwhy/chess-piece-detection-qskmb    # green mat, top-down, grey floor
-        max_images: 346
       - id: yolo-2jm8x/piece_detection    # green/white mat on a cream cloth
         max_images: 304
       - id: josh-allen-wu-s-workspace/chess-piece-detection-0yom0    # marbled board, straight above
@@ -178,6 +174,11 @@ sources:
         max_images: 85
       - id: aaronag/chess-piece-detection-geuxo    # dark wooden board, close views
         max_images: 81
+    # Dropped 2026-11-21: tj-gabor-chess/chess-pieces-paoho and
+    # iit-mandi-sxwhy/chess-piece-detection-qskmb leave many pieces unlabelled
+    # (main's piece model finds about half as many unlabelled pieces as labelled
+    # ones; runs/unlabelled_check.py); a model trained with them missed white
+    # pieces on the top-down samryan photos.
     # Tried and dropped: mahdi-ruposh/chesspiece-object-detection (no published
     # version); luksuz/chess_pieces-nf8av, jjgg/chess_detection-cief9,
     # cutegander/chess-pieces-b8cbo (empty projects); senku/chess-piece-vrw2r
